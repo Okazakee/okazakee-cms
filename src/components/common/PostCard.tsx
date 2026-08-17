@@ -1,8 +1,8 @@
+import { Eye } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { BlogPost, PortfolioPost } from '@/types/fetchedData.types';
 import { Tags } from './Tags';
-import ViewDisplay from './ViewDisplay';
 
 export default function Postcard({
   post,
@@ -59,12 +59,10 @@ export default function Postcard({
             <h1 className="font-bold text-[1.4rem] md:text-2xl shrink min-w-0">
               {initTitle}
             </h1>
-            <ViewDisplay
-              postId={post.id.toString()}
-              postType={checkPostType}
-              initialViews={post.views}
-              isCard={true}
-            />
+            <span className="inline-flex items-center gap-1.5 text-xs text-lighttext2 dark:text-lighttext2 whitespace-nowrap">
+              <Eye size={14} />
+              {post.views ?? 0}
+            </span>
           </div>
           <div className="h-12 mb-2 flex items-center">
             <h2 className="sm:line-clamp-2 line-clamp-3 sm:text-[1.03rem] text-sm leading-4 sm:leading-normal tracking-wide sm:tracking-tight">

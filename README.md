@@ -238,3 +238,15 @@ Optional:
 Apply `supabase/migrations/*.sql` before production cutover (durable login
 rate limiting). See `docs/cms-decoupling/pre-cutover-checklist.md` in the
 public repo for the full cutover procedure.
+
+---
+
+## Repository scope
+
+This is the **standalone CMS**. Public-only code from the original repository
+(public homepage, blog/portfolio post pages, search, sitemap, robots, view
+counters, public header/footer/nav) has been removed. The CMS serves only
+`/{locale}/cms*` routes plus its auth routes; the site root redirects to the
+CMS login. Previews reuse a small set of shared presentation components
+(PostCard, MarkdownRenderer, BrandIcons, theme toggles) copied at extraction
+from `Okazakee/okazakee-ws` (source commit `234b064`).

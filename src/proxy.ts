@@ -130,16 +130,6 @@ function createRedirectResponse(
   return response;
 }
 
-function createRewriteResponse(
-  request: NextRequest,
-  pathname: string,
-  locale: string
-): NextResponse {
-  const url = request.nextUrl.clone();
-  url.pathname = validatePathname(`/${locale}${pathname}`);
-  return NextResponse.rewrite(url);
-}
-
 function handleAuthError(
   request: NextRequest,
   locale: string,
@@ -246,7 +236,7 @@ export default async function proxy(request: NextRequest) {
     const locale = getPreferredLocale(request);
 
     if (pathname === '/') {
-      return createRewriteResponse(request, pathname, locale);
+      return createRedirectResponse(request, '/cms/login', locale);
     }
 
     return createRedirectResponse(request, pathname, locale);

@@ -1,6 +1,6 @@
 'use client';
 
-import { CirclePlay, Clock, ExternalLink, Globe, Smartphone } from 'lucide-react';
+import { CirclePlay, Clock, ExternalLink, Globe, Smartphone , Eye} from 'lucide-react';
 import { AppleIcon, GithubIcon } from '@/components/common/BrandIcons';
 import { formatDMY } from '@/utils/formatDate';
 import Image from 'next/image';
@@ -9,7 +9,6 @@ import React from 'react';
 import type { Author } from '@/app/actions/cms/sections/blogActions';
 import ShareButton from '@/components/common/ShareButton';
 import Tags from '@/components/common/Tags';
-import ViewDisplay from '@/components/common/ViewDisplay';
 import MarkdownRenderer from '@/components/layout/MarkdownRenderer';
 
 type BlogFormData = {
@@ -262,11 +261,10 @@ export function PostPreview({
           <span className="mt-0.5">{formattedDate}</span>
         </div>
 
-        <ViewDisplay
-          postId="preview"
-          postType={postType}
-          initialViews={views}
-        />
+        <span className="inline-flex items-center text-darktext dark:text-lighttext">
+          <Eye size={20} className="mr-2" />
+          <span className="mt-0.5">{views}</span>
+        </span>
 
         <ShareButton
           className="ml-auto"
