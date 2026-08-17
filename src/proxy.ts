@@ -189,12 +189,11 @@ export default async function proxy(request: NextRequest) {
     if (hasLocale) {
       // Legacy pre-root-move paths: /{locale}/cms... -> /{locale}...
       // (old bookmarks, public-site redirects that preserved the path).
+      // The pathname already includes the locale prefix — redirect directly.
       if (pathname.includes('/cms')) {
-        return createRedirectResponse(
-          request,
-          pathname.replace(/\/cms/, ''),
-          currentLocale
-        );
+        const url = request.nextUrl.clone();
+        url.pathname = validatePathname(pathname.replace(/\/cms/, ''));
+        return NextResponse.redirect(url, 307);
       }
 
       try {
