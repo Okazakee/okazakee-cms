@@ -3,7 +3,10 @@
 import { refresh } from 'next/cache';
 import { headers } from 'next/headers';
 import { findAllowedCmsUser, getUserGithubUsername } from './utils/auth';
-import { checkLoginRateLimit } from '@/libs/rateLimiters';
+import {
+  checkLoginRateLimitDurable,
+  normalizeLoginRateIdentifier,
+} from '@/libs/cms/loginRateLimit';
 import { createClient } from '@/utils/supabase/server';
 
 // Email validation regex
@@ -28,9 +31,15 @@ export async function login(email: string, password: string) {
   const realIp = headersList.get('x-real-ip');
   const clientIp = forwardedFor?.split(',')[0]?.trim() || realIp || 'unknown';
 
-  // Rate limit by both IP and email
+  const supabase = await createClient();
+
+  // Rate limit by both IP and email (durable Postgres-backed limiter;
+  // identifiers stored as hashes, never raw email/IP).
   const rateLimitKey = `login:${clientIp}:${email.toLowerCase()}`;
-  const rateLimit = checkLoginRateLimit(rateLimitKey);
+  const rateLimit = await checkLoginRateLimitDurable(
+    supabase,
+    normalizeLoginRateIdentifier(rateLimitKey)
+  );
 
   if (!rateLimit.allowed) {
     const minutes = Math.ceil((rateLimit.lockoutRemaining || 0) / 60);
@@ -38,8 +47,6 @@ export async function login(email: string, password: string) {
       error: `Too many login attempts. Please try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`,
     };
   }
-
-  const supabase = await createClient();
 
   // Check allowlist BEFORE attempting login
   const allowlistCheck = await findAllowedCmsUser(supabase, email);

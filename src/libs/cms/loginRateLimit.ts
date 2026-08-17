@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *
  * Activation: apply supabase/migrations/20260817100000_cms_login_rate_limit.sql
  * (supabase db push), then switch login.ts from checkLoginRateLimit to
- * checkLoginRateLimitDurable. See the pre-cutover checklist in
+* must be applied first). See the pre-cutover checklist in
  * docs/cms-decoupling/implementation-log.md.
  *
  * Policy: 5 attempts / minute per identifier, 15-minute lockout.
