@@ -1,6 +1,5 @@
 'use server';
 
-import { refresh } from 'next/cache';
 import { headers } from 'next/headers';
 import { findAllowedCmsUser, getUserGithubUsername } from './utils/auth';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
@@ -88,6 +87,11 @@ export async function login(email: string, password: string) {
   // are not left penalized by earlier failures. Best-effort.
   await clearLoginRateLimitDurable(getCmsAdminClient(), ipHash, emailHash);
 
-  refresh();
+  // NO router revalidation here. The client performs a single full-page
+  // navigation to redirectTo immediately after this action resolves; any
+  // competing router refresh of the login route races that navigation and
+  // causes a transient load error in Firefox (revalidatePath was removed
+  // from this flow for the same reason). One deterministic navigation path
+  // only — see src/app/actions/cms/login.test.ts.
   return { success: true, redirectTo: '/auth/ready?next=/' };
 }

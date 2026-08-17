@@ -351,6 +351,7 @@ typecheck (build first: fresh checkouts need `.next/types`).
 - **Never add a dependency with npm/yarn/pnpm** — always use `bun add`.
 - **Never export a component as default** unless it is a Next.js page or layout file. Use named exports.
 - **Never delete a Storage object before its DB write has committed** (see §4). Storage cleanup after a commit is best-effort and never throws.
+- **Never trigger a router refresh from an action that also drives a client navigation** (e.g. login): the competing paths race and cause a transient load error in Firefox. The login flow intentionally has ONE deterministic navigation path — see `src/app/actions/cms/login.test.ts`.
 - **Never call the limiter RPCs with the publishable-key client** — execution
   is service_role only (use `getCmsAdminClient`). The legacy single-identifier
   `cms_check_login_rate(text)` and its temporary anon grant were removed by
