@@ -1,11 +1,13 @@
 'use server';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { refresh, updateTag } from 'next/cache';
 import {
   getAdminClient,
   getCmsActionContext,
 } from '@/app/actions/cms/utils/fileHelpers';
+import { getContentInvalidation, type ContentEntity } from '@/libs/cms/invalidation';
+import { getLocalInvalidationTags } from '@/libs/cms/localInvalidation';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import { getContentInvalidation } from '@/libs/cms/invalidation';
 
 type I18nOperation =
   | { type: 'GET' }
@@ -111,6 +113,22 @@ function mergeSectionTranslations(
     newSectionData
   );
   return merged;
+}
+
+/**
+ * Invalidates the CMS's OWN cached reads after a committed mutation.
+ *
+ * `updateTag` is the immediate Server-Action mechanism for `'use cache'`
+ * entries (the CMS shell/previews read translations via
+ * `getTranslationsSupabase`). `refresh` re-renders the current route so the
+ * editor sees their own write without a manual reload. Remote public-site
+ * invalidation is handled separately by `invalidatePublicContent`.
+ */
+function invalidateLocalCache(entity: ContentEntity): void {
+  for (const tag of getLocalInvalidationTags(entity)) {
+    updateTag(tag);
+  }
+  refresh();
 }
 
 export async function i18nActions(
@@ -220,6 +238,7 @@ async function updateSectionTranslationsForLocales(
     }
 
     await invalidatePublicContent({ entity: 'translations', operation: 'update' });
+    invalidateLocalCache('translations');
 
     return { success: true, data: updated };
   } catch (error) {
@@ -283,6 +302,7 @@ async function updateI18nData(
         operation: 'update',
       }),
     });
+    invalidateLocalCache('translations');
 
     return { success: true, data };
   } catch (error) {
@@ -342,6 +362,7 @@ async function updateSectionTranslations(
     if (error) throw error;
 
     await invalidatePublicContent({ entity: 'translations', operation: 'update' });
+    invalidateLocalCache('translations');
 
     return { success: true, data };
   } catch (error) {
@@ -400,6 +421,10 @@ async function updatePrivacyPolicy(
     if (error) throw error;
 
     await invalidatePublicContent({ entity: 'privacy', operation: 'update' });
+    // Privacy writes the top-level privacy_policy column only; the local
+    // translations cache is deliberately NOT touched. Revalidating the
+    // privacy tag is a no-op locally (nothing caches it yet).
+    invalidateLocalCache('privacy');
 
     return { success: true, data };
   } catch (error) {
