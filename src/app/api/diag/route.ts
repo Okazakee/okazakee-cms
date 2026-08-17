@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 function listDir(dir: string): string[] | string {
   try {
     if (!fs.existsSync(dir)) return 'MISSING';
-    return fs.readdirSync(dir).slice(0, 20);
+    return fs.readdirSync(dir).slice(0, 25);
   } catch (error) {
     return `ERR: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -21,29 +21,22 @@ export async function GET() {
 
   for (const pkg of ['sharp', '@img/sharp-linux-x64', '@img/sharp-libvips-linux-x64']) {
     try {
-      const resolved = require.resolve(pkg);
-      const root = path.dirname(resolved);
-      const pkgJson = JSON.parse(
-        fs.readFileSync(path.join(root, 'package.json'), 'utf8')
-      );
+      // Resolve the package.json to locate the package root without importing
+      // any native code (avoids Turbopack bundling the .node addon).
+      const pkgPath = require.resolve(`${pkg}/package.json`);
+      const root = path.dirname(pkgPath);
+      const pkgJson = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       out[pkg] = {
-        resolved,
+        root,
         version: pkgJson.version,
         files: listDir(root),
+        libDir: listDir(path.join(root, 'lib')),
       };
     } catch (error) {
       out[pkg] = {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }
-
-  try {
-    const sharp = require('sharp');
-    const meta = await sharp(Buffer.from('fake')).metadata();
-    out.loadTest = `loaded, metadata error: ${String(meta)}`;
-  } catch (error) {
-    out.loadTest = `LOAD FAILED: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   return NextResponse.json(out);
