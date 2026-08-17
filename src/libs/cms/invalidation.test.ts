@@ -41,10 +41,10 @@ describe('getContentInvalidation', () => {
     ).toEqual(['blog', 'posts']);
   });
 
-  it('blog update invalidates collection, list, broad post and entity tag', () => {
+  it('blog update invalidates collection, list and entity tag', () => {
     expect(
       getContentInvalidation({ entity: 'blog', operation: 'update', id: 42 })
-    ).toEqual(['blog', 'posts', 'post', 'post:blog:42']);
+    ).toEqual(['blog', 'posts', 'post:blog:42']);
   });
 
   it('portfolio delete invalidates portfolio entity tag', () => {
@@ -54,7 +54,7 @@ describe('getContentInvalidation', () => {
         operation: 'delete',
         id: 7,
       })
-    ).toEqual(['portfolio', 'posts', 'post', 'post:portfolio:7']);
+    ).toEqual(['portfolio', 'posts', 'post:portfolio:7']);
   });
 
   it('batch publish emits one tag per affected row id', () => {
@@ -67,7 +67,6 @@ describe('getContentInvalidation', () => {
     ).toEqual([
       'blog',
       'posts',
-      'post',
       'post:blog:1',
       'post:blog:2',
       'post:blog:3',

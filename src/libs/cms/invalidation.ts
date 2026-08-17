@@ -82,7 +82,6 @@ export function getContentInvalidation(
       if (operation === 'create') break;
 
       // update/delete/publish also invalidate post-detail caches
-      tags.add(cacheTags.post); // legacy broad tag, kept during migration
       const rowIds = [...(ids ?? []), ...(id !== undefined ? [id] : [])];
       for (const rowId of rowIds) {
         tags.add(postDetailTag(entity, rowId));

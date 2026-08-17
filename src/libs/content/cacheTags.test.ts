@@ -13,7 +13,6 @@ describe('cacheTags', () => {
       blog: 'blog',
       portfolio: 'portfolio',
       posts: 'posts',
-      post: 'post',
       resume: 'resume',
       heroSection: 'hero_section',
     });

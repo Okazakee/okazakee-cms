@@ -20,8 +20,6 @@ export const cacheTags = {
   portfolio: 'portfolio',
   /** All post lists (blog + portfolio shared listing/search cache). */
   posts: 'posts',
-  /** Legacy broad detail tag — retained during migration, removable later. */
-  post: 'post',
   resume: 'resume',
   heroSection: 'hero_section',
 } as const;
