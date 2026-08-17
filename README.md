@@ -82,9 +82,12 @@ Tables: `user_profiles`, `cms_allowed_users`, `blog_posts`, `portfolio_posts`,
 `i18n_translations`. Storage bucket: `website`. Auth redirect URLs must
 include the CMS callback paths (e.g. `https://cms.okazakee.dev/en/auth/callback`).
 
-Apply the migration in `supabase/migrations/` for durable login rate limiting
-(`cms_check_login_rate` RPC — 5 attempts/minute, 15-minute lockout, hashed
-identifiers).
+Apply the migrations in `supabase/migrations/` for durable login rate limiting:
+`cms_check_login_rate` RPC — 5 attempts/minute per identifier with a
+15-minute lockout, using two independent buckets (per-IP and per-email,
+identifiers stored as sha256 hashes), plus `cms_clear_login_rate` which resets
+both buckets after a successful login. RPC execution is restricted to the
+service role; stale rows are purged hourly by a scheduled `pg_cron` job.
 
 ## Scripts
 
@@ -119,8 +122,9 @@ Legacy `/{locale}/cms*` URLs 307-redirect to the equivalent root paths.
   Auth identity or historical author attribution.
 - **Dummy authors** (`dummy-<uuid>@dummy.local`) are auth users for post
   attribution; removing them also deletes the auth identity.
-- **Login rate limiting:** durable Postgres-backed limiter (5/min,
-  15-minute lockout).
+- **Login rate limiting:** durable Postgres-backed limiter — independent
+  per-IP and per-email buckets (5/min, 15-minute lockout), cleared on
+  successful login.
 
 ## Origin
 

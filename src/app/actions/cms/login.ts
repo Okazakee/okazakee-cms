@@ -6,7 +6,8 @@ import { findAllowedCmsUser, getUserGithubUsername } from './utils/auth';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import {
   checkLoginRateLimitDurable,
-  normalizeLoginRateIdentifier,
+  clearLoginRateLimitDurable,
+  getLoginRateIdentifiers,
 } from '@/libs/cms/loginRateLimit';
 import { createClient } from '@/utils/supabase/server';
 
@@ -34,15 +35,17 @@ export async function login(email: string, password: string) {
 
   const supabase = await createClient();
 
-  // Rate limit by both IP and email (durable Postgres-backed limiter;
-  // identifiers stored as hashes, never raw email/IP). The RPC is invoked
-  // with the service-role client: migration 20260818090000_harden_login_rate_limit.sql
-  // revokes cms_check_login_rate execution from anon/authenticated, so the
-  // browser-facing (publishable-key) client can no longer call it.
-  const rateLimitKey = `login:${clientIp}:${email.toLowerCase()}`;
+  // Rate limit by BOTH IP and email using two independent durable
+  // Postgres-backed buckets (identifiers stored as hashes, never raw
+  // email/IP). Rotating emails against one IP or IPs against one account
+  // cannot bypass the limiter. The RPC is invoked with the service-role
+  // client: execution is revoked from anon/authenticated
+  // (migration 20260818090000_harden_login_rate_limit.sql).
+  const { ipHash, emailHash } = getLoginRateIdentifiers(clientIp, email);
   const rateLimit = await checkLoginRateLimitDurable(
     getCmsAdminClient(),
-    normalizeLoginRateIdentifier(rateLimitKey)
+    ipHash,
+    emailHash
   );
 
   if (!rateLimit.allowed) {
@@ -80,6 +83,10 @@ export async function login(email: string, password: string) {
     await supabase.auth.signOut();
     return { error: 'Access denied. Please contact the administrator.' };
   }
+
+  // Successful login: reset both rate-limit buckets so the account and IP
+  // are not left penalized by earlier failures. Best-effort.
+  await clearLoginRateLimitDurable(getCmsAdminClient(), ipHash, emailHash);
 
   refresh();
   return { success: true, redirectTo: '/auth/ready?next=/' };
