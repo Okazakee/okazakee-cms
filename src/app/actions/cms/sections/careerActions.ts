@@ -5,7 +5,6 @@ import {
   generateBlurhashFromBuffer,
   getAdminClient,
   getCmsActionContext,
-  getStoragePathFromPublicUrl,
   isValidDate,
   isValidHttpUrl,
   prepareImageUpload,
@@ -531,19 +530,21 @@ async function deleteCareer(
       return { success: false, error: 'Career entry not found' };
     }
 
-    if (existingCareer.logo) {
-      const logoPath = getStoragePathFromPublicUrl(
-        existingCareer.logo as string,
-        'website'
-      );
-      if (logoPath) {
-        await admin.storage.from('website').remove([logoPath]);
-      }
-    }
-
-    const { error } = await admin.from('career_entries').delete().eq('id', id);
+    // Commit the DB delete FIRST; only then remove the Storage object
+    // (best-effort). Deleting the object before the row is gone would leave
+    // the row pointing at a deleted logo if the DB delete failed.
+    const { error } = await admin
+      .from('career_entries')
+      .delete()
+      .eq('id', id);
 
     if (error) throw error;
+
+    await removePublicFileIfPresent(
+      admin,
+      existingCareer.logo as string | null,
+      'website'
+    );
 
     const revalidation = await invalidatePublicContent({
       entity: 'career',
@@ -576,21 +577,22 @@ async function rollbackCareerCreate(entryId: number): Promise<CareerResult> {
 
     if (fetchError || !entry) return { success: true };
 
-    if (entry.logo) {
-      const logoPath = getStoragePathFromPublicUrl(
-        entry.logo as string,
-        'website'
-      );
-      if (logoPath) {
-        await admin.storage.from('website').remove([logoPath]);
-      }
-    }
-
     const { error } = await admin
       .from('career_entries')
       .delete()
       .eq('id', entryId);
     if (error) throw error;
+
+    // The row is the authoritative state: delete it first, then remove the
+    // logo best-effort. Storage-first would leave a surviving row pointing at
+    // a deleted logo if the DB delete failed.
+    if (entry.logo) {
+      await removePublicFileIfPresent(
+        admin,
+        entry.logo as string | null,
+        'website'
+      );
+    }
 
     return { success: true };
   } catch (error) {
@@ -657,8 +659,11 @@ async function uploadCareerLogo(
     );
     const fileName = `Website Assets/career/${careerId}-${sanitizedCompany}.webp`;
 
-    await admin.storage.from('website').remove([fileName]);
-
+    // No pre-upload deletion: the new logo is uploaded with `upsert` to the
+    // same path (replacing the previous one), and a previous file behind a
+    // different URL is removed AFTER the DB commit by
+    // removePublicFileIfDifferent. Deleting first would leave the row
+    // pointing at a deleted logo if the upload or DB update failed.
     const { error: uploadError } = await admin.storage
       .from('website')
       .upload(fileName, buffer, {

@@ -271,8 +271,9 @@ async function uploadResume(
     const fileName = `resumes/${field}.pdf`;
     const admin = getAdminClient();
 
-    await admin.storage.from('website').remove([fileName]);
-
+    // No pre-upload deletion: the new PDF is uploaded with `upsert` to the
+    // same path (replacing the previous one). Deleting first would leave the
+    // row pointing at a deleted resume if the upload or DB update failed.
     const { error: uploadError } = await admin.storage
       .from('website')
       .upload(fileName, file, {

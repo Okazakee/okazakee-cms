@@ -1,5 +1,6 @@
 'use server';
 
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { cmsConfig } from '@/config/cms';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
@@ -10,6 +11,7 @@ import type {
 import { refresh } from 'next/cache';
 import {
   prepareImageUpload,
+  removePublicFileIfDifferent,
   requireAuth,
   uploadPreparedImage,
   validateImageFile,
@@ -757,33 +759,18 @@ export async function uploadUserAvatar(
     return { success: false, error: prepared.error };
   }
 
-  // Get current avatar URL to delete old file
+  // Get current avatar URL to remove the old file AFTER the DB commit
   const { data: currentProfile } = await adminClient
     .from('user_profiles')
     .select('avatar_url')
     .eq('id', profileId)
     .single();
 
-  // Delete old avatar file if it exists
-  if (currentProfile?.avatar_url) {
-    try {
-      // Extract file path from URL (remove query params and get path after bucket name)
-      const url = new URL(currentProfile.avatar_url.split('?')[0]); // Remove query params
-      const pathParts = url.pathname.split('/');
-      const bucketIndex = pathParts.indexOf('website');
-      if (bucketIndex !== -1) {
-        const filePath = pathParts.slice(bucketIndex + 1).join('/');
-        if (filePath) {
-          await adminClient.storage.from('website').remove([filePath]);
-        }
-      }
-    } catch (deleteError) {
-      // Log but don't fail - old file might not exist or URL format might be different
-      console.warn('Failed to delete old avatar file:', deleteError);
-    }
-  }
-
-  // Upload via the shared prepared-image pipeline
+  // Upload via the shared prepared-image pipeline. No pre-upload deletion:
+  // the new avatar is uploaded with `upsert` to the deterministic path
+  // (replacing any previous same-path file); an old file behind a different
+  // path is removed after the DB commit. Deleting first would leave the row
+  // pointing at a deleted avatar if the upload or DB update failed.
   let upload: { publicUrl: string; path: string };
   try {
     upload = await uploadPreparedImage(
@@ -808,6 +795,14 @@ export async function uploadUserAvatar(
     console.error('Profile update error:', updateError);
     return { success: false, error: 'Failed to update profile' };
   }
+
+  // DB committed: clean up the old avatar file (best-effort).
+  await removePublicFileIfDifferent(
+    adminClient,
+    currentProfile?.avatar_url,
+    'website',
+    upload.path
+  );
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
@@ -903,6 +898,13 @@ export async function updateMyProfile(
   const avatarFile = formData.get('avatar') as File | null;
 
   const updates: { display_name?: string; avatar_url?: string } = {};
+  // Captured BEFORE the upload so the old avatar file can be removed after
+  // the DB commit (best-effort). Never delete it before the row points away.
+  let pendingAvatarCleanup: {
+    client: SupabaseClient;
+    oldUrl: string | null;
+    newPath: string;
+  } | null = null;
 
   // Update display name if provided
   if (displayName && displayName.trim().length > 0) {
@@ -930,33 +932,18 @@ export async function updateMyProfile(
       return { success: false, error: prepared.error };
     }
 
-    // Get current avatar URL to delete old file
+    // Get current avatar URL to remove the old file AFTER the DB commit
     const { data: currentProfile } = await supabase
       .from('user_profiles')
       .select('avatar_url')
       .eq('id', user.id)
       .single();
 
-    // Delete old avatar file if it exists
-    if (currentProfile?.avatar_url) {
-      try {
-        // Extract file path from URL (remove query params and get path after bucket name)
-        const url = new URL(currentProfile.avatar_url.split('?')[0]); // Remove query params
-        const pathParts = url.pathname.split('/');
-        const bucketIndex = pathParts.indexOf('website');
-        if (bucketIndex !== -1) {
-          const filePath = pathParts.slice(bucketIndex + 1).join('/');
-          if (filePath) {
-            await adminClient.storage.from('website').remove([filePath]);
-          }
-        }
-      } catch (deleteError) {
-        // Log but don't fail - old file might not exist or URL format might be different
-        console.warn('Failed to delete old avatar file:', deleteError);
-      }
-    }
-
-    // Upload via the shared prepared-image pipeline
+    // Upload via the shared prepared-image pipeline. No pre-upload deletion:
+    // the new avatar is uploaded with `upsert` to the deterministic path
+    // (replacing any previous same-path file); an old file behind a different
+    // path is removed after the DB commit. Deleting first would leave the row
+    // pointing at a deleted avatar if the upload or DB update failed.
     let upload: { publicUrl: string; path: string };
     try {
       upload = await uploadPreparedImage(
@@ -972,6 +959,11 @@ export async function updateMyProfile(
 
     // Add cache-busting param to force refresh
     updates.avatar_url = `${upload.publicUrl}?t=${Date.now()}`;
+    pendingAvatarCleanup = {
+      client: adminClient,
+      oldUrl: currentProfile?.avatar_url ?? null,
+      newPath: upload.path,
+    };
   }
 
   // If nothing to update
@@ -988,6 +980,16 @@ export async function updateMyProfile(
   if (updateError) {
     console.error('Profile update error:', updateError);
     return { success: false, error: 'Failed to update profile' };
+  }
+
+  // DB committed: clean up the old avatar file (best-effort).
+  if (pendingAvatarCleanup) {
+    await removePublicFileIfDifferent(
+      pendingAvatarCleanup.client,
+      pendingAvatarCleanup.oldUrl,
+      'website',
+      pendingAvatarCleanup.newPath
+    );
   }
 
   // Revalidate CMS paths to ensure fresh data

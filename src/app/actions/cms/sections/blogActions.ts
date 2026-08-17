@@ -4,10 +4,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   getAdminClient,
   getCmsActionContext,
-  getStoragePathFromPublicUrl,
   prepareImageUpload,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
+  removeStorageObjectBestEffort,
   requireAllowedPostWriter,
   requireAuth,
   sanitizeFilename,
@@ -566,19 +566,18 @@ async function deleteBlog(
       return { success: false, error: 'Blog post not found' };
     }
 
-    if (existingBlog.image) {
-      const imagePath = getStoragePathFromPublicUrl(
-        existingBlog.image as string,
-        'website'
-      );
-      if (imagePath) {
-        await admin.storage.from('website').remove([imagePath]);
-      }
-    }
-
+    // Commit the DB delete FIRST; only then remove the Storage object
+    // (best-effort). Deleting the object before the row is gone would leave
+    // the row pointing at a deleted image if the DB delete failed.
     const { error } = await admin.from('blog_posts').delete().eq('id', id);
 
     if (error) throw error;
+
+    await removePublicFileIfPresent(
+      admin,
+      existingBlog.image as string | null,
+      'website'
+    );
 
     const revalidation = await invalidatePublicContent({
       entity: 'blog',
@@ -665,9 +664,12 @@ async function rollbackBlogCreate(
   }
   try {
     const admin = getAdminClient();
-    await admin.storage.from('website').remove([imagePath]);
+    // The row is the authoritative state: delete it first, then remove the
+    // uploaded image best-effort. Storage-first would leave a surviving row
+    // pointing at a deleted object if the DB delete failed.
     const { error } = await admin.from('blog_posts').delete().eq('id', postId);
     if (error) throw error;
+    await removeStorageObjectBestEffort(admin, 'website', imagePath);
     return { success: true };
   } catch (error) {
     console.error('Error rolling back blog create:', error);
@@ -727,12 +729,11 @@ async function uploadBlogImage(
     );
     const pathBase = `Website Assets/blog/${blogId}-${sanitizedTitle}`;
 
-    // Remove any previously stored variant for this post (webp or png)
-    await admin.storage.from('website').remove([
-      `${pathBase}.webp`,
-      `${pathBase}.png`,
-    ]);
-
+    // No pre-upload deletion: the new image is uploaded with `upsert` to the
+    // same pathBase (replacing any same-format variant), and a previous
+    // other-format variant (webp/png) is removed AFTER the DB commit by
+    // removePublicFileIfDifferent. Deleting variants first would leave the
+    // row pointing at a deleted object if the upload or DB update failed.
     const upload = await uploadPreparedImage(
       admin,
       'website',

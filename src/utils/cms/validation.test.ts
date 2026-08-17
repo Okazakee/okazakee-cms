@@ -153,6 +153,16 @@ describe('getStoragePathFromPublicUrl', () => {
     ).toBeNull();
   });
 
+  it('returns null for a bucket name that is only a path prefix', () => {
+    // "mywebsite" contains "website" but the bucket must be a full segment
+    expect(
+      getStoragePathFromPublicUrl(
+        'https://xxx.supabase.co/storage/v1/object/public/mywebsite/x.png',
+        'website'
+      )
+    ).toBeNull();
+  });
+
   it('returns null on malformed URL', () => {
     expect(getStoragePathFromPublicUrl('not-a-url', 'website')).toBeNull();
   });

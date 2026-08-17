@@ -323,6 +323,30 @@ export async function uploadPreparedImage(
   return { publicUrl: data.publicUrl, path };
 }
 
+/**
+ * Best-effort removal of a Storage object. NEVER throws: after a DB write has
+ * committed, a failing storage cleanup must not fail the mutation (the
+ * orphaned object is harmless; a broken DB reference is not).
+ */
+export async function removeStorageObjectBestEffort(
+  supabase: SupabaseClient,
+  bucket: string,
+  filePath: string
+): Promise<void> {
+  try {
+    const { error } = await supabase.storage.from(bucket).remove([filePath]);
+    if (error) {
+      console.error(`Failed to remove storage object ${filePath}:`, error);
+    }
+  } catch (error) {
+    console.error(`Failed to remove storage object ${filePath}:`, error);
+  }
+}
+
+/**
+ * Best-effort removal of the file behind a public URL, if it exists.
+ * Never throws — see removeStorageObjectBestEffort.
+ */
 export async function removePublicFileIfPresent(
   supabase: SupabaseClient,
   fileUrl: string | null | undefined,
@@ -331,9 +355,13 @@ export async function removePublicFileIfPresent(
   if (!fileUrl) return;
   const filePath = getStoragePathFromPublicUrl(fileUrl, bucket);
   if (!filePath) return;
-  await supabase.storage.from(bucket).remove([filePath]);
+  await removeStorageObjectBestEffort(supabase, bucket, filePath);
 }
 
+/**
+ * Best-effort removal of the file behind a public URL when it differs from
+ * the newly stored path (e.g. a previous format variant). Never throws.
+ */
 export async function removePublicFileIfDifferent(
   supabase: SupabaseClient,
   fileUrl: string | null | undefined,
@@ -343,5 +371,5 @@ export async function removePublicFileIfDifferent(
   if (!fileUrl) return;
   const filePath = getStoragePathFromPublicUrl(fileUrl, bucket);
   if (!filePath || filePath === nextPath) return;
-  await supabase.storage.from(bucket).remove([filePath]);
+  await removeStorageObjectBestEffort(supabase, bucket, filePath);
 }
