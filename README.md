@@ -208,3 +208,33 @@ See `docs/cms-decoupling/` for the migration plan artifacts.
 - **Login rate limiting:** 5 attempts/minute, 15-minute lockout. The durable
   Postgres-backed limiter (`supabase/migrations/20260817100000_cms_login_rate_limit.sql`)
   replaces the process-local one before production cutover.
+
+---
+
+## Environment variables
+
+Required:
+
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase
+  project (same project as the public site).
+- `SUPABASE_SERVICE_ROLE_KEY` — server-only elevated key used by CMS
+  mutations (post-extraction: a dedicated `SUPABASE_SECRET_KEY`).
+- `CMS_PUBLIC_URL` — canonical CMS origin (OAuth callbacks, invite/recovery
+  links).
+
+Public-site revalidation (production):
+
+- `WEBSITE_REVALIDATION_URL` — `https://<public>/api/internal/content-revalidate`
+- `WEBSITE_REVALIDATION_SECRET` — shared with the public site's
+  `CONTENT_REVALIDATION_SECRET`.
+
+Optional:
+
+- `CMS_AUTH_DEBUG` — verbose auth logging (auto-on in development).
+- `APP_ENV`, `ISR_REVALIDATION`, `CONTENT_ENFORCE_PUBLISH_DATE` — cache and
+  publish-date semantics (defaults derived from `NODE_ENV`).
+- `NEXT_PUBLIC_LOCALES`, `NEXT_PUBLIC_DEFAULT_LOCALE`.
+
+Apply `supabase/migrations/*.sql` before production cutover (durable login
+rate limiting). See `docs/cms-decoupling/pre-cutover-checklist.md` in the
+public repo for the full cutover procedure.
