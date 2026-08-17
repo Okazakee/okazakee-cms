@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_UPLOAD_SIZE_BYTES,
   getStoragePathFromPublicUrl,
   isValidDate,
   isValidUrl,
@@ -11,6 +12,12 @@ import {
 function makeFile(name: string, type: string, size = 1024): File {
   return new File([new Uint8Array(size)], name, { type });
 }
+
+describe('MAX_UPLOAD_SIZE_BYTES', () => {
+  it('is the documented 10MB application contract', () => {
+    expect(MAX_UPLOAD_SIZE_BYTES).toBe(10 * 1024 * 1024);
+  });
+});
 
 describe('sanitizeFilename', () => {
   it('lowercases and trims', () => {
@@ -86,6 +93,21 @@ describe('validateImageFile', () => {
     expect(result.isValid).toBe(true);
   });
 
+  it('rejects a WebP file over 10MB (client-processed passthrough path)', () => {
+    const result = validateImageFile(
+      makeFile('big.webp', 'image/webp', 10 * 1024 * 1024 + 1)
+    );
+    expect(result.isValid).toBe(false);
+    expect(result.error).toMatch(/10MB/i);
+  });
+
+  it('accepts a WebP file exactly at the 10MB boundary', () => {
+    expect(
+      validateImageFile(makeFile('img.webp', 'image/webp', 10 * 1024 * 1024))
+        .isValid
+    ).toBe(true);
+  });
+
   it('rejects over-long filenames', () => {
     const longName = `${'n'.repeat(256)}.png`;
     const result = validateImageFile(makeFile(longName, 'image/png'));
@@ -129,6 +151,14 @@ describe('validatePdfFile', () => {
       makeFile('cv.pdf', 'application/pdf', 10 * 1024 * 1024 + 1)
     );
     expect(result.isValid).toBe(false);
+  });
+
+  it('accepts a PDF exactly at the 10MB boundary', () => {
+    expect(
+      validatePdfFile(
+        makeFile('cv.pdf', 'application/pdf', 10 * 1024 * 1024)
+      ).isValid
+    ).toBe(true);
   });
 });
 

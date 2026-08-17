@@ -15,6 +15,17 @@ const revalidateSeconds = publicConfig.isrRevalidationSeconds;
 const thirtyDaysInSeconds = 60 * 60 * 24 * 30;
 
 const nextConfig: NextConfig = {
+  // Upload contract: the CMS accepts files up to 10 MB (images and PDFs).
+  // This MUST match the client-side (useFileUpload maxSizeMB) and server-side
+  // (src/utils/cms/validation.ts MAX_FILE_SIZE_BYTES) validators. The Next
+  // Server Action default is 1 MB — without this the framework rejects the
+  // request before any validator runs, so the UI would accept a file the
+  // action could never receive.
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
   cacheLife: {
     default: {
       stale: revalidateSeconds,

@@ -18,6 +18,13 @@ Supabase. The public website lives in a separate repository
 - **Uploads:** images (client WebP preprocessing, server fallback via Sharp,
   SVG rejected) and PDF resumes, stored in the shared Supabase `website`
   bucket with format-aware extensions/MIME.
+- **Upload limit:** 10 MB for images and PDFs, enforced consistently across
+  the client (`useFileUpload` `maxSizeMB`), the server validators
+  (`MAX_UPLOAD_SIZE_BYTES` in `src/utils/cms/validation.ts`) and the
+  framework (`serverActions.bodySizeLimit: '10mb'` in `next.config.ts` —
+  without it Next's 1 MB default would reject uploads before the action
+  runs). Supabase Storage object limits (default 50 MB) exceed the
+  application contract.
 - **Cache invalidation:** after a committed content mutation the CMS sends a
   signed HTTP event to the public site's
   `/api/internal/content-revalidate` endpoint (HMAC-SHA256, replay window,

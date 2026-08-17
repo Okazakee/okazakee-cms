@@ -17,7 +17,16 @@ const ALLOWED_IMAGE_TYPES = [
   'image/avif',
 ] as const;
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+/**
+ * Application upload contract — 10 MB max for both images and PDFs.
+ * Keep in sync with:
+ * - client-side validators: `useFileUpload` maxSizeMB in CMS section
+ *   components (default 10);
+ * - framework limit: next.config.ts `serverActions.bodySizeLimit` ('10mb'),
+ *   otherwise Next rejects the request before the action runs.
+ */
+export const MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_FILE_SIZE_BYTES = MAX_UPLOAD_SIZE_BYTES;
 const MAX_FILENAME_LENGTH = 255;
 
 /**
