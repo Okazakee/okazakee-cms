@@ -14,7 +14,7 @@ import {
   uploadPreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 type BlogOperation =
@@ -377,7 +377,7 @@ async function batchPublishBlog(
       operation.updates.length > 0 ||
       operation.deletes.length > 0
     ) {
-      invalidateContent({
+      await invalidatePublicContent({
         entity: 'blog',
         operation: 'publish',
         ids: [
@@ -480,7 +480,7 @@ async function createBlog(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'blog', operation: 'create' });
+    await invalidatePublicContent({ entity: 'blog', operation: 'create' });
     return { success: true, data: newBlog };
   } catch (error) {
     console.error('Error creating blog post:', error);
@@ -528,7 +528,7 @@ async function updateBlog(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'blog', operation: 'update', id });
+    await invalidatePublicContent({ entity: 'blog', operation: 'update', id });
     return { success: true, data: updatedBlog };
   } catch (error) {
     console.error('Error updating blog post:', error);
@@ -574,7 +574,7 @@ async function deleteBlog(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'blog', operation: 'delete', id });
+    await invalidatePublicContent({ entity: 'blog', operation: 'delete', id });
     return { success: true };
   } catch (error) {
     console.error('Error deleting blog post:', error);
@@ -752,7 +752,7 @@ async function uploadBlogImage(
       upload.path
     );
 
-    invalidateContent({
+    await invalidatePublicContent({
       entity: 'blog',
       operation: 'asset-update',
       id: blogId,

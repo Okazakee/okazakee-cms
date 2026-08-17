@@ -15,7 +15,7 @@ import {
   uploadPreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
@@ -403,7 +403,7 @@ async function batchPublishPortfolio(
       operation.updates.length > 0 ||
       operation.deletes.length > 0
     ) {
-      invalidateContent({
+      await invalidatePublicContent({
         entity: 'portfolio',
         operation: 'publish',
         ids: [
@@ -504,7 +504,7 @@ async function createPortfolio(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'portfolio', operation: 'create' });
+    await invalidatePublicContent({ entity: 'portfolio', operation: 'create' });
     return { success: true, data: newPortfolio };
   } catch (error) {
     console.error('Error creating portfolio post:', error);
@@ -554,7 +554,7 @@ async function updatePortfolio(
 
     if (error) throw error;
 
-    invalidateContent({
+    await invalidatePublicContent({
       entity: 'portfolio',
       operation: 'update',
       id,
@@ -604,7 +604,7 @@ async function deletePortfolio(
 
     if (error) throw error;
 
-    invalidateContent({
+    await invalidatePublicContent({
       entity: 'portfolio',
       operation: 'delete',
       id,
@@ -789,7 +789,7 @@ async function uploadPortfolioImage(
       upload.path
     );
 
-    invalidateContent({
+    await invalidatePublicContent({
       entity: 'portfolio',
       operation: 'asset-update',
       id: portfolioId,

@@ -2,7 +2,7 @@
 
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { cmsConfig } from '@/config/cms';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { refresh } from 'next/cache';
 import {
   prepareImageUpload,
@@ -659,7 +659,7 @@ async function removeUser(
   }
 
   if (profileId) {
-    invalidateContent({ entity: 'author', operation: 'update', id: profileId });
+    await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
   }
 
   // Revalidate CMS paths to ensure fresh data
@@ -692,7 +692,7 @@ async function updateUserProfile(
 
   if (error) throw error;
 
-  invalidateContent({ entity: 'author', operation: 'update', id: profileId });
+  await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
   return { success: true };
 }
 
@@ -800,7 +800,7 @@ export async function uploadUserAvatar(
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
-  invalidateContent({ entity: 'author', operation: 'update', id: profileId });
+  await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
 
   return { success: true, avatarUrl };
 }
@@ -850,7 +850,7 @@ export async function updateUserDisplayName(
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
-  invalidateContent({ entity: 'author', operation: 'update', id: profileId });
+  await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
 
   return { success: true };
 }
@@ -975,7 +975,7 @@ export async function updateMyProfile(
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
-  invalidateContent({ entity: 'author', operation: 'update', id: user.id });
+  await invalidatePublicContent({ entity: 'author', operation: 'update', id: user.id });
 
   return { success: true, avatarUrl: updates.avatar_url };
 }

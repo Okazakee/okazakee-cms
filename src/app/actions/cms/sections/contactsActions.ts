@@ -7,7 +7,7 @@ import {
   isValidContactUrl,
   requireAdmin,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 type ContactOperation =
@@ -221,7 +221,7 @@ async function batchPublishContacts(
       operation.deletes.length > 0 ||
       operation.reorder.length > 0
     ) {
-      invalidateContent({ entity: 'contacts', operation: 'publish' });
+      await invalidatePublicContent({ entity: 'contacts', operation: 'publish' });
     }
 
     return {
@@ -279,7 +279,7 @@ async function createContact(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'contacts', operation: 'create' });
+    await invalidatePublicContent({ entity: 'contacts', operation: 'create' });
     return { success: true, data };
   } catch (error) {
     console.error('Error creating contact:', error);
@@ -320,7 +320,7 @@ async function updateContact(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'contacts', operation: 'update' });
+    await invalidatePublicContent({ entity: 'contacts', operation: 'update' });
     return { success: true, data };
   } catch (error) {
     console.error('Error updating contact:', error);
@@ -341,7 +341,7 @@ async function deleteContact(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'contacts', operation: 'delete' });
+    await invalidatePublicContent({ entity: 'contacts', operation: 'delete' });
     return { success: true };
   } catch (error) {
     console.error('Error deleting contact:', error);
@@ -367,7 +367,7 @@ async function reorderContacts(
       if (error) throw error;
     }
 
-    invalidateContent({ entity: 'contacts', operation: 'update' });
+    await invalidatePublicContent({ entity: 'contacts', operation: 'update' });
     return { success: true };
   } catch (error) {
     console.error('Error reordering contacts:', error);

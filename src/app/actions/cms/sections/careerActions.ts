@@ -17,7 +17,7 @@ import {
   uploadPreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import type { CareerEntry } from '@/types/fetchedData.types';
 import { isValidBlurhash } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
@@ -386,7 +386,7 @@ async function batchPublishCareer(
       operation.updates.length > 0 ||
       operation.deletes.length > 0
     ) {
-      invalidateContent({ entity: 'career', operation: 'publish' });
+      await invalidatePublicContent({ entity: 'career', operation: 'publish' });
     }
 
     return {
@@ -448,7 +448,7 @@ async function createCareer(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'career', operation: 'create' });
+    await invalidatePublicContent({ entity: 'career', operation: 'create' });
     return { success: true, data: normalizeCareerEntry(newCareer) };
   } catch (error) {
     console.error('Error creating career entry:', error);
@@ -490,7 +490,7 @@ async function updateCareer(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'career', operation: 'update' });
+    await invalidatePublicContent({ entity: 'career', operation: 'update' });
     return { success: true, data: normalizeCareerEntry(updatedCareer) };
   } catch (error) {
     console.error('Error updating career entry:', error);
@@ -531,7 +531,7 @@ async function deleteCareer(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'career', operation: 'delete' });
+    await invalidatePublicContent({ entity: 'career', operation: 'delete' });
     return { success: true };
   } catch (error) {
     console.error('Error deleting career entry:', error);
@@ -675,7 +675,7 @@ async function uploadCareerLogo(
       fileName
     );
 
-    invalidateContent({ entity: 'career', operation: 'asset-update' });
+    await invalidatePublicContent({ entity: 'career', operation: 'asset-update' });
     return {
       success: true,
       data: { logo: urlData.publicUrl, blurhashURL: blurhash || '' },

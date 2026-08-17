@@ -6,7 +6,7 @@ import {
   getCmsActionContext,
   requireAdmin,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 type SkillOperation =
@@ -261,7 +261,7 @@ async function batchPublishSkills(
       operation.deleteCategories.length > 0 ||
       operation.categoryOrder.length > 0
     ) {
-      invalidateContent({ entity: 'skills', operation: 'publish' });
+      await invalidatePublicContent({ entity: 'skills', operation: 'publish' });
     }
 
     return {
@@ -320,7 +320,7 @@ async function createSkill(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'skills', operation: 'create' });
+    await invalidatePublicContent({ entity: 'skills', operation: 'create' });
     return { success: true, data };
   } catch (error) {
     console.error('Error creating skill:', error);
@@ -361,7 +361,7 @@ async function updateSkill(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'skills', operation: 'update' });
+    await invalidatePublicContent({ entity: 'skills', operation: 'update' });
     return { success: true, data };
   } catch (error) {
     console.error('Error updating skill:', error);
@@ -382,7 +382,7 @@ async function deleteSkill(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'skills', operation: 'delete' });
+    await invalidatePublicContent({ entity: 'skills', operation: 'delete' });
     return { success: true };
   } catch (error) {
     console.error('Error deleting skill:', error);
@@ -418,7 +418,7 @@ async function createCategory(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'skills', operation: 'create' });
+    await invalidatePublicContent({ entity: 'skills', operation: 'create' });
     return { success: true, data };
   } catch (error) {
     console.error('Error creating category:', error);
@@ -475,7 +475,7 @@ async function updateCategory(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'skills', operation: 'update' });
+    await invalidatePublicContent({ entity: 'skills', operation: 'update' });
     return { success: true, data };
   } catch (error) {
     console.error('Error updating category:', error);
@@ -513,7 +513,7 @@ async function deleteCategory(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'skills', operation: 'delete' });
+    await invalidatePublicContent({ entity: 'skills', operation: 'delete' });
     return { success: true };
   } catch (error) {
     console.error('Error deleting category:', error);

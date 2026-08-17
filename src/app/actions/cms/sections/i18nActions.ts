@@ -4,7 +4,7 @@ import {
   getAdminClient,
   getCmsActionContext,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { getContentInvalidation } from '@/libs/cms/invalidation';
 
 type I18nOperation =
@@ -219,7 +219,7 @@ async function updateSectionTranslationsForLocales(
       updated.push(data);
     }
 
-    invalidateContent({ entity: 'translations', operation: 'update' });
+    await invalidatePublicContent({ entity: 'translations', operation: 'update' });
 
     return { success: true, data: updated };
   } catch (error) {
@@ -275,7 +275,7 @@ async function updateI18nData(
     if (error) throw error;
 
     // Invalidate cache
-    invalidateContent({
+    await invalidatePublicContent({
       entity: 'translations',
       operation: 'update',
       extraTags: getContentInvalidation({
@@ -341,7 +341,7 @@ async function updateSectionTranslations(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'translations', operation: 'update' });
+    await invalidatePublicContent({ entity: 'translations', operation: 'update' });
 
     return { success: true, data };
   } catch (error) {
@@ -399,7 +399,7 @@ async function updatePrivacyPolicy(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'privacy', operation: 'update' });
+    await invalidatePublicContent({ entity: 'privacy', operation: 'update' });
 
     return { success: true, data };
   } catch (error) {

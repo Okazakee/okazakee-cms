@@ -2,7 +2,7 @@
 
 import { refresh } from 'next/cache';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 export async function deleteMyAccount() {
@@ -92,7 +92,7 @@ export async function deleteMyAccount() {
       // Don't throw - profile deletion is not critical if it fails
     }
 
-    invalidateContent({
+    await invalidatePublicContent({
       entity: 'author',
       operation: 'update',
       id: authUser.id,

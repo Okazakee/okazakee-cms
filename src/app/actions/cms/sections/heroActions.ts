@@ -10,7 +10,7 @@ import {
   validateImageFile,
   validatePdfFile,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { invalidateContent } from '@/libs/cms/invalidate';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
@@ -172,7 +172,7 @@ async function updateHero(
 
     if (error) throw error;
 
-    invalidateContent({ entity: 'hero', operation: 'update' });
+    await invalidatePublicContent({ entity: 'hero', operation: 'update' });
 
     return { success: true, data };
   } catch (error) {
@@ -237,7 +237,7 @@ async function uploadHeroImage(
       upload.path
     );
 
-    invalidateContent({ entity: 'hero', operation: 'asset-update' });
+    await invalidatePublicContent({ entity: 'hero', operation: 'asset-update' });
 
     return {
       success: true,
@@ -300,7 +300,7 @@ async function uploadResume(
       fileName
     );
 
-    invalidateContent({ entity: 'resume', operation: 'update' });
+    await invalidatePublicContent({ entity: 'resume', operation: 'update' });
 
     return {
       success: true,
