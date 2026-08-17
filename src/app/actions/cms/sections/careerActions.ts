@@ -18,6 +18,7 @@ import {
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import type { CareerEntry } from '@/types/fetchedData.types';
 import { isValidBlurhash } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
@@ -72,14 +73,12 @@ type CreateCareerData = {
 
 type UpdateCareerData = Partial<CreateCareerData>;
 
-type CareerResult = {
-  success: boolean;
+type CareerResult = MutationResult & {
   data?:
     | CareerEntry
     | CareerEntry[]
     | { logo: string; blurhashURL: string }
     | null;
-  error?: string;
 };
 
 function toCareerDbData(
@@ -381,18 +380,23 @@ async function batchPublishCareer(
       }
     }
 
+    let revalidation: RevalidationStatus | undefined;
     if (
       operation.creates.length > 0 ||
       operation.updates.length > 0 ||
       operation.deletes.length > 0
     ) {
-      await invalidatePublicContent({ entity: 'career', operation: 'publish' });
+      revalidation = await invalidatePublicContent({
+        entity: 'career',
+        operation: 'publish',
+      });
     }
 
     return {
       success: errors.length === 0,
       data: changed,
       error: errors.length > 0 ? errors.join('\n') : undefined,
+      revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing career entries:', error);
@@ -448,8 +452,11 @@ async function createCareer(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'career', operation: 'create' });
-    return { success: true, data: normalizeCareerEntry(newCareer) };
+    const revalidation = await invalidatePublicContent({
+      entity: 'career',
+      operation: 'create',
+    });
+    return { success: true, data: normalizeCareerEntry(newCareer), revalidation };
   } catch (error) {
     console.error('Error creating career entry:', error);
     return {
@@ -490,8 +497,15 @@ async function updateCareer(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'career', operation: 'update' });
-    return { success: true, data: normalizeCareerEntry(updatedCareer) };
+    const revalidation = await invalidatePublicContent({
+      entity: 'career',
+      operation: 'update',
+    });
+    return {
+      success: true,
+      data: normalizeCareerEntry(updatedCareer),
+      revalidation,
+    };
   } catch (error) {
     console.error('Error updating career entry:', error);
     return {
@@ -531,8 +545,11 @@ async function deleteCareer(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'career', operation: 'delete' });
-    return { success: true };
+    const revalidation = await invalidatePublicContent({
+      entity: 'career',
+      operation: 'delete',
+    });
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting career entry:', error);
     return {
@@ -675,10 +692,14 @@ async function uploadCareerLogo(
       fileName
     );
 
-    await invalidatePublicContent({ entity: 'career', operation: 'asset-update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'career',
+      operation: 'asset-update',
+    });
     return {
       success: true,
       data: { logo: urlData.publicUrl, blurhashURL: blurhash || '' },
+      revalidation,
     };
   } catch (error) {
     console.error('Error uploading career logo:', error);

@@ -11,6 +11,7 @@ import {
   validatePdfFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
@@ -59,11 +60,7 @@ type HeroCurrentData = {
   resume_it?: string;
 };
 
-type HeroResult = {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-};
+type HeroResult = MutationResult;
 
 export async function heroActions(
   operation: HeroOperation
@@ -172,9 +169,12 @@ async function updateHero(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'hero', operation: 'update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'hero',
+      operation: 'update',
+    });
 
-    return { success: true, data };
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating hero:', error);
     return {
@@ -237,11 +237,15 @@ async function uploadHeroImage(
       upload.path
     );
 
-    await invalidatePublicContent({ entity: 'hero', operation: 'asset-update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'hero',
+      operation: 'asset-update',
+    });
 
     return {
       success: true,
       data: { propic: propicUrl, blurhashURL: prepared.image.blurhash },
+      revalidation,
     };
   } catch (error) {
     console.error('Error uploading hero image:', error);
@@ -300,11 +304,15 @@ async function uploadResume(
       fileName
     );
 
-    await invalidatePublicContent({ entity: 'resume', operation: 'update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'resume',
+      operation: 'update',
+    });
 
     return {
       success: true,
       data: { [field]: urlData.publicUrl },
+      revalidation,
     };
   } catch (error) {
     console.error('Error uploading resume:', error);
@@ -324,6 +332,7 @@ async function updateWithFiles(
   try {
     const updates: HeroUpdateData = {};
     const resumeUpdates: Record<string, string> = {};
+    const revalidationStates: RevalidationStatus[] = [];
 
     // Handle profile picture upload (frontend sends mainImage, backend also accepts propic)
     const propicFile = files.propic ?? files.mainImage;
@@ -337,6 +346,9 @@ async function updateWithFiles(
       );
       if (!imageResult.success) {
         return imageResult;
+      }
+      if (imageResult.revalidation) {
+        revalidationStates.push(imageResult.revalidation);
       }
       const imageData = imageResult.data as {
         propic: string;
@@ -357,6 +369,9 @@ async function updateWithFiles(
       if (!resumeResult.success) {
         return resumeResult;
       }
+      if (resumeResult.revalidation) {
+        revalidationStates.push(resumeResult.revalidation);
+      }
       const resumeData = resumeResult.data as { resume_en: string };
       resumeUpdates.resume_en = resumeData.resume_en;
     }
@@ -371,13 +386,24 @@ async function updateWithFiles(
       if (!resumeResult.success) {
         return resumeResult;
       }
+      if (resumeResult.revalidation) {
+        revalidationStates.push(resumeResult.revalidation);
+      }
       const resumeData = resumeResult.data as { resume_it: string };
       resumeUpdates.resume_it = resumeData.resume_it;
     }
 
+    // Composite status: any failure wins, else any sent, else skipped.
+    const revalidation = revalidationStates.includes('failed')
+      ? 'failed'
+      : revalidationStates.includes('sent')
+        ? 'sent'
+        : 'skipped';
+
     return {
       success: true,
       data: { ...updates, ...resumeUpdates },
+      revalidation,
     };
   } catch (error) {
     console.error('Error updating with files:', error);

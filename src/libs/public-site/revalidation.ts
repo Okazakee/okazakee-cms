@@ -17,12 +17,14 @@ import {
   getContentInvalidation,
   type ContentInvalidationArgs,
 } from '@/libs/cms/invalidation';
+import type { RevalidationStatus } from '@/libs/cms/mutationResult';
 
 const REVALIDATION_URL = process.env.WEBSITE_REVALIDATION_URL ?? '';
 const REVALIDATION_SECRET = process.env.WEBSITE_REVALIDATION_SECRET ?? '';
 const REQUEST_TIMEOUT_MS = 5000;
 
-export type RevalidationStatus = 'sent' | 'skipped' | 'failed';
+// Re-exported for callers that import the status type from this module.
+export type { RevalidationStatus };
 
 export function signRevalidationEvent(
   secret: string,

@@ -17,6 +17,7 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { CareerPreview } from '@/components/common/cms/previews/CareerPreview';
 import type { CareerEntry, RemoteType } from '@/types/fetchedData.types';
@@ -205,6 +206,8 @@ export default function CareerSection() {
       deletes: Array.from(deletedIds),
     });
     if (!batch.success && batch.error) errors.push(batch.error);
+    const revalidationMessage = revalidationWarning(batch);
+    if (revalidationMessage) errors.push(revalidationMessage);
 
     if (transDirty) { const tErrs = await saveTranslations(); errors.push(...tErrs); }
     await fetchData();

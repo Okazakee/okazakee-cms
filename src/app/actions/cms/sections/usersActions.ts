@@ -3,6 +3,10 @@
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { cmsConfig } from '@/config/cms';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
 import { refresh } from 'next/cache';
 import {
   prepareImageUpload,
@@ -40,10 +44,8 @@ type AllowedUser = {
   } | null;
 };
 
-type UsersResult = {
-  success: boolean;
+type UsersResult = MutationResult & {
   data?: AllowedUser | AllowedUser[];
-  error?: string;
 };
 
 // Email validation
@@ -658,14 +660,19 @@ async function removeUser(
     }
   }
 
+  let revalidation: RevalidationStatus | undefined;
   if (profileId) {
-    await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
+    revalidation = await invalidatePublicContent({
+      entity: 'author',
+      operation: 'update',
+      id: profileId,
+    });
   }
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
 
-  return { success: true };
+  return { success: true, revalidation };
 }
 
 async function updateUserProfile(
@@ -692,8 +699,12 @@ async function updateUserProfile(
 
   if (error) throw error;
 
-  await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
-  return { success: true };
+  const revalidation = await invalidatePublicContent({
+    entity: 'author',
+    operation: 'update',
+    id: profileId,
+  });
+  return { success: true, revalidation };
 }
 
 /**
@@ -800,9 +811,13 @@ export async function uploadUserAvatar(
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
-  await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
+  const revalidation = await invalidatePublicContent({
+    entity: 'author',
+    operation: 'update',
+    id: profileId,
+  });
 
-  return { success: true, avatarUrl };
+  return { success: true, avatarUrl, revalidation };
 }
 
 /**
@@ -850,18 +865,20 @@ export async function updateUserDisplayName(
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
-  await invalidatePublicContent({ entity: 'author', operation: 'update', id: profileId });
+  const revalidation = await invalidatePublicContent({
+    entity: 'author',
+    operation: 'update',
+    id: profileId,
+  });
 
-  return { success: true };
+  return { success: true, revalidation };
 }
 
 /**
  * Update current user's profile (display name and/or avatar)
  */
-type ProfileUpdateResult = {
-  success: boolean;
+type ProfileUpdateResult = MutationResult & {
   avatarUrl?: string;
-  error?: string;
 };
 
 export async function updateMyProfile(
@@ -975,7 +992,11 @@ export async function updateMyProfile(
 
   // Revalidate CMS paths to ensure fresh data
   refresh();
-  await invalidatePublicContent({ entity: 'author', operation: 'update', id: user.id });
+  const revalidation = await invalidatePublicContent({
+    entity: 'author',
+    operation: 'update',
+    id: user.id,
+  });
 
-  return { success: true, avatarUrl: updates.avatar_url };
+  return { success: true, avatarUrl: updates.avatar_url, revalidation };
 }

@@ -25,6 +25,7 @@ import {
 } from '@/app/actions/cms/sections/usersActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
 
@@ -116,6 +117,8 @@ export default function UsersSection() {
       const fd = new FormData(); fd.append('profileId', profileId); fd.append('avatar', processed.file);
       const r = await uploadUserAvatar(fd);
       if (!r.success) throw new Error(r.error);
+      const warning = revalidationWarning(r);
+      if (warning) setError(warning);
       await fetchUsers();
     } catch (err) { setError(err instanceof Error ? err.message : t('users.errorUploadAvatar')); }
     finally { setUploadingAvatarFor(null); }
@@ -127,6 +130,8 @@ export default function UsersSection() {
     try {
       const r = await updateUserDisplayName(profileId, editedName.trim());
       if (!r.success) throw new Error(r.error);
+      const warning = revalidationWarning(r);
+      if (warning) setError(warning);
       setEditingNameFor(null); setEditedName('');
       await new Promise((res) => setTimeout(res, 100));
       await fetchUsers();

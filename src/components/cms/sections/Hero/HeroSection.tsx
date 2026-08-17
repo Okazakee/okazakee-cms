@@ -14,6 +14,7 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { HeroPreview } from '@/components/common/cms/previews/HeroPreview';
@@ -64,6 +65,7 @@ export default function HeroSection() {
     setError(null);
 
     try {
+      let revalidationMessage: string | null = null;
       if (imgUpload.file) {
         const result = await heroActions({
           type: 'UPDATE_WITH_FILES',
@@ -83,6 +85,8 @@ export default function HeroSection() {
           setIsUpdating(false);
           return;
         }
+
+        revalidationMessage = revalidationWarning(result);
 
         const data = result.data as {
           propic?: string;
@@ -107,6 +111,8 @@ export default function HeroSection() {
       const transErrors = await saveTranslations();
       if (transErrors.length > 0) {
         setError(transErrors.join('\n'));
+      } else if (revalidationMessage) {
+        setError(revalidationMessage);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('hero.errorUpdateHero'));

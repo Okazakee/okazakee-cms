@@ -92,7 +92,7 @@ export async function deleteMyAccount() {
       // Don't throw - profile deletion is not critical if it fails
     }
 
-    await invalidatePublicContent({
+    const revalidation = await invalidatePublicContent({
       entity: 'author',
       operation: 'update',
       id: authUser.id,
@@ -107,7 +107,7 @@ export async function deleteMyAccount() {
 
     refresh();
 
-    return { success: true };
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting account:', error);
     return {

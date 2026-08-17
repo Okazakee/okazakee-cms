@@ -7,6 +7,7 @@ import {
 } from '@/app/actions/cms/utils/fileHelpers';
 import { getContentInvalidation, type ContentEntity } from '@/libs/cms/invalidation';
 import { getLocalInvalidationTags } from '@/libs/cms/localInvalidation';
+import type { MutationResult } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 
 type I18nOperation =
@@ -30,11 +31,7 @@ type UpdateI18nData = {
   privacy_policy?: string;
 };
 
-type I18nResult = {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-};
+type I18nResult = MutationResult;
 
 // Validation functions
 function validateI18nData(
@@ -237,10 +234,13 @@ async function updateSectionTranslationsForLocales(
       updated.push(data);
     }
 
-    await invalidatePublicContent({ entity: 'translations', operation: 'update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'translations',
+      operation: 'update',
+    });
     invalidateLocalCache('translations');
 
-    return { success: true, data: updated };
+    return { success: true, data: updated, revalidation };
   } catch (error) {
     console.error('Error updating section translations for locales:', error);
     return {
@@ -294,7 +294,7 @@ async function updateI18nData(
     if (error) throw error;
 
     // Invalidate cache
-    await invalidatePublicContent({
+    const revalidation = await invalidatePublicContent({
       entity: 'translations',
       operation: 'update',
       extraTags: getContentInvalidation({
@@ -304,7 +304,7 @@ async function updateI18nData(
     });
     invalidateLocalCache('translations');
 
-    return { success: true, data };
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating i18n data:', error);
     return {
@@ -361,10 +361,13 @@ async function updateSectionTranslations(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'translations', operation: 'update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'translations',
+      operation: 'update',
+    });
     invalidateLocalCache('translations');
 
-    return { success: true, data };
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating section translations:', error);
     return {
@@ -420,13 +423,16 @@ async function updatePrivacyPolicy(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'privacy', operation: 'update' });
+    const revalidation = await invalidatePublicContent({
+      entity: 'privacy',
+      operation: 'update',
+    });
     // Privacy writes the top-level privacy_policy column only; the local
     // translations cache is deliberately NOT touched. Revalidating the
     // privacy tag is a no-op locally (nothing caches it yet).
     invalidateLocalCache('privacy');
 
-    return { success: true, data };
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating privacy policy:', error);
     return {

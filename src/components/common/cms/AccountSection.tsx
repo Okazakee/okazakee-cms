@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
 import { updateMyProfile } from '@/app/actions/cms/sections/usersActions';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
 
@@ -68,6 +69,8 @@ export default function AccountSection() {
       if (!result.success) {
         throw new Error(result.error || 'Failed to upload avatar');
       }
+      const warning = revalidationWarning(result);
+      if (warning) setError(warning);
       // Refresh user data
       const refreshedUser = await getUser();
       if (refreshedUser) {
@@ -102,6 +105,8 @@ export default function AccountSection() {
       if (!result.success) {
         throw new Error(result.error || 'Failed to update display name');
       }
+      const warning = revalidationWarning(result);
+      if (warning) setError(warning);
       setEditingName(false);
       // Refresh user data
       const refreshedUser = await getUser();

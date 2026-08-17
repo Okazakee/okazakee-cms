@@ -10,6 +10,7 @@ import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import MarkdownRenderer from '@/components/layout/MarkdownRenderer';
 
 export default function PrivacyPolicySection() {
@@ -61,6 +62,10 @@ export default function PrivacyPolicySection() {
         markdown: locale === 'en' ? enMarkdown : itMarkdown,
       });
       if (!r.success) errors.push(`${locale}: ${r.error}`);
+      else {
+        const warning = revalidationWarning(r);
+        if (warning) errors.push(warning);
+      }
     }
     if (errors.length === 0) setOriginal({ en: enMarkdown, it: itMarkdown });
     else setError(errors.join('\n'));

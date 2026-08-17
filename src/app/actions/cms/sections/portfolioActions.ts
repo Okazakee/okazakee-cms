@@ -16,6 +16,7 @@ import {
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
@@ -84,11 +85,7 @@ type CreatePortfolioData = {
 
 type UpdatePortfolioData = Partial<CreatePortfolioData>;
 
-type PortfolioResult = {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-};
+type PortfolioResult = MutationResult;
 
 // Validation functions
 function validatePortfolioData(
@@ -398,12 +395,13 @@ async function batchPublishPortfolio(
       }
     }
 
+    let revalidation: RevalidationStatus | undefined;
     if (
       operation.creates.length > 0 ||
       operation.updates.length > 0 ||
       operation.deletes.length > 0
     ) {
-      await invalidatePublicContent({
+      revalidation = await invalidatePublicContent({
         entity: 'portfolio',
         operation: 'publish',
         ids: [
@@ -417,6 +415,7 @@ async function batchPublishPortfolio(
       success: errors.length === 0,
       data: { created, updated },
       error: errors.length > 0 ? errors.join('\n') : undefined,
+      revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing portfolio posts:', error);
@@ -504,8 +503,11 @@ async function createPortfolio(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'portfolio', operation: 'create' });
-    return { success: true, data: newPortfolio };
+    const revalidation = await invalidatePublicContent({
+      entity: 'portfolio',
+      operation: 'create',
+    });
+    return { success: true, data: newPortfolio, revalidation };
   } catch (error) {
     console.error('Error creating portfolio post:', error);
     return {
@@ -554,12 +556,12 @@ async function updatePortfolio(
 
     if (error) throw error;
 
-    await invalidatePublicContent({
+    const revalidation = await invalidatePublicContent({
       entity: 'portfolio',
       operation: 'update',
       id,
     });
-    return { success: true, data: updatedPortfolio };
+    return { success: true, data: updatedPortfolio, revalidation };
   } catch (error) {
     console.error('Error updating portfolio post:', error);
     return {
@@ -604,12 +606,12 @@ async function deletePortfolio(
 
     if (error) throw error;
 
-    await invalidatePublicContent({
+    const revalidation = await invalidatePublicContent({
       entity: 'portfolio',
       operation: 'delete',
       id,
     });
-    return { success: true };
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting portfolio post:', error);
     return {
@@ -789,7 +791,7 @@ async function uploadPortfolioImage(
       upload.path
     );
 
-    await invalidatePublicContent({
+    const revalidation = await invalidatePublicContent({
       entity: 'portfolio',
       operation: 'asset-update',
       id: portfolioId,
@@ -797,6 +799,7 @@ async function uploadPortfolioImage(
     return {
       success: true,
       data: { image: upload.publicUrl, blurhashURL: prepared.image.blurhash },
+      revalidation,
     };
   } catch (error) {
     console.error('Error uploading portfolio image:', error);

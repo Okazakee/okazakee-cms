@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 
 type FlatTranslations = Record<string, string>;
 type NestedTranslations = Record<string, unknown>;
@@ -180,7 +181,8 @@ export function useSectionTranslations(
 
     if (result.success) {
       setOriginal(JSON.parse(JSON.stringify(translations)));
-      return [];
+      const warning = revalidationWarning(result);
+      return warning ? [warning] : [];
     }
 
     return [result.error || 'translations: failed'];

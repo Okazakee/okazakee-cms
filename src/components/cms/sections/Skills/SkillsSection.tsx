@@ -21,6 +21,7 @@ import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { SkillsPreview } from '@/components/common/cms/previews/SkillsPreview';
 import type { Skill, SkillsCategory } from '@/types/fetchedData.types';
@@ -131,6 +132,8 @@ export default function SkillsSection() {
       }),
     });
     if (!batch.success && batch.error) errors.push(batch.error);
+    const revalidationMessage = revalidationWarning(batch);
+    if (revalidationMessage) errors.push(revalidationMessage);
 
     if (transDirty) {
       const tErrs = await saveTranslations();

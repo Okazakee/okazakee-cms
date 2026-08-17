@@ -8,6 +8,7 @@ import {
   requireAdmin,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type ContactOperation =
@@ -40,11 +41,7 @@ type UpdateContactData = {
   position?: number;
 };
 
-type ContactsResult = {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-};
+type ContactsResult = MutationResult;
 
 // Validation functions
 function validateContactData(data: CreateContactData | UpdateContactData): {
@@ -215,19 +212,24 @@ async function batchPublishContacts(
       if (error) errors.push(`Reorder ${contact.id}: ${error.message}`);
     }
 
+    let revalidation: RevalidationStatus | undefined;
     if (
       operation.creates.length > 0 ||
       operation.updates.length > 0 ||
       operation.deletes.length > 0 ||
       operation.reorder.length > 0
     ) {
-      await invalidatePublicContent({ entity: 'contacts', operation: 'publish' });
+      revalidation = await invalidatePublicContent({
+        entity: 'contacts',
+        operation: 'publish',
+      });
     }
 
     return {
       success: errors.length === 0,
       data: changed,
       error: errors.length > 0 ? errors.join('\n') : undefined,
+      revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing contacts:', error);
@@ -279,8 +281,11 @@ async function createContact(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'contacts', operation: 'create' });
-    return { success: true, data };
+    const revalidation = await invalidatePublicContent({
+      entity: 'contacts',
+      operation: 'create',
+    });
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error creating contact:', error);
     return {
@@ -320,8 +325,11 @@ async function updateContact(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'contacts', operation: 'update' });
-    return { success: true, data };
+    const revalidation = await invalidatePublicContent({
+      entity: 'contacts',
+      operation: 'update',
+    });
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating contact:', error);
     return {
@@ -341,8 +349,11 @@ async function deleteContact(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'contacts', operation: 'delete' });
-    return { success: true };
+    const revalidation = await invalidatePublicContent({
+      entity: 'contacts',
+      operation: 'delete',
+    });
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting contact:', error);
     return {
@@ -367,8 +378,11 @@ async function reorderContacts(
       if (error) throw error;
     }
 
-    await invalidatePublicContent({ entity: 'contacts', operation: 'update' });
-    return { success: true };
+    const revalidation = await invalidatePublicContent({
+      entity: 'contacts',
+      operation: 'update',
+    });
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error reordering contacts:', error);
     return {

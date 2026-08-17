@@ -7,6 +7,7 @@ import {
   requireAdmin,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type SkillOperation =
@@ -53,11 +54,7 @@ type UpdateCategoryData = {
   position?: number;
 };
 
-type SkillsResult = {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-};
+type SkillsResult = MutationResult;
 
 // Validation functions
 function validateSkillData(data: CreateSkillData | UpdateSkillData): {
@@ -252,6 +249,7 @@ async function batchPublishSkills(
       if (error) errors.push(`Skill ${item.id}: ${error.message}`);
     }
 
+    let revalidation: RevalidationStatus | undefined;
     if (
       operation.newCategories.length > 0 ||
       operation.newSkills.length > 0 ||
@@ -261,13 +259,17 @@ async function batchPublishSkills(
       operation.deleteCategories.length > 0 ||
       operation.categoryOrder.length > 0
     ) {
-      await invalidatePublicContent({ entity: 'skills', operation: 'publish' });
+      revalidation = await invalidatePublicContent({
+        entity: 'skills',
+        operation: 'publish',
+      });
     }
 
     return {
       success: errors.length === 0,
       data: { tempIdToRealId },
       error: errors.length > 0 ? errors.join('\n') : undefined,
+      revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing skills:', error);
@@ -320,8 +322,11 @@ async function createSkill(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'skills', operation: 'create' });
-    return { success: true, data };
+    const revalidation = await invalidatePublicContent({
+      entity: 'skills',
+      operation: 'create',
+    });
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error creating skill:', error);
     return {
@@ -361,8 +366,11 @@ async function updateSkill(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'skills', operation: 'update' });
-    return { success: true, data };
+    const revalidation = await invalidatePublicContent({
+      entity: 'skills',
+      operation: 'update',
+    });
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating skill:', error);
     return {
@@ -382,8 +390,11 @@ async function deleteSkill(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'skills', operation: 'delete' });
-    return { success: true };
+    const revalidation = await invalidatePublicContent({
+      entity: 'skills',
+      operation: 'delete',
+    });
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting skill:', error);
     return {
@@ -418,8 +429,11 @@ async function createCategory(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'skills', operation: 'create' });
-    return { success: true, data };
+    const revalidation = await invalidatePublicContent({
+      entity: 'skills',
+      operation: 'create',
+    });
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error creating category:', error);
     return {
@@ -475,8 +489,11 @@ async function updateCategory(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'skills', operation: 'update' });
-    return { success: true, data };
+    const revalidation = await invalidatePublicContent({
+      entity: 'skills',
+      operation: 'update',
+    });
+    return { success: true, data, revalidation };
   } catch (error) {
     console.error('Error updating category:', error);
     return {
@@ -513,8 +530,11 @@ async function deleteCategory(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'skills', operation: 'delete' });
-    return { success: true };
+    const revalidation = await invalidatePublicContent({
+      entity: 'skills',
+      operation: 'delete',
+    });
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting category:', error);
     return {

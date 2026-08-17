@@ -18,6 +18,7 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { ContactsPreview } from '@/components/common/cms/previews/ContactsPreview';
@@ -135,6 +136,8 @@ export default function ContactsSection() {
           resume_en: data.resume_en || heroSection?.resume_en || null,
           resume_it: data.resume_it || heroSection?.resume_it || null,
         });
+        const heroWarning = revalidationWarning(result);
+        if (heroWarning) errors.push(heroWarning);
         resumeEnUpload.clearFile();
         resumeItUpload.clearFile();
       }
@@ -169,6 +172,8 @@ export default function ContactsSection() {
         : [],
     });
     if (!batch.success && batch.error) errors.push(batch.error);
+    const batchWarning = revalidationWarning(batch);
+    if (batchWarning) errors.push(batchWarning);
     if (transDirty) { const tErrs = await saveTranslations(); errors.push(...tErrs); }
     await fetchData();
     setModifiedIds(new Set()); setNewContacts([]); setDeletedIds(new Set()); setOrderChanged(false); setIsUpdating(false);

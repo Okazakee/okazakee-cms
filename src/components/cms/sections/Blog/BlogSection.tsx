@@ -15,6 +15,7 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { BlogPreview } from '@/components/common/cms/previews/BlogPreview';
@@ -159,6 +160,8 @@ export default function BlogSection() {
       deletes: Array.from(deletedIds),
     });
     if (!batch.success && batch.error) errors.push(batch.error);
+    const revalidationMessage = revalidationWarning(batch);
+    if (revalidationMessage) errors.push(revalidationMessage);
 
     if (transDirty) { const te = await saveTranslations(); errors.push(...te); }
     await fetchData();

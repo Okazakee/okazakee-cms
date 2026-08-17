@@ -15,6 +15,7 @@ import {
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type BlogOperation =
@@ -77,11 +78,7 @@ type CreateBlogData = {
 
 type UpdateBlogData = Partial<CreateBlogData>;
 
-type BlogResult = {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-};
+type BlogResult = MutationResult;
 
 // Validation functions
 function validateBlogData(data: CreateBlogData | UpdateBlogData): {
@@ -372,12 +369,13 @@ async function batchPublishBlog(
       }
     }
 
+    let revalidation: RevalidationStatus | undefined;
     if (
       operation.creates.length > 0 ||
       operation.updates.length > 0 ||
       operation.deletes.length > 0
     ) {
-      await invalidatePublicContent({
+      revalidation = await invalidatePublicContent({
         entity: 'blog',
         operation: 'publish',
         ids: [
@@ -391,6 +389,7 @@ async function batchPublishBlog(
       success: errors.length === 0,
       data: { created, updated },
       error: errors.length > 0 ? errors.join('\n') : undefined,
+      revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing blog posts:', error);
@@ -480,8 +479,11 @@ async function createBlog(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'blog', operation: 'create' });
-    return { success: true, data: newBlog };
+    const revalidation = await invalidatePublicContent({
+      entity: 'blog',
+      operation: 'create',
+    });
+    return { success: true, data: newBlog, revalidation };
   } catch (error) {
     console.error('Error creating blog post:', error);
     return {
@@ -528,8 +530,12 @@ async function updateBlog(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'blog', operation: 'update', id });
-    return { success: true, data: updatedBlog };
+    const revalidation = await invalidatePublicContent({
+      entity: 'blog',
+      operation: 'update',
+      id,
+    });
+    return { success: true, data: updatedBlog, revalidation };
   } catch (error) {
     console.error('Error updating blog post:', error);
     return {
@@ -574,8 +580,12 @@ async function deleteBlog(
 
     if (error) throw error;
 
-    await invalidatePublicContent({ entity: 'blog', operation: 'delete', id });
-    return { success: true };
+    const revalidation = await invalidatePublicContent({
+      entity: 'blog',
+      operation: 'delete',
+      id,
+    });
+    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting blog post:', error);
     return {
@@ -752,7 +762,7 @@ async function uploadBlogImage(
       upload.path
     );
 
-    await invalidatePublicContent({
+    const revalidation = await invalidatePublicContent({
       entity: 'blog',
       operation: 'asset-update',
       id: blogId,
@@ -761,6 +771,7 @@ async function uploadBlogImage(
     return {
       success: true,
       data: { image: upload.publicUrl, blurhashURL: prepared.image.blurhash },
+      revalidation,
     };
   } catch (error) {
     console.error('Error uploading blog image:', error);
