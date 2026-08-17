@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { encode as blurkitEncode } from 'blurkit/node';
-import sharp from 'sharp';
 import { findAllowedCmsUser, getUserGithubUsername } from './auth';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
@@ -174,6 +173,10 @@ export async function processImage(
   file: File,
   options?: ProcessImageOptions
 ): Promise<ProcessImageResult> {
+  // Lazy-load sharp: importing it statically pulls the native addon into the
+  // module graph of every CMS action (dashboard boot included). Dynamic
+  // import keeps the addon out of the critical path.
+  const sharp = (await import('sharp')).default;
   try {
     const maxWidth = options?.maxWidth;
     const maxHeight = options?.maxHeight || DEFAULT_MAX_HEIGHT;

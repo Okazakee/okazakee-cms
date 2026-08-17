@@ -49,8 +49,10 @@ const nextConfig: NextConfig = {
     deviceSizes: [640, 768, 1024, 1280],
     imageSizes: [256, 384, 512],
   },
-  // Ensure sharp is bundled correctly for serverless
-  serverExternalPackages: ['sharp'],
+  // NOTE: sharp is intentionally NOT in serverExternalPackages. Externalizing
+  // it broke sharp's __dirname-relative native requires under Turbopack's
+  // external module loader at runtime (ERR_DLOPEN_FAILED on libvips). Letting
+  // Turbopack handle the native addon (copy + resolve) works on Vercel.
   cacheComponents: true,
   async headers() {
     return [
