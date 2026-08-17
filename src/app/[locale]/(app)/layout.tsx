@@ -1,4 +1,13 @@
+import type { Metadata } from 'next';
 import { connection } from 'next/server';
+
+export const metadata: Metadata = {
+  title: {
+    default: 'Okazakee CMS',
+    template: '%s · Okazakee CMS',
+  },
+  description: 'Content management for okazakee.dev',
+};
 
 export default async function AppLayout({
   children,

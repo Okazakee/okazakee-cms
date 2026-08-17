@@ -15,16 +15,11 @@ export const appEnv =
 export const isProductionEnv = appEnv === 'production';
 
 export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-// Publishable API key (sb_publishable_...) — safe for public code. Falls back
-// to the legacy anon key while the migration is in progress.
+// Publishable API key (sb_publishable_...) — safe for public code.
 export const supabasePublishableKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
-  '';
-// Server-only secret API key (sb_secret_...) — NEVER in public code. Falls
-// back to the legacy service_role key until the migration is complete.
-export const supabaseServerSecret =
-  process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
+// Server-only secret API key (sb_secret_...) — NEVER in public code.
+export const supabaseServerSecret = process.env.SUPABASE_SECRET_KEY ?? '';
 
 export function parsePositiveInt(raw: string | undefined): number | null {
   if (!raw) return null;
