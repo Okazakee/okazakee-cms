@@ -1,6 +1,7 @@
 'use server';
 
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import { cmsConfig } from '@/config/cms';
 import { invalidateContent } from '@/libs/cms/invalidate';
 import { refresh } from 'next/cache';
 import {
@@ -304,17 +305,10 @@ async function addEmailUser(
       };
     }
 
-    // Send password reset email so they can set their own password
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    await adminClient.auth.admin.generateLink({
-      type: 'recovery',
-      email: normalizedEmail,
-      options: {
-        redirectTo: `${siteUrl}/cms`,
-      },
-    });
-
-    // Also trigger the actual email
+    // Send password reset email so they can set their own password.
+    // Canonical CMS origin; locale-aware recovery destination.
+    const siteUrl =
+      cmsConfig.cmsPublicUrl || 'http://localhost:3000';
     const { error: emailError } = await adminClient.auth.resetPasswordForEmail(
       normalizedEmail,
       {

@@ -34,14 +34,6 @@ const LOCALE_PATTERN = new RegExp(`^/(${LOCALES.join('|')})(?:/|$)`);
 const STATIC_ASSET_PATTERN = /\.[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*$/;
 const CMS_ROUTE_PATTERN = /^\/[a-z]{2}\/cms(?:\/.*)?$/;
 const LOCALE_COOKIE_PATTERN = /^[a-zA-Z0-9_-]+$/;
-const BOT_PROBE_PATTERNS = [
-  /^\/(?:wp-admin(?:\/|$)|wp-content(?:\/|$)|wp-includes(?:\/|$)|wp-json(?:\/|$)|wp-login\.php$|xmlrpc\.php$|phpmyadmin(?:\/|$))/i,
-  /^\/wp-[a-z0-9-]+\.php(?:$|[/?#])/i,
-  /^\/(?:index|install|setup|config|admin|login|backup|shell|test)\.php(?:$|[/?#])/i,
-  /^\/(?:vendor\/phpunit|cgi-bin)(?:\/|$)/i,
-  /(?:^|\/)\.(?:env|git|docker)(?:$|[/.])/i,
-  /^\/(?:sitemap(?:\.[a-z0-9_-]+)?|news_sitemap\.xml)(?:\/|%2f).+/i,
-];
 const ACCEPT_LANGUAGE_PATTERN =
   /^([a-z]{2})(?:-[a-z]{2})?(?:;q=[0-9.]+)?(?:,|$)/i;
 
@@ -73,10 +65,6 @@ function extractLocaleFromPath(pathname: string): string | null {
 
 function isCMSRoute(pathname: string): boolean {
   return CMS_ROUTE_PATTERN.test(pathname);
-}
-
-function isBotProbePath(pathname: string): boolean {
-  return BOT_PROBE_PATTERNS.some((pattern) => pattern.test(pathname));
 }
 
 function validatePathname(pathname: string): string {
@@ -215,10 +203,6 @@ export default async function proxy(request: NextRequest) {
   // Check redirect loop prevention
   if (request.headers.get(REDIRECT_HEADER)) {
     return NextResponse.next();
-  }
-
-  if (isBotProbePath(pathname)) {
-    return new NextResponse(null, { status: 404 });
   }
 
   // Skip processing for static assets, API routes - matches old matcher behavior

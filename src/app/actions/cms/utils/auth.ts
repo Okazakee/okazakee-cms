@@ -1,3 +1,4 @@
+import { cmsConfig } from '@/config/cms';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 
 export const CMS_ALLOWED_ROLES = ['admin', 'editor'] as const;
@@ -33,15 +34,14 @@ export function getSafeCmsNext(rawNext: string | null | undefined): string {
 }
 
 export function getRequestOrigin(request: Request): string {
-  const url = new URL(request.url);
-  const forwardedHost = request.headers.get('x-forwarded-host');
-  const forwardedProto = request.headers.get('x-forwarded-proto') || 'https';
-
-  if (forwardedHost && process.env.NODE_ENV !== 'development') {
-    return `${forwardedProto}://${forwardedHost}`;
+  const canonical = cmsConfig.cmsPublicUrl;
+  if (canonical && process.env.NODE_ENV !== 'development') {
+    // Deterministic production origin: never rebuild it from forwarded
+    // request headers when a canonical CMS_PUBLIC_URL is configured.
+    return canonical;
   }
 
-  return url.origin;
+  return new URL(request.url).origin;
 }
 
 export function getUserGithubUsername(user: User): string | null {
