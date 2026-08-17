@@ -1,5 +1,4 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import createMiddleware from 'next-intl/middleware';
 import { updateSession } from '@/utils/supabase/middleware';
 
 // Environment-based configuration with validation
@@ -32,7 +31,6 @@ const REDIRECT_HEADER = 'x-redirected';
 const LOCALE_SET = new Set(LOCALES);
 const LOCALE_PATTERN = new RegExp(`^/(${LOCALES.join('|')})(?:/|$)`);
 const STATIC_ASSET_PATTERN = /\.[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*$/;
-const CMS_ROUTE_PATTERN = /^\/[a-z]{2}\/cms(?:\/.*)?$/;
 const LOCALE_COOKIE_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const ACCEPT_LANGUAGE_PATTERN =
   /^([a-z]{2})(?:-[a-z]{2})?(?:;q=[0-9.]+)?(?:,|$)/i;
@@ -48,12 +46,6 @@ const PATH_TRAVERSAL_PATTERNS = [
   /[\u007f-\u009f]/, // Extended control characters
 ];
 
-const handleI18n = createMiddleware({
-  locales: LOCALES,
-  defaultLocale: DEFAULT_LOCALE,
-  localeDetection: true,
-});
-
 function isValidLocale(locale: string | null | undefined): locale is string {
   return typeof locale === 'string' && LOCALE_SET.has(locale);
 }
@@ -61,10 +53,6 @@ function isValidLocale(locale: string | null | undefined): locale is string {
 function extractLocaleFromPath(pathname: string): string | null {
   const match = pathname.match(LOCALE_PATTERN);
   return match?.[1] && isValidLocale(match[1]) ? match[1] : null;
-}
-
-function isCMSRoute(pathname: string): boolean {
-  return CMS_ROUTE_PATTERN.test(pathname);
 }
 
 function validatePathname(pathname: string): string {
@@ -128,21 +116,6 @@ function createRedirectResponse(
   const response = NextResponse.redirect(url);
   response.headers.set(REDIRECT_HEADER, 'true');
   return response;
-}
-
-function handleAuthError(
-  request: NextRequest,
-  locale: string,
-  error: unknown
-): NextResponse {
-  console.error('Authentication failed for CMS route:', {
-    pathname: request.nextUrl.pathname,
-    locale,
-    error: error instanceof Error ? error.message : 'Unknown error',
-    timestamp: new Date().toISOString(),
-  });
-
-  return createRedirectResponse(request, '/cms/login', locale);
 }
 
 function handleMiddlewareError(
@@ -213,30 +186,39 @@ export default async function proxy(request: NextRequest) {
     const currentLocale = extractLocaleFromPath(pathname);
     const hasLocale = currentLocale !== null;
 
-    // Handle CMS routes authentication
-    if (hasLocale && isCMSRoute(pathname)) {
+    if (hasLocale) {
+      // Legacy pre-root-move paths: /{locale}/cms... -> /{locale}...
+      // (old bookmarks, public-site redirects that preserved the path).
+      if (pathname.includes('/cms')) {
+        return createRedirectResponse(
+          request,
+          pathname.replace(/\/cms/, ''),
+          currentLocale
+        );
+      }
+
       try {
         const response = await updateSession(request, currentLocale);
         if (response instanceof NextResponse) {
-          response.headers.set('x-cms-route', 'true');
           return response;
         }
-        const nextResponse = NextResponse.next();
-        nextResponse.headers.set('x-cms-route', 'true');
-        return nextResponse;
+        return NextResponse.next();
       } catch (authError) {
-        return handleAuthError(request, currentLocale, authError);
+        console.error('CMS session handling failed:', {
+          pathname,
+          error:
+            authError instanceof Error
+              ? authError.message
+              : 'Unknown error',
+        });
+        return createRedirectResponse(request, '/login', currentLocale);
       }
-    }
-
-    if (hasLocale) {
-      return handleI18n(request);
     }
 
     const locale = getPreferredLocale(request);
 
     if (pathname === '/') {
-      return createRedirectResponse(request, '/cms/login', locale);
+      return createRedirectResponse(request, '/', locale);
     }
 
     return createRedirectResponse(request, pathname, locale);

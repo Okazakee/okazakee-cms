@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 
         if (!user) {
           logCmsAuth('callback-missing-user', { locale });
-          const errorUrl = new URL(`/${locale}/cms/login`, origin);
+          const errorUrl = new URL(`/${locale}/login`, origin);
           errorUrl.searchParams.set('error', 'Authentication failed');
           return NextResponse.redirect(errorUrl);
         }
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
 
         await syncCmsUserProfile(user);
 
-        const readyUrl = new URL(`/${locale}/cms/auth/ready`, origin);
+        const readyUrl = new URL(`/${locale}/auth/ready`, origin);
         readyUrl.searchParams.set('next', next);
         return NextResponse.redirect(readyUrl);
       }

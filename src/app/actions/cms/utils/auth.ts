@@ -28,9 +28,10 @@ export function logCmsAuth(
 }
 
 export function getSafeCmsNext(rawNext: string | null | undefined): string {
-  return rawNext?.startsWith('/cms') && !rawNext.startsWith('//')
+  // Same-origin paths only; never protocol-relative or external URLs.
+  return rawNext?.startsWith('/') && !rawNext.startsWith('//')
     ? rawNext
-    : '/cms';
+    : '/';
 }
 
 export function getRequestOrigin(request: Request): string {

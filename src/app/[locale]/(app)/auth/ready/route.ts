@@ -29,7 +29,7 @@ export async function GET(request: Request) {
         locale,
         error: error?.message || null,
       });
-      const loginUrl = new URL(`/${locale}/cms/login`, origin);
+      const loginUrl = new URL(`/${locale}/login`, origin);
       loginUrl.searchParams.set('error', 'Authentication not ready yet. Please try again.');
       return NextResponse.redirect(loginUrl);
     }

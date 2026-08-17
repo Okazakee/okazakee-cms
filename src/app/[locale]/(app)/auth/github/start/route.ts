@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const locale = localeMatch?.[1] || 'en';
   const next = getSafeCmsNext(requestUrl.searchParams.get('next'));
   const origin = getRequestOrigin(request);
-  const redirectTo = `${origin}/${locale}/cms/auth/callback?next=${encodeURIComponent(next)}`;
+  const redirectTo = `${origin}/${locale}/auth/callback?next=${encodeURIComponent(next)}`;
 
   try {
     const supabase = await createClient();
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
     });
 
     if (error || !data.url) {
-      const errorUrl = new URL(`/${locale}/cms/login`, origin);
+      const errorUrl = new URL(`/${locale}/login`, origin);
       errorUrl.searchParams.set('error', 'Failed to start GitHub login');
       return NextResponse.redirect(errorUrl);
     }

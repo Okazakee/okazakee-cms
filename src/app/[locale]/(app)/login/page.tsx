@@ -8,10 +8,8 @@ import { login } from '@/app/actions/cms/login';
 
 // Component that reads search params - must be wrapped in Suspense
 function LoginFormContent({
-  locale,
   initialError,
 }: {
-  locale: string;
   initialError?: string | null;
 }) {
   const [email, setEmail] = useState('');
@@ -20,6 +18,8 @@ function LoginFormContent({
   const [isLoading, setIsLoading] = useState(false);
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
   const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const locale = pathname.split('/')[1] || 'en';
 
   // Check for error from OAuth callback
   useEffect(() => {
@@ -47,7 +47,7 @@ function LoginFormContent({
   const handleGitHubLogin = async () => {
     setIsGitHubLoading(true);
     setError(null);
-    window.location.href = `/${locale}/cms/auth/github/start`;
+    window.location.href = `/${locale}/auth/github/start`;
   };
 
   return (
@@ -120,9 +120,6 @@ function LoginFormContent({
 
 // Main page component with Suspense boundary
 export default function LoginPage() {
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
-
   return (
     <section className="my-52 flex items-center justify-center">
       <div className="p-8 rounded-xl w-full max-w-md border border-main">
@@ -134,7 +131,7 @@ export default function LoginPage() {
             </div>
           }
         >
-          <LoginFormContent locale={locale} />
+          <LoginFormContent />
         </Suspense>
       </div>
     </section>

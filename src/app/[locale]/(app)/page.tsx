@@ -73,7 +73,7 @@ export default function CMS() {
         const bootData = await getCmsBootData();
 
         if (bootData.status === 'unauthenticated') {
-          window.location.href = `/${locale}/cms/login`;
+          window.location.href = `/${locale}/login`;
           return;
         }
 
@@ -81,7 +81,7 @@ export default function CMS() {
           const errorMessage = encodeURIComponent(
             'Access denied. Please contact the administrator.'
           );
-          window.location.href = `/${locale}/cms/login?error=${errorMessage}`;
+          window.location.href = `/${locale}/login?error=${errorMessage}`;
           return;
         }
 

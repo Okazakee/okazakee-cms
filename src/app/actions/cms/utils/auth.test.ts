@@ -24,18 +24,17 @@ function makeUser(overrides: Partial<User> = {}): User {
 
 describe('getSafeCmsNext', () => {
   it('keeps internal /cms paths', () => {
-    expect(getSafeCmsNext('/cms/blog')).toBe('/cms/blog');
+    expect(getSafeCmsNext('/login')).toBe('/login');
   });
 
   it('falls back to /cms for null/undefined', () => {
-    expect(getSafeCmsNext(null)).toBe('/cms');
-    expect(getSafeCmsNext(undefined)).toBe('/cms');
+    expect(getSafeCmsNext(null)).toBe('/');
+    expect(getSafeCmsNext(undefined)).toBe('/');
   });
 
   it('rejects protocol-relative and external URLs', () => {
-    expect(getSafeCmsNext('//evil.com')).toBe('/cms');
-    expect(getSafeCmsNext('https://evil.com')).toBe('/cms');
-    expect(getSafeCmsNext('/login')).toBe('/cms');
+    expect(getSafeCmsNext('//evil.com')).toBe('/');
+    expect(getSafeCmsNext('https://evil.com')).toBe('/');
   });
 });
 

@@ -78,5 +78,5 @@ export async function login(email: string, password: string) {
   }
 
   refresh();
-  return { success: true, redirectTo: '/cms/auth/ready?next=/cms' };
+  return { success: true, redirectTo: '/auth/ready?next=/' };
 }

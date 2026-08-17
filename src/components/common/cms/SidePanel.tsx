@@ -104,7 +104,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     setHeroSection(null);
     const supabase = createClient();
     await supabase.auth.signOut();
-    window.location.href = `/${locale}/cms/login`;
+    window.location.href = `/${locale}/login`;
   };
 
   const pendingCount = Object.values(publishQueue).reduce(

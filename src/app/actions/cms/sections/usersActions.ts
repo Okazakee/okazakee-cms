@@ -312,7 +312,7 @@ async function addEmailUser(
     const { error: emailError } = await adminClient.auth.resetPasswordForEmail(
       normalizedEmail,
       {
-        redirectTo: `${siteUrl}/cms`,
+        redirectTo: `${siteUrl}/`,
       }
     );
 
