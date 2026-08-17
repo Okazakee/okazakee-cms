@@ -11,7 +11,6 @@ import {
   validatePdfFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidateContent } from '@/libs/cms/invalidate';
-import { getHeroSection, getResumeLink } from '@/utils/getData';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
@@ -81,7 +80,7 @@ export async function heroActions(
   try {
     switch (operation.type) {
       case 'GET':
-        return await getHeroData();
+        return await getHeroData(supabase);
 
       case 'UPDATE':
         return await updateHero(supabase, operation.data);
@@ -123,10 +122,17 @@ export async function heroActions(
   }
 }
 
-async function getHeroData(): Promise<HeroResult> {
+async function getHeroData(supabase: SupabaseClient): Promise<HeroResult> {
+  // Uncached direct reads: editors must see current DB state immediately.
   try {
-    const heroSection = await getHeroSection();
-    const resumeData = await getResumeLink();
+    const { data: heroSection } = await supabase
+      .from('hero_section')
+      .select('id, propic, blurhashURL')
+      .single();
+    const { data: resumeData } = await supabase
+      .from('hero_section')
+      .select('resume_en, resume_it')
+      .single();
 
     if (!heroSection) {
       return {

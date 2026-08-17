@@ -2,12 +2,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  generateBlurhashFromBuffer,
   getAdminClient,
   getCmsActionContext,
   getStoragePathFromPublicUrl,
   prepareImageUpload,
-  processImage,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   requireAllowedPostWriter,
@@ -17,7 +15,6 @@ import {
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { invalidateContent } from '@/libs/cms/invalidate';
-import { isValidBlurhash } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
 
 type BlogOperation =
@@ -610,55 +607,31 @@ async function uploadBlogImageForNewPost(
     }
 
     const admin = getAdminClient();
-    const isWebP = file.type === 'image/webp';
-    let buffer: Buffer;
-    let blurhash: string | undefined;
-    let format: 'webp' | 'png' = 'webp';
 
-    if (isWebP) {
-      const arrayBuffer = await file.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
-      blurhash = isValidBlurhash(blurhashURL)
-        ? blurhashURL
-        : await generateBlurhashFromBuffer(buffer);
-    } else {
-      const processed = await processImage(file);
-      if (!processed.success || !processed.buffer) {
-        return {
-          success: false,
-          error: processed.error || 'Failed to process image',
-        };
-      }
-      buffer = processed.buffer;
-      blurhash = isValidBlurhash(blurhashURL)
-        ? blurhashURL
-        : processed.blurhash;
-      format = processed.format ?? 'webp';
+    // Shared format-aware pipeline: extension + MIME follow the actual
+    // processed format (WebP passthrough or Sharp fallback to PNG).
+    const prepared = await prepareImageUpload(file, blurhashURL);
+    if (!prepared.success) {
+      return {
+        success: false,
+        error: prepared.error,
+      };
     }
 
     const sanitizedTitle = sanitizeFilename(titleEn || 'untitled');
-    const fileName = `Website Assets/blog/${Date.now()}-${sanitizedTitle}.webp`;
-
-    const { error: uploadError } = await admin.storage
-      .from('website')
-      .upload(fileName, buffer, {
-        cacheControl: '3600',
-        contentType: format === 'png' ? 'image/png' : 'image/webp',
-        upsert: true,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data: urlData } = admin.storage
-      .from('website')
-      .getPublicUrl(fileName);
+    const upload = await uploadPreparedImage(
+      admin,
+      'website',
+      `Website Assets/blog/${Date.now()}-${sanitizedTitle}`,
+      prepared.image
+    );
 
     return {
       success: true,
       data: {
-        image: urlData.publicUrl,
-        blurhashURL: blurhash ?? '',
-        path: fileName,
+        image: upload.publicUrl,
+        blurhashURL: prepared.image.blurhash,
+        path: upload.path,
       },
     };
   } catch (error) {
@@ -729,77 +702,65 @@ async function uploadBlogImage(
       return { success: false, error: 'Blog post not found' };
     }
 
-    const isWebP = file.type === 'image/webp';
-    let buffer: Buffer;
-    let blurhash: string | undefined;
-    let format: 'webp' | 'png' = 'webp';
-
-    if (isWebP) {
-      const arrayBuffer = await file.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
-      blurhash = isValidBlurhash(blurhashURL)
-        ? blurhashURL
-        : await generateBlurhashFromBuffer(buffer);
-    } else {
-      const processed = await processImage(file);
-      if (!processed.success || !processed.buffer) {
-        return {
-          success: false,
-          error: processed.error || 'Failed to process image',
-        };
-      }
-      buffer = processed.buffer;
-      blurhash = isValidBlurhash(blurhashURL)
-        ? blurhashURL
-        : processed.blurhash;
-      format = processed.format ?? 'webp';
+    // Shared format-aware pipeline: extension + MIME follow the actual
+    // processed format (WebP passthrough or Sharp fallback to PNG).
+    const prepared = await prepareImageUpload(file, blurhashURL);
+    if (!prepared.success) {
+      return {
+        success: false,
+        error: prepared.error,
+      };
     }
 
     const sanitizedTitle = sanitizeFilename(
       existingBlog.title_en || 'untitled'
     );
-    const fileName = `Website Assets/blog/${blogId}-${sanitizedTitle}.webp`;
+    const pathBase = `Website Assets/blog/${blogId}-${sanitizedTitle}`;
 
-    await admin.storage.from('website').remove([fileName]);
+    // Remove any previously stored variant for this post (webp or png)
+    await admin.storage.from('website').remove([
+      `${pathBase}.webp`,
+      `${pathBase}.png`,
+    ]);
 
-    const { error: uploadError } = await admin.storage
-      .from('website')
-      .upload(fileName, buffer, {
-        cacheControl: '3600',
-        contentType: format === 'png' ? 'image/png' : 'image/webp',
-        upsert: true,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data: urlData } = admin.storage
-      .from('website')
-      .getPublicUrl(fileName);
+    const upload = await uploadPreparedImage(
+      admin,
+      'website',
+      pathBase,
+      prepared.image
+    );
 
     const updateData: { image: string; blurhashURL?: string | null } = {
-      image: urlData.publicUrl,
+      image: upload.publicUrl,
     };
-    if (blurhash !== undefined) {
-      updateData.blurhashURL = blurhash || null;
-    }
+    updateData.blurhashURL = prepared.image.blurhash || null;
 
     const { error: updateError } = await admin
       .from('blog_posts')
       .update(updateData)
       .eq('id', blogId);
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      await admin.storage.from('website').remove([upload.path]);
+      throw updateError;
+    }
 
     await removePublicFileIfDifferent(
       admin,
       currentImageUrl,
       'website',
-      fileName
+      upload.path
     );
+
+    invalidateContent({
+      entity: 'blog',
+      operation: 'asset-update',
+      id: blogId,
+    });
 
     return {
       success: true,
-      data: { image: urlData.publicUrl, blurhashURL: blurhash },
+      data: { image: upload.publicUrl, blurhashURL: prepared.image.blurhash },
     };
   } catch (error) {
     console.error('Error uploading blog image:', error);

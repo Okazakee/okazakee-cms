@@ -20,7 +20,6 @@ import {
 import { invalidateContent } from '@/libs/cms/invalidate';
 import type { CareerEntry } from '@/types/fetchedData.types';
 import { isValidBlurhash } from '@/utils/blurhashUtils';
-import { getCareerEntries } from '@/utils/getData';
 import { createClient } from '@/utils/supabase/server';
 
 type CareerOperation =
@@ -407,9 +406,16 @@ async function batchPublishCareer(
   }
 }
 
-async function getCareerData(_supabase: SupabaseClient): Promise<CareerResult> {
+async function getCareerData(supabase: SupabaseClient): Promise<CareerResult> {
+  // Uncached direct read: editors must see current DB state immediately.
   try {
-    const careerEntries = await getCareerEntries();
+    const { data: careerEntries, error } = await supabase
+      .from('career_entries')
+      .select('*')
+      .order('id', { ascending: false });
+
+    if (error) throw error;
+
     return {
       success: true,
       data: careerEntries?.map(normalizeCareerEntry) ?? null,
