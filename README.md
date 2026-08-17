@@ -89,12 +89,11 @@ identifiers stored as sha256 hashes), plus `cms_clear_login_rate` which resets
 both buckets after a successful login. RPC execution is restricted to the
 service role; stale rows are purged hourly by a scheduled `pg_cron` job.
 
-> **Rolling deployment:** the legacy single-identifier
-> `cms_check_login_rate(text)` (and its temporary anon/authenticated grant)
-> is retained by the migrations until the split-bucket CMS code is live.
-> Apply both migrations → deploy the CMS → smoke-test login → then apply the
-> follow-up cleanup migration documented in the migration headers (revoke the
-> old grant and drop the old function).
+> **Rolling deployment (history):** the legacy single-identifier
+> `cms_check_login_rate(text)` and its temporary anon/authenticated grant were
+> retained by the migrations until the split-bucket CMS was live, then removed
+> by `20260818110000_remove_legacy_login_rate_rpc.sql`. The limiter is now
+> service-role only.
 
 ## Scripts
 
