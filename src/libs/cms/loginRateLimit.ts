@@ -4,10 +4,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 /**
  * Durable login rate limiter backed by Supabase/Postgres.
  *
- * Activation: apply supabase/migrations/20260817100000_cms_login_rate_limit.sql
- * (supabase db push), then switch login.ts from checkLoginRateLimit to
-* must be applied first). See the pre-cutover checklist in
- * docs/cms-decoupling/implementation-log.md.
+ * Requires the migrations in supabase/migrations/:
+ * - 20260817100000_cms_login_rate_limit.sql (table + RPCs);
+ * - 20260818090000_harden_login_rate_limit.sql (grants, RLS, scheduled purge).
+ *
+ * The RPC is invoked with the service-role client (getCmsAdminClient) — RPC
+ * execution is revoked from anon/authenticated.
  *
  * Policy: 5 attempts / minute per identifier, 15-minute lockout.
  */

@@ -3,6 +3,7 @@
 import { refresh } from 'next/cache';
 import { headers } from 'next/headers';
 import { findAllowedCmsUser, getUserGithubUsername } from './utils/auth';
+import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import {
   checkLoginRateLimitDurable,
   normalizeLoginRateIdentifier,
@@ -34,10 +35,13 @@ export async function login(email: string, password: string) {
   const supabase = await createClient();
 
   // Rate limit by both IP and email (durable Postgres-backed limiter;
-  // identifiers stored as hashes, never raw email/IP).
+  // identifiers stored as hashes, never raw email/IP). The RPC is invoked
+  // with the service-role client: migration 20260818090000_harden_login_rate_limit.sql
+  // revokes cms_check_login_rate execution from anon/authenticated, so the
+  // browser-facing (publishable-key) client can no longer call it.
   const rateLimitKey = `login:${clientIp}:${email.toLowerCase()}`;
   const rateLimit = await checkLoginRateLimitDurable(
-    supabase,
+    getCmsAdminClient(),
     normalizeLoginRateIdentifier(rateLimitKey)
   );
 
