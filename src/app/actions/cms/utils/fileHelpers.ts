@@ -87,50 +87,21 @@ export async function getCmsActionContext(
 }
 
 /**
- * Verifies the user is authenticated before allowing CMS operations
- * Returns the authenticated user or throws an error
+ * Verifies the user is authenticated before allowing CMS operations.
+ * Delegates to the canonical authorization implementation.
  */
 export async function requireAuth(): Promise<{ id: string; email: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) {
-    throw new Error('Unauthorized: Authentication required');
-  }
-
-  return { id: user.id, email: user.email || '' };
+  const context = await getCmsActionContext();
+  return { id: context.user.id, email: context.user.email };
 }
 
 /**
- * Verifies the user is an admin before allowing admin-only CMS operations
- * Returns the authenticated user or throws an error
+ * Verifies the user is an admin before allowing admin-only CMS operations.
+ * Delegates to the canonical authorization implementation.
  */
 export async function requireAdmin(): Promise<{ id: string; email: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) {
-    throw new Error('Unauthorized: Authentication required');
-  }
-
-  // Check if user is admin - try by email first, then GitHub username
-  const allowedUser = await findAllowedCmsUser(
-    supabase,
-    user.email,
-    getUserGithubUsername(user)
-  );
-
-  if (allowedUser?.role !== 'admin') {
-    throw new Error('Unauthorized: Admin access required');
-  }
-
-  return { id: user.id, email: user.email || '' };
+  const context = await getCmsActionContext('admin');
+  return { id: context.user.id, email: context.user.email };
 }
 
 /** Roles that are allowed to create/update blog and portfolio posts (must match RLS if using JWT role) */
@@ -139,40 +110,19 @@ const CMS_POST_WRITER_ROLES = ['admin', 'editor'] as const;
 /**
  * Verifies the user is in cms_allowed_users with a role that can create posts.
  * Use this before INSERT on blog_posts/portfolio_posts when RLS expects JWT role (which we don't set).
+ * Delegates to the canonical authorization implementation.
  */
 export async function requireAllowedPostWriter(): Promise<{
   id: string;
   email: string;
   role: string;
 }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  if (error || !user) {
-    throw new Error('Unauthorized: Authentication required');
-  }
-
-  const allowedUser = await findAllowedCmsUser(
-    supabase,
-    user.email,
-    getUserGithubUsername(user)
-  );
-
-  if (
-    !allowedUser ||
-    !CMS_POST_WRITER_ROLES.includes(
-      allowedUser.role as (typeof CMS_POST_WRITER_ROLES)[number]
-    )
-  ) {
-    throw new Error(
-      'Unauthorized: You do not have permission to create or edit posts'
-    );
-  }
-
-  return { id: user.id, email: user.email || '', role: allowedUser.role };
+  const context = await getCmsActionContext('post-writer');
+  return {
+    id: context.user.id,
+    email: context.user.email,
+    role: context.role ?? '',
+  };
 }
 
 /**

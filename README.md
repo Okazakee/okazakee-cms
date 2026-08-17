@@ -186,3 +186,25 @@ Extracted from `Okazakee/okazakee-ws` at commit `234b064` (beta branch,
 remains the historical source of truth for pre-extraction history.
 
 See `docs/cms-decoupling/` for the migration plan artifacts.
+
+---
+
+## Auth and account semantics
+
+- **Login:** email/password or GitHub OAuth, allowlist-gated (`cms_allowed_users`:
+  email match OR GitHub username match) with roles `admin` / `editor`.
+- **Roles:** admin = all sections + user management; editor = blog/portfolio +
+  account. Authorization is enforced server-side in every Server Action; the
+  hidden navigation is never an authorization mechanism.
+- **User management (admin only):** add email user (invite via password reset
+  email), add GitHub user, add dummy author, change role, remove user. The
+  last admin cannot be demoted or removed.
+- **"Delete my account"** revokes CMS access: removes the allowlist row and the
+  `user_profiles` row, then signs out. It does NOT delete the Supabase Auth
+  identity or historical author attribution. Do not change this semantics
+  silently.
+- **Dummy authors** are auth users with `dummy-<uuid>@dummy.local` emails used
+  purely for post attribution; removing them also deletes the auth identity.
+- **Login rate limiting:** 5 attempts/minute, 15-minute lockout. The durable
+  Postgres-backed limiter (`supabase/migrations/20260817100000_cms_login_rate_limit.sql`)
+  replaces the process-local one before production cutover.
