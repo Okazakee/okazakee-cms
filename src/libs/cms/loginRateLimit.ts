@@ -11,7 +11,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  *   buckets, clear-on-success).
  *
  * The RPCs are invoked with the service-role client (getCmsAdminClient) —
- * execution is revoked from anon/authenticated.
+ * execution is revoked from anon/authenticated. The legacy single-identifier
+ * cms_check_login_rate(text) is retained (with its temporary anon grant) for
+ * rolling deployment and removed by a follow-up cleanup migration once this
+ * code is live — never write new code against it.
  *
  * Policy: two independent buckets per attempt — per-IP and per-email — each
  * 5 failures / minute with a 15-minute lockout. An attempt is allowed only

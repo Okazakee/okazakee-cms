@@ -22,9 +22,16 @@
 -- prefixed raw values (loginIp:<ip>, loginEmail:<email>); the raw values are
 -- never persisted.
 --
--- The single-argument cms_check_login_rate(text) is replaced by the
--- two-argument form. Grants mirror the hardening migration: execution is
--- service_role only.
+-- The single-argument cms_check_login_rate(text) is RETAINED for rolling
+-- deployment: the currently-deployed CMS still calls it (with the publishable
+-- key) until the split-bucket code is live. Once the new CMS is deployed and
+-- smoke-tested, apply the follow-up cleanup migration:
+--
+--   revoke execute on function cms_check_login_rate(text) from anon, authenticated;
+--   drop function if exists cms_check_login_rate(text);
+--
+-- (the anon/authenticated grant on the old RPC is retained for the same
+-- reason in 20260818090000_harden_login_rate_limit.sql.)
 --
 -- REVERSIBLE
 --   drop function cms_check_login_rate(text, text);
@@ -153,8 +160,10 @@ begin
 end;
 $$;
 
--- The old combined-identifier RPC is replaced by the two-bucket form.
-drop function if exists cms_check_login_rate(text);
+-- The old combined-identifier RPC is RETAINED for rolling deployment (see
+-- header): the currently-deployed CMS still calls it until the split-bucket
+-- code is live. The follow-up cleanup migration drops it afterwards.
+-- (was: drop function if exists cms_check_login_rate(text);)
 
 -- BEGIN GRANTS (excluded from unit tests: pglite has no anon/authenticated)
 revoke execute on function cms_check_login_rate(text, text) from anon, authenticated;

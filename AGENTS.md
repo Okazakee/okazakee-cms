@@ -351,4 +351,8 @@ typecheck (build first: fresh checkouts need `.next/types`).
 - **Never add a dependency with npm/yarn/pnpm** — always use `bun add`.
 - **Never export a component as default** unless it is a Next.js page or layout file. Use named exports.
 - **Never delete a Storage object before its DB write has committed** (see §4). Storage cleanup after a commit is best-effort and never throws.
-- **Never call the limiter RPCs with the publishable-key client** — execution is service_role only (use `getCmsAdminClient`).
+- **Never call the limiter RPCs with the publishable-key client** — execution
+  is service_role only (use `getCmsAdminClient`). Exception: the LEGACY
+  single-identifier `cms_check_login_rate(text)` keeps a temporary
+  anon/authenticated grant for rolling deployment until its cleanup migration
+  (see `supabase/migrations/` headers) — never write new code against it.
