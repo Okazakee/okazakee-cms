@@ -99,6 +99,15 @@ bun run lint      # Biome lint
 bun run test      # Vitest
 ```
 
+## Tests and CI
+
+Unit/integration tests run with Vitest (`bun run test`); suites cover the
+cache-tag vocabulary, invalidation descriptors, the mutation result contract,
+route matching, validators, auth helpers and the login rate limiter — the
+limiter SQL policy is executed against a real (WASM) Postgres via PGlite.
+CI (`.github/workflows/ci.yml`, `main` + PRs) runs install → lint → test →
+build → typecheck (`bunx tsc --noEmit`).
+
 ## Routes
 
 The CMS serves root paths (no `/cms` prefix):
