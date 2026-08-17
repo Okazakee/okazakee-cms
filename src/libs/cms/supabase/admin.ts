@@ -2,9 +2,7 @@ import {
   createClient as createSupabaseClient,
   type SupabaseClient,
 } from '@supabase/supabase-js';
-import { supabaseUrl } from '@/config/shared';
-
-const supabaseServerSecret = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+import { supabaseServerSecret, supabaseUrl } from '@/config/shared';
 
 let cachedClient: SupabaseClient | null = null;
 
