@@ -20,7 +20,7 @@ const PortfolioSection = dynamic(() => import('@/components/cms/sections/Portfol
 const PrivacyPolicySection = dynamic(() => import('@/components/cms/sections/Privacy/PrivacyPolicySection'), { ssr: false });
 const SkillsSection = dynamic(() => import('@/components/cms/sections/Skills/SkillsSection'), { ssr: false });
 const UsersSection = dynamic(() => import('@/components/cms/sections/Users/UsersSection'), { ssr: false });
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 
 export default function CMS() {
   const t = useTranslations('cms');
@@ -49,7 +49,7 @@ export default function CMS() {
     loading,
     error,
     user,
-  } = useLayoutStore();
+  } = useCmsStore();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [canShowError, setCanShowError] = useState(false);
   const [bootComplete, setBootComplete] = useState(false);

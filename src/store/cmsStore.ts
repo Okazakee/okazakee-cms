@@ -7,7 +7,7 @@ export interface PublishState {
   lastModified: number;
 }
 
-interface LayoutState {
+interface CmsState {
   user: CMSUser | null;
   sidePanelSections: string[];
   activeSection: string | null;
@@ -48,7 +48,7 @@ interface LayoutState {
   clearSectionCallbacks: () => void;
 }
 
-export const useLayoutStore = create<LayoutState>((set) => ({
+export const useCmsStore = create<CmsState>((set) => ({
   user: null,
   sidePanelSections: [],
   activeSection: 'hero',

@@ -15,7 +15,7 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { BlogPreview } from '@/components/common/cms/previews/BlogPreview';
 import { PostPreview } from '@/components/common/cms/previews/PostPreview';
@@ -38,7 +38,7 @@ const emptyForm: BlogFormData = {
 
 export default function BlogSection() {
   const t = useTranslations('cms');
-  const { user } = useLayoutStore();
+  const { user } = useCmsStore();
   const [posts, setPosts] = useState<EditablePost[]>([]);
   const [authors, setAuthors] = useState<Author[]>([]);
   const [isLoading, setIsLoading] = useState(true);

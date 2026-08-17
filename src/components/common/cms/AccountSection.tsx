@@ -17,12 +17,12 @@ import { useEffect, useRef, useState } from 'react';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
 import { updateMyProfile } from '@/app/actions/cms/sections/usersActions';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
 
 export default function AccountSection() {
   const t = useTranslations('cms');
-  const { user, setUser } = useLayoutStore();
+  const { user, setUser } = useCmsStore();
   const router = useRouter();
   const pathname = usePathname();
   const locale = pathname.split('/')[1] || 'en';

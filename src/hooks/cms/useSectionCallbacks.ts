@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 
 export function useSectionCallbacks(publish: () => Promise<void>, revert: () => void) {
   const publishRef = useRef(publish);
@@ -10,13 +10,13 @@ export function useSectionCallbacks(publish: () => Promise<void>, revert: () => 
   revertRef.current = revert;
 
   useEffect(() => {
-    const store = useLayoutStore.getState();
+    const store = useCmsStore.getState();
     store.setSectionCallbacks(
       async () => publishRef.current(),
       () => revertRef.current()
     );
     return () => {
-      useLayoutStore.getState().clearSectionCallbacks();
+      useCmsStore.getState().clearSectionCallbacks();
     };
   }, []);
 }

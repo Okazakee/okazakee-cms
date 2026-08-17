@@ -14,13 +14,13 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { HeroPreview } from '@/components/common/cms/previews/HeroPreview';
 
 export default function HeroSection() {
   const t = useTranslations('cms');
-  const { heroSection, setHeroSection } = useLayoutStore();
+  const { heroSection, setHeroSection } = useCmsStore();
 
   const [_isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);

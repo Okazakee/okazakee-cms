@@ -18,14 +18,14 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { ContactsPreview } from '@/components/common/cms/previews/ContactsPreview';
 import type { Contact } from '@/types/fetchedData.types';
 
 export default function ContactsSection() {
   const t = useTranslations('cms');
-  const { heroSection, setHeroSection } = useLayoutStore();
+  const { heroSection, setHeroSection } = useCmsStore();
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);

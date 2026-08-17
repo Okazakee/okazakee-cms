@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 
 export function useSectionDirty(sectionKey: string, isDirty: boolean) {
-  const register = useLayoutStore((s) => s.registerPublishState);
-  const unregister = useLayoutStore((s) => s.unregisterPublishState);
+  const register = useCmsStore((s) => s.registerPublishState);
+  const unregister = useCmsStore((s) => s.unregisterPublishState);
 
   useEffect(() => {
     if (!isDirty) return;

@@ -23,7 +23,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
-import { useLayoutStore } from '@/store/layoutStore';
+import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
 
 interface SidePanelProps {
@@ -68,7 +68,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     publishQueue,
     sidebarCollapsed,
     toggleSidebar,
-  } = useLayoutStore();
+  } = useCmsStore();
 
   const isAdmin = user?.role === 'admin';
 
@@ -337,14 +337,14 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             <div className="flex gap-1.5">
               <button
                 type="button"
-                onClick={() => useLayoutStore.getState().sectionRevertCallback?.()}
+                onClick={() => useCmsStore.getState().sectionRevertCallback?.()}
                 className="flex-1 px-2 py-1 text-xs bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors min-h-[28px]"
               >
                 {t('common.revert')}
               </button>
               <button
                 type="button"
-                onClick={() => useLayoutStore.getState().sectionPublishCallback?.()}
+                onClick={() => useCmsStore.getState().sectionPublishCallback?.()}
                 className="flex-1 px-2 py-1 text-xs bg-main hover:bg-secondary text-white rounded transition-colors min-h-[28px]"
               >
                 {t('common.publish')}
