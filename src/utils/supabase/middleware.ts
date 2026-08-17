@@ -6,6 +6,7 @@ import {
   getUserGithubUsername,
   logCmsAuth,
 } from '@/app/actions/cms/utils/auth';
+import { isAuthPagePath, isCmsPublicPath } from '@/utils/cmsRouteMatching';
 
 /* PLEASE REFER TO https://supabase.com/docs/guides/auth/server-side/nextjs?queryGroups=router&router=app */
 
@@ -23,26 +24,8 @@ function clearSupabaseAuthCookies(
 }
 
 // The whole app is the CMS: every route is protected except the public
-// auth paths (login + OAuth routes).
-const PUBLIC_PATHS = [
-  '/login',
-  '/auth/callback',
-  '/auth/github/start',
-  '/auth/ready',
-] as const;
-
-function isPublicPath(pathname: string, locale: string): boolean {
-  const normalizedPath = pathname.replace(new RegExp(`^/${locale}`), '');
-  return PUBLIC_PATHS.some(
-    (path) => normalizedPath === path || normalizedPath.startsWith(path)
-  );
-}
-
-function isAuthPage(pathname: string): boolean {
-  // Only login page - registration is disabled
-  return pathname.includes('/login');
-}
-
+// auth paths (login + OAuth routes). Matching is EXACT-segment based (see
+// src/utils/cmsRouteMatching.ts): `/login-foo` is NOT a public route.
 export async function updateSession(request: NextRequest, locale: string) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -67,8 +50,8 @@ export async function updateSession(request: NextRequest, locale: string) {
   );
 
   const pathname = request.nextUrl.pathname;
-  const isPublic = isPublicPath(pathname, locale);
-  const isAuthPath = isAuthPage(pathname);
+  const isPublic = isCmsPublicPath(pathname, locale);
+  const isAuthPath = isAuthPagePath(pathname, locale);
 
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user'] =
     null;

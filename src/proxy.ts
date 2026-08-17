@@ -1,5 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { updateSession } from '@/utils/supabase/middleware';
+import {
+  isLegacyCmsPath,
+  stripLegacyCmsSegment,
+} from '@/utils/cmsRouteMatching';
 
 // Environment-based configuration with validation
 const LOCALES_ENV = process.env.NEXT_PUBLIC_LOCALES?.split(',') || ['en', 'it'];
@@ -190,9 +194,11 @@ export default async function proxy(request: NextRequest) {
       // Legacy pre-root-move paths: /{locale}/cms... -> /{locale}...
       // (old bookmarks, public-site redirects that preserved the path).
       // The pathname already includes the locale prefix — redirect directly.
-      if (pathname.includes('/cms')) {
+      // Segment-based: `/cms` must be a full path segment, so
+      // `/something-cms-whatever` never matches.
+      if (isLegacyCmsPath(pathname)) {
         const url = request.nextUrl.clone();
-        url.pathname = validatePathname(pathname.replace(/\/cms/, ''));
+        url.pathname = validatePathname(stripLegacyCmsSegment(pathname));
         return NextResponse.redirect(url, 307);
       }
 
