@@ -19,7 +19,6 @@ interface CmsState {
   } | null;
   loading: boolean;
   error: string | null;
-  sidebarCollapsed: boolean;
   publishQueue: Record<string, PublishState>;
 
   setUser: (user: CMSUser | null) => void;
@@ -35,7 +34,6 @@ interface CmsState {
   ) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  toggleSidebar: () => void;
   registerPublishState: (key: string, state: PublishState) => void;
   unregisterPublishState: (key: string) => void;
   clearAllPublishState: () => void;
@@ -55,7 +53,6 @@ export const useCmsStore = create<CmsState>((set) => ({
   heroSection: null,
   loading: false,
   error: null,
-  sidebarCollapsed: false,
   publishQueue: {},
   sectionPublishCallback: null,
   sectionRevertCallback: null,
@@ -66,8 +63,6 @@ export const useCmsStore = create<CmsState>((set) => ({
   setHeroSection: (heroSection) => set({ heroSection }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
-  toggleSidebar: () =>
-    set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   registerPublishState: (key, state) =>
     set((prev) => ({
       publishQueue: { ...prev.publishQueue, [key]: state },
