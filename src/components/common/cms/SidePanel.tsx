@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import titleCms from '@public/title-cms.png';
+import titleCmsLight from '@public/title-cms-lightmode.png';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -194,7 +195,14 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
                 alt="Okazakee CMS"
                 width={2172}
                 height={724}
-                className="w-52 h-auto relative -left-3"
+                className="w-52 h-auto relative -left-3 hidden dark:block"
+              />
+              <Image
+                src={titleCmsLight}
+                alt="Okazakee CMS"
+                width={2172}
+                height={724}
+                className="w-52 h-auto relative -left-3 dark:hidden"
               />
               <p className="text-gray-500 dark:text-lighttext2 text-xs mt-1">
                 {t('sidebar.subtitle')}
@@ -219,7 +227,14 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               alt="Okazakee CMS"
               width={2172}
               height={724}
-              className="w-44 h-auto"
+              className="w-44 h-auto hidden dark:block"
+            />
+            <Image
+              src={titleCmsLight}
+              alt="Okazakee CMS"
+              width={2172}
+              height={724}
+              className="w-44 h-auto dark:hidden"
             />
             <p className="text-gray-500 dark:text-lighttext2 text-xs mt-1">
               {t('sidebar.subtitle')}
