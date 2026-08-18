@@ -10,6 +10,7 @@ import {
 } from '@/app/actions/cms/utils/auth';
 import { syncCmsUserProfile } from '@/app/actions/cms/utils/profileSync';
 import { createClient } from '@/utils/supabase/server';
+import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 
 /**
  * GitHub OAuth callback.
@@ -55,10 +56,12 @@ export async function GET(request: Request) {
           );
         }
 
-        // Enforce the allowlist by email OR GitHub username.
+        // Enforce the allowlist by email OR GitHub username. Uses the
+        // server-side admin client: anon/authenticated have no SELECT on
+        // cms_allowed_users (the allowlist is internal data).
         const githubUsername = getUserGithubUsername(user);
         const allowlistMatch = await findAllowedCmsUser(
-          supabase,
+          getCmsAdminClient(),
           user.email,
           githubUsername
         );

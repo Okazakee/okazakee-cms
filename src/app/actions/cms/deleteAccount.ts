@@ -39,9 +39,13 @@ export async function deleteMyAccount(locale: string) {
 
     let allowedUser: { id: number; role: string } | null = null;
 
+    // Allowlist queries go through the admin client (service_role):
+    // anon/authenticated have no access to cms_allowed_users.
+    const allowlistClient = adminClient;
+
     // Try by email first
     if (email) {
-      const { data: emailMatch } = await supabase
+      const { data: emailMatch } = await allowlistClient
         .from('cms_allowed_users')
         .select('id, role')
         .eq('email', email)
@@ -51,7 +55,7 @@ export async function deleteMyAccount(locale: string) {
 
     // Try by GitHub username if no email match
     if (!allowedUser && githubUsername) {
-      const { data: githubMatch } = await supabase
+      const { data: githubMatch } = await allowlistClient
         .from('cms_allowed_users')
         .select('id, role')
         .eq('github_username', githubUsername)
@@ -65,7 +69,7 @@ export async function deleteMyAccount(locale: string) {
 
     // Prevent deleting the last admin
     if (allowedUser.role === 'admin') {
-      const { data: admins } = await supabase
+      const { data: admins } = await allowlistClient
         .from('cms_allowed_users')
         .select('id')
         .eq('role', 'admin');
@@ -79,7 +83,7 @@ export async function deleteMyAccount(locale: string) {
     }
 
     // Delete from cms_allowed_users
-    const { error: deleteAllowedError } = await supabase
+    const { error: deleteAllowedError } = await allowlistClient
       .from('cms_allowed_users')
       .delete()
       .eq('id', allowedUser.id);

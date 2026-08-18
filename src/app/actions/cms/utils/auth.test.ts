@@ -9,6 +9,7 @@ import {
   getUserAvatarUrl,
   getUserDisplayName,
   getUserGithubUsername,
+  lookupAllowedCmsUserViaRpc,
   resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
 
@@ -233,5 +234,32 @@ describe('findAllowedCmsUser', () => {
   it('returns null when role is not a valid CMS role', async () => {
     const supabase = mockSupabase([{ email: 'x@y.com', role: 'viewer' }]);
     expect(await findAllowedCmsUser(supabase, 'x@y.com')).toBeNull();
+  });
+});
+
+describe('lookupAllowedCmsUserViaRpc', () => {
+  function mockRpc(result: unknown) {
+    return {
+      rpc: vi.fn(async () => ({ data: result })),
+    } as unknown as Parameters<typeof lookupAllowedCmsUserViaRpc>[0];
+  }
+
+  it('returns role + matchSource from an RPC result', async () => {
+    const supabase = mockRpc({ role: 'admin', match_source: 'email' });
+    expect(
+      await lookupAllowedCmsUserViaRpc(supabase, 'admin@example.com')
+    ).toEqual({ role: 'admin', matchSource: 'email' });
+  });
+
+  it('returns null for unknown users', async () => {
+    const supabase = mockRpc(null);
+    expect(
+      await lookupAllowedCmsUserViaRpc(supabase, 'nope@b.com', 'nobody')
+    ).toBeNull();
+  });
+
+  it('returns null when role is not a valid CMS role', async () => {
+    const supabase = mockRpc({ role: 'viewer', match_source: 'email' });
+    expect(await lookupAllowedCmsUserViaRpc(supabase, 'x@y.com')).toBeNull();
   });
 });

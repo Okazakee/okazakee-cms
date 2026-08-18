@@ -9,6 +9,7 @@ import {
 } from './utils/auth';
 import { syncCmsUserProfile } from './utils/profileSync';
 import { createClient } from '@/utils/supabase/server';
+import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 
 export type CMSUser = {
   id: string;
@@ -40,8 +41,9 @@ async function buildCmsUser(
     .single();
 
   const githubUsername = getUserGithubUsername(user);
+  // Admin client: cms_allowed_users is internal (no anon/authenticated SELECT).
   const allowedUser = await findAllowedCmsUser(
-    supabase,
+    getCmsAdminClient(),
     user.email,
     githubUsername
   );

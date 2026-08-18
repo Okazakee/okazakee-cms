@@ -2,9 +2,9 @@ import { createServerClient } from '@supabase/ssr';
 import { supabasePublishableKey, supabaseUrl } from '@/config/shared';
 import { type NextRequest, NextResponse } from 'next/server';
 import {
-  findAllowedCmsUser,
   getUserGithubUsername,
   logCmsAuth,
+  lookupAllowedCmsUserViaRpc,
 } from '@/app/actions/cms/utils/auth';
 import { isAuthPagePath, isCmsPublicPath } from '@/utils/cmsRouteMatching';
 
@@ -102,7 +102,9 @@ export async function updateSession(request: NextRequest, locale: string) {
   }
 
   if (user && !isPublic) {
-    const allowlistMatch = await findAllowedCmsUser(
+    // Allowlist is internal data: the middleware (Edge Runtime) calls the
+    // SECURITY DEFINER RPC instead of reading the table directly.
+    const allowlistMatch = await lookupAllowedCmsUserViaRpc(
       supabase,
       user.email,
       getUserGithubUsername(user)

@@ -67,8 +67,9 @@ async function isAdmin(
   } = await supabase.auth.getUser();
   if (!user) return false;
 
+  // Allowlist is internal: lookup via admin client (service_role).
   const allowedUser = await findAllowedCmsUser(
-    supabase,
+    getCmsAdminClient(),
     user.email,
     getUserGithubUsername(user)
   );
@@ -148,7 +149,8 @@ export async function usersActions(
 async function getAllowedUsers(
   supabase: ReturnType<typeof createClient> extends Promise<infer T> ? T : never
 ): Promise<UsersResult> {
-  const { data, error } = await supabase
+  // Allowlist is internal: read via admin client (service_role).
+  const { data, error } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .select('*')
     .order('created_at', { ascending: false });
@@ -221,7 +223,7 @@ async function getAllowedUsers(
       // If profile has GitHub username but cms_allowed_users doesn't, update it
       if (githubUsername && !allowedUser.github_username && allowedUser.email) {
         try {
-          await supabase
+          await getCmsAdminClient()
             .from('cms_allowed_users')
             .update({ github_username: githubUsername })
             .eq('id', allowedUser.id);
@@ -266,7 +268,7 @@ async function addEmailUser(
   const normalizedEmail = email.trim().toLowerCase();
 
   // Check if already exists
-  const { data: existing } = await supabase
+  const { data: existing } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .select('id')
     .eq('email', normalizedEmail)
@@ -280,7 +282,7 @@ async function addEmailUser(
   }
 
   // Add to allowlist
-  const { data: newUser, error: insertError } = await supabase
+  const { data: newUser, error: insertError } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .insert({ email: normalizedEmail, role })
     .select()
@@ -325,7 +327,7 @@ async function addEmailUser(
     } else {
       console.log('User created and reset email sent to:', normalizedEmail);
       // Update invited_at timestamp
-      await supabase
+      await getCmsAdminClient()
         .from('cms_allowed_users')
         .update({ invited_at: new Date().toISOString() })
         .eq('id', newUser.id);
@@ -357,7 +359,7 @@ async function addGitHubUser(
   }
 
   // Check if already exists
-  const { data: existing } = await supabase
+  const { data: existing } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .select('id')
     .eq('github_username', cleanUsername)
@@ -371,7 +373,7 @@ async function addGitHubUser(
   }
 
   // Add to allowlist (no invite needed - they'll use GitHub OAuth)
-  const { data: newUser, error: insertError } = await supabase
+  const { data: newUser, error: insertError } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .insert({ github_username: cleanUsername, role })
     .select()
@@ -412,7 +414,7 @@ async function addDummyUser(
   const adminClient = getCmsAdminClient();
 
   // Check if a dummy user with this email already exists in cms_allowed_users
-  const { data: existingAllowed } = await supabase
+  const { data: existingAllowed } = await adminClient
     .from('cms_allowed_users')
     .select('id')
     .eq('email', dummyEmail)
@@ -518,7 +520,7 @@ async function addDummyUser(
   }
 
   // Create entry in cms_allowed_users
-  const { data: newUser, error: insertError } = await supabase
+  const { data: newUser, error: insertError } = await adminClient
     .from('cms_allowed_users')
     .insert({ email: dummyEmail, role })
     .select()
@@ -550,7 +552,7 @@ async function updateUserRole(
 ): Promise<UsersResult> {
   // Prevent removing the last admin
   if (role === 'editor') {
-    const { data: admins } = await supabase
+    const { data: admins } = await getCmsAdminClient()
       .from('cms_allowed_users')
       .select('id')
       .eq('role', 'admin');
@@ -560,7 +562,7 @@ async function updateUserRole(
     }
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .update({ role })
     .eq('id', id)
@@ -582,7 +584,7 @@ async function removeUser(
   id: number
 ): Promise<UsersResult> {
   // Prevent removing the last admin
-  const { data: user } = await supabase
+  const { data: user } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .select('role, email, github_username')
     .eq('id', id)
@@ -593,7 +595,7 @@ async function removeUser(
   }
 
   if (user.role === 'admin') {
-    const { data: admins } = await supabase
+    const { data: admins } = await getCmsAdminClient()
       .from('cms_allowed_users')
       .select('id')
       .eq('role', 'admin');
@@ -632,7 +634,7 @@ async function removeUser(
   }
 
   // Delete from cms_allowed_users
-  const { error } = await supabase
+  const { error } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .delete()
     .eq('id', id);

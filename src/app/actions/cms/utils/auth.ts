@@ -157,3 +157,38 @@ export async function findAllowedCmsUser(
 
   return null;
 }
+
+/**
+ * Edge-safe allowlist lookup for the Next.js middleware (Edge Runtime).
+ *
+ * The middleware cannot use the service_role client (anti-pattern: the
+ * server secret would be embedded in the edge bundle). Instead it calls the
+ * `cms_lookup_allowed_user` SECURITY DEFINER RPC, which has a fixed
+ * `search_path` and full-qualified table names. The RPC is granted EXECUTE
+ * to `authenticated` only; anon has no path to the allowlist.
+ */
+export async function lookupAllowedCmsUserViaRpc(
+  supabase: Pick<SupabaseClient, 'rpc'>,
+  email?: string | null,
+  githubUsername?: string | null
+): Promise<CmsAllowlistMatch | null> {
+  const { data } = await supabase.rpc('cms_lookup_allowed_user', {
+    p_email: email ?? null,
+    p_github_username: githubUsername ?? null,
+  });
+
+  if (
+    data &&
+    typeof data === 'object' &&
+    'role' in data &&
+    'match_source' in data &&
+    CMS_ALLOWED_ROLES.includes((data as { role: string }).role as CmsRole)
+  ) {
+    return {
+      role: (data as { role: CmsRole }).role,
+      matchSource: (data as { match_source: 'email' | 'github' }).match_source,
+    };
+  }
+
+  return null;
+}

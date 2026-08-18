@@ -62,7 +62,9 @@ export async function login(email: string, password: string, locale: string) {
   }
 
   // Check allowlist BEFORE attempting login
-  const allowlistCheck = await findAllowedCmsUser(supabase, email);
+  // Uses the server-side admin client so the allowlist stays internal:
+  // anon/authenticated have no SELECT on cms_allowed_users.
+  const allowlistCheck = await findAllowedCmsUser(getCmsAdminClient(), email);
   if (!allowlistCheck) {
     return { error: 'Access denied. Please contact the administrator.' };
   }
@@ -80,7 +82,7 @@ export async function login(email: string, password: string, locale: string) {
     data: { user },
   } = await supabase.auth.getUser();
   const postLoginAllowlist = await findAllowedCmsUser(
-    supabase,
+    getCmsAdminClient(),
     user?.email,
     user ? getUserGithubUsername(user) : null
   );
