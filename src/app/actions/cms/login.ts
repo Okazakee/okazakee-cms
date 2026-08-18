@@ -1,8 +1,11 @@
 'use server';
 
 import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { findAllowedCmsUser, getUserGithubUsername } from './utils/auth';
+import { syncCmsUserProfile } from './utils/profileSync';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import { defaultLocale, isValidLocale } from '@/i18n/routing';
 import {
   checkLoginRateLimitDurable,
   clearLoginRateLimitDurable,
@@ -14,9 +17,13 @@ import { createClient } from '@/utils/supabase/server';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Email + Password login
+ * Email + Password login.
+ *
+ * On success the action performs the navigation itself via redirect() —
+ * framework-owned, single deterministic path. The client never navigates on
+ * the password success path (see src/app/actions/cms/login.test.ts).
  */
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, locale: string) {
   // Input validation
   if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email)) {
     return { error: 'Please enter a valid email address' };
@@ -87,11 +94,21 @@ export async function login(email: string, password: string) {
   // are not left penalized by earlier failures. Best-effort.
   await clearLoginRateLimitDurable(getCmsAdminClient(), ipHash, emailHash);
 
-  // NO router revalidation here. The client performs a single full-page
-  // navigation to redirectTo immediately after this action resolves; any
-  // competing router refresh of the login route races that navigation and
-  // causes a transient load error in Firefox (revalidatePath was removed
-  // from this flow for the same reason). One deterministic navigation path
-  // only — see src/app/actions/cms/login.test.ts.
-  return { success: true, redirectTo: '/auth/ready?next=/' };
+  // Finalize the CMS profile (what /auth/ready used to do for this flow):
+  // the dashboard boot needs it and recreates it lazily anyway. Best-effort:
+  // a sync failure must not block an otherwise-successful login.
+  try {
+    await syncCmsUserProfile(user);
+  } catch (error) {
+    console.error('Error syncing CMS profile after login:', error);
+  }
+
+  // Framework-owned navigation: redirect() throws NEXT_REDIRECT, the client's
+  // awaited promise rejects with it and the framework performs the
+  // navigation. No client-side navigation and no router refresh on the
+  // success path — a single deterministic transition (previously the action
+  // returned redirectTo and the client raced a hard navigation against the
+  // action's RSC lifecycle, causing a transient load error in Firefox).
+  const safeLocale = isValidLocale(locale) ? locale : defaultLocale;
+  redirect(`/${safeLocale}`);
 }

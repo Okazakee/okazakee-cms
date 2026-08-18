@@ -7,6 +7,7 @@ import {
   getUserAvatarUrl,
   getUserDisplayName,
   getUserGithubUsername,
+  resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -35,6 +36,31 @@ describe('getSafeCmsNext', () => {
   it('rejects protocol-relative and external URLs', () => {
     expect(getSafeCmsNext('//evil.com')).toBe('/');
     expect(getSafeCmsNext('https://evil.com')).toBe('/');
+  });
+
+  it('rejects backslash-prefixed host tricks (open redirect)', () => {
+    // '/\evil.com' is parsed by browsers as '//evil.com'
+    expect(getSafeCmsNext('/\\evil.com')).toBe('/');
+    expect(getSafeCmsNext('/foo\\bar')).toBe('/');
+  });
+});
+
+describe('resolvePostAuthPath', () => {
+  it('builds the canonical /{locale} target from next=/', () => {
+    expect(resolvePostAuthPath('it', '/')).toBe('/it');
+    expect(resolvePostAuthPath('en', '/')).toBe('/en');
+  });
+
+  it('strips a redundant trailing slash from deeper targets', () => {
+    expect(resolvePostAuthPath('it', '/blog/')).toBe('/it/blog');
+    expect(resolvePostAuthPath('it', '/blog')).toBe('/it/blog');
+  });
+
+  it('falls back to /{locale} for unsafe next values', () => {
+    expect(resolvePostAuthPath('it', '//evil.com')).toBe('/it');
+    expect(resolvePostAuthPath('it', '/\\evil.com')).toBe('/it');
+    expect(resolvePostAuthPath('it', 'https://evil.com')).toBe('/it');
+    expect(resolvePostAuthPath('it', null as unknown as string)).toBe('/it');
   });
 });
 

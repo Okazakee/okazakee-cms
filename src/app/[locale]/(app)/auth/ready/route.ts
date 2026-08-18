@@ -5,6 +5,7 @@ import {
   getSafeCmsNext,
   getUserGithubUsername,
   logCmsAuth,
+  resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
 import { syncCmsUserProfile } from '@/app/actions/cms/utils/profileSync';
 import { createClient } from '@/utils/supabase/server';
@@ -67,7 +68,11 @@ export async function GET(request: Request) {
       next,
     });
 
-    return NextResponse.redirect(new URL(`/${locale}${next}`, origin));
+    // Canonical target: '/{locale}' + safe next, no trailing slash (the
+    // framework would otherwise 308 '/{locale}/' -> '/{locale}').
+    return NextResponse.redirect(
+      new URL(resolvePostAuthPath(locale, next), origin)
+    );
   } catch (error) {
     logCmsAuth('ready-error', {
       locale,

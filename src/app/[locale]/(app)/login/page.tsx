@@ -34,13 +34,30 @@ function LoginFormContent({
     setIsLoading(true);
     setError(null);
 
-    const result = await login(email, password);
-    if (result?.error) {
-      setError(result.error);
+    try {
+      const result = await login(email, password, locale);
+      // On success the action calls redirect() — the framework owns the
+      // navigation and the awaited promise rejects with NEXT_REDIRECT, so a
+      // RESOLVED result here is always a typed failure. Never navigate from
+      // the client on the success path (single deterministic transition).
+      if (result && 'error' in result) {
+        setError(result.error);
+        setIsLoading(false);
+      }
+    } catch (err) {
+      // The framework's redirect control flow surfaces as a NEXT_REDIRECT
+      // rejection after the action threw; navigation is already in flight —
+      // do not turn it into a form error.
+      const isRedirect =
+        (err instanceof Error && err.message.startsWith('NEXT_REDIRECT')) ||
+        String((err as { digest?: unknown })?.digest ?? '').startsWith(
+          'NEXT_REDIRECT'
+        );
+      if (isRedirect) return;
+      setError(
+        err instanceof Error ? err.message : 'Failed to sign in. Please try again.'
+      );
       setIsLoading(false);
-    } else if (result?.success) {
-      // Redirect on client side
-      window.location.href = `/${locale}${result.redirectTo}`;
     }
   };
 

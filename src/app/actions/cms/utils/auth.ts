@@ -28,10 +28,28 @@ export function logCmsAuth(
 }
 
 export function getSafeCmsNext(rawNext: string | null | undefined): string {
-  // Same-origin paths only; never protocol-relative or external URLs.
-  return rawNext?.startsWith('/') && !rawNext.startsWith('//')
+  // Same-origin paths only; never protocol-relative or external URLs, and
+  // never backslash-prefixed paths ('/\evil.com' parses as '//evil.com' in
+  // browsers, i.e. an open redirect).
+  return rawNext?.startsWith('/') &&
+    !rawNext.startsWith('//') &&
+    !rawNext.includes('\\')
     ? rawNext
     : '/';
+}
+
+/**
+ * Builds the canonical post-auth redirect path: '/' + locale + safe next,
+ * with the trailing slash stripped so auth never triggers the framework's
+ * 308 trailing-slash redirect (/{locale}/ -> /{locale}). The result is
+ * always a same-origin path (never an open redirect).
+ */
+export function resolvePostAuthPath(locale: string, next: string): string {
+  const safeNext = getSafeCmsNext(next);
+  const target = `/${locale}${safeNext}`;
+  return target.length > 1 && target.endsWith('/')
+    ? target.slice(0, -1)
+    : target;
 }
 
 export function getRequestOrigin(request: Request): string {
