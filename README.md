@@ -1,34 +1,51 @@
-# Okazakee CMS
+<p align="center">
+  <img src="src/app/public/title-cms.png" alt="Okazakee CMS" width="340" />
+</p>
 
-Standalone content management system for [okazakee.dev](https://okazakee.dev) —
-a Next.js 16 application that edits the portfolio/blog content stored in
-Supabase. The public website lives in a separate repository
-([Okazakee/okazakee-ws](https://github.com/Okazakee/okazakee-ws)).
+<p align="center">
+  <strong>Content management for okazakee.dev</strong>
+  <br />
+  <a href="https://cms.okazakee.dev">cms.okazakee.dev</a> &nbsp;·&nbsp; renders
+  on the public site <a href="https://github.com/Okazakee/okazakee-ws">okazakee-ws</a>
+</p>
 
-## Features
+---
 
-- **Auth:** email/password + GitHub OAuth, gated by an allowlist
-  (`cms_allowed_users` — email OR GitHub username match) with roles
-  `admin` / `editor`.
-- **Role-based access:** admin = all sections + user management; editor =
-  blog/portfolio + account. Every mutation is authorized server-side.
-- **Sections:** Hero, Skills, Career, Blog, Portfolio, Contacts, Layout
-  (header/footer), Privacy Policy, Users, Account — with EN/IT translations,
-  draft/publish state, and live previews.
-- **Uploads:** images (client WebP preprocessing, server fallback via Sharp,
-  SVG rejected) and PDF resumes, stored in the shared Supabase `website`
-  bucket with format-aware extensions/MIME.
-- **Upload limit:** 10 MB for images and PDFs, enforced consistently across
-  the client (`useFileUpload` `maxSizeMB`), the server validators
+## Overview
+
+The standalone content management system for
+[okazakee.dev](https://okazakee.dev). A Next.js 16 application that authors
+the portfolio/blog content stored in a shared Supabase project — sections,
+translations, uploads, user management — then notifies the public site to
+refresh its caches.
+
+This repository is **write-side only**. It owns editing, auth flows, uploads,
+previews and revalidation events; the public website
+([Okazakee/okazakee-ws](https://github.com/Okazakee/okazakee-ws)) owns
+rendering and caching.
+
+## Highlights
+
+- **Auth** — email/password + GitHub OAuth, gated by an allowlist
+  (`cms_allowed_users`: email OR GitHub username) with roles
+  `admin` / `editor`
+- **Role-based access** — admin: all sections + user management; editor:
+  blog/portfolio + account. Every mutation is authorized server-side; the UI
+  never is the security boundary
+- **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Layout
+  (header/footer), Privacy Policy, Users, Account — each with EN/IT
+  translations, draft/publish state, and live previews
+- **Uploads** — images (client-side WebP preprocessing, server fallback via
+  Sharp, SVG rejected) and PDF resumes, stored in the shared `website`
+  bucket with format-aware extensions/MIME
+- **Consistent limits** — 10 MB for images and PDFs, enforced at every layer:
+  client (`useFileUpload` `maxSizeMB`), server validators
   (`MAX_UPLOAD_SIZE_BYTES` in `src/utils/cms/validation.ts`) and the
   framework (`serverActions.bodySizeLimit: '10mb'` in `next.config.ts` —
-  without it Next's 1 MB default would reject uploads before the action
-  runs). Supabase Storage object limits (default 50 MB) exceed the
-  application contract.
-- **Cache invalidation:** after a committed content mutation the CMS sends a
-  signed HTTP event to the public site's
-  `/api/internal/content-revalidate` endpoint (HMAC-SHA256, replay window,
-  hard-coded tag allowlist).
+  without it Next's 1 MB default would reject uploads before the action runs)
+- **Cache invalidation** — after a committed mutation the CMS sends a signed
+  HTTP event to the public site's `/api/internal/content-revalidate`
+  (HMAC-SHA256, replay window, hard-coded tag allowlist)
 
 ## Architecture
 
@@ -41,11 +58,11 @@ CMS (this repo) ──writes──▶ Supabase ◀──reads── Public websi
 - **Supabase** owns content, auth, storage and the allowlist.
 - **This repo** owns editing, auth flows, uploads, previews and revalidation
   events.
-- The **public repo** owns rendering, caching (Next Cache Components) and the
-  signed revalidation endpoint. `revalidateTag(tag, 'max')` is used there —
-  never `updateTag()` across applications (Server-Action-only).
+- **The public repo** owns rendering and caching (Next Cache Components).
+  Revalidation uses `revalidateTag(tag, 'max')` there — never `updateTag()`
+  across applications (Server-Action-only).
 
-## Getting started
+## Getting Started
 
 ### Prerequisites
 
@@ -55,8 +72,10 @@ CMS (this repo) ──writes──▶ Supabase ◀──reads── Public websi
 ### Install
 
 ```bash
+git clone https://github.com/Okazakee/okazakee-cms.git
+cd okazakee-cms
 bun install
-cp .env.local.example .env.local
+cp .env.local.example .env.local   # then fill in the values below
 bun run dev
 ```
 
@@ -64,90 +83,52 @@ bun run dev
 
 See `.env.local.example`. Required:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (`sb_publishable_…`)
-- `SUPABASE_SECRET_KEY` (`sb_secret_…`) — server-only, never in public code
-- `CMS_PUBLIC_URL` — canonical CMS origin (OAuth callbacks, recovery links)
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key (`sb_publishable_…`) |
+| `SUPABASE_SECRET_KEY` | Secret key (`sb_secret_…`) — server-only, never in public code |
+| `CMS_PUBLIC_URL` | Canonical CMS origin (OAuth callbacks, recovery links) |
 
 Public-site revalidation (production):
 
-- `WEBSITE_REVALIDATION_URL` — `https://<public>/api/internal/content-revalidate`
-- `WEBSITE_REVALIDATION_SECRET` — must equal the public site's
-  `CONTENT_REVALIDATION_SECRET`
+| Variable | Purpose |
+| --- | --- |
+| `WEBSITE_REVALIDATION_URL` | `https://<public>/api/internal/content-revalidate` |
+| `WEBSITE_REVALIDATION_SECRET` | Must equal the public site's `CONTENT_REVALIDATION_SECRET` |
 
-### Supabase setup
+### Supabase Setup
 
-Tables: `user_profiles`, `cms_allowed_users`, `blog_posts`, `portfolio_posts`,
-`skills`, `skills_categories`, `career_entries`, `contacts`, `hero_section`,
-`i18n_translations`. Storage bucket: `website`.
+**Tables:** `user_profiles`, `cms_allowed_users`, `blog_posts`,
+`portfolio_posts`, `skills`, `skills_categories`, `career_entries`,
+`contacts`, `hero_section`, `i18n_translations`. **Storage bucket:** `website`.
 
-Supabase Auth → URL Configuration → Redirect URLs must include exactly these
-canonical paths (the CMS never generates `/cms` callback paths):
+**Auth redirect URLs** (Supabase Auth → URL Configuration) must include
+exactly these canonical paths — the CMS never generates `/cms` callback paths:
 
 - `https://cms.okazakee.dev/en/auth/callback`
 - `https://cms.okazakee.dev/it/auth/callback`
-- local dev: `http://localhost:3001/en/auth/callback` and
+- local dev: `http://localhost:3001/en/auth/callback`,
   `http://localhost:3001/it/auth/callback`
 
-Legacy monolith-era entries like `https://cms.okazakee.dev/en/cms/auth/callback`
-(or `/it/…`) are no longer generated by any flow and can be removed.
+Legacy monolith-era entries such as
+`https://cms.okazakee.dev/en/cms/auth/callback` (or `/it/…`) are no longer
+generated by any flow and can be removed.
 
-Apply the migrations in `supabase/migrations/` for durable login rate limiting:
-`cms_check_login_rate` RPC — 5 attempts/minute per identifier with a
-15-minute lockout, using two independent buckets (per-IP and per-email,
-identifiers stored as sha256 hashes), plus `cms_clear_login_rate` which resets
-both buckets after a successful login. RPC execution is restricted to the
-service role; stale rows are purged hourly by a scheduled `pg_cron` job.
+**Login rate limiting** — apply the migrations in `supabase/migrations/`:
+`cms_check_login_rate` (5 attempts/minute per identifier with a 15-minute
+lockout, two independent buckets per-IP and per-email, identifiers stored as
+sha256 hashes) plus `cms_clear_login_rate` (resets both buckets after a
+successful login). RPC execution is restricted to the service role; stale
+rows are purged hourly by a scheduled `pg_cron` job.
 
 > **Rolling deployment (history):** the legacy single-identifier
-> `cms_check_login_rate(text)` and its temporary anon/authenticated grant were
-> retained by the migrations until the split-bucket CMS was live, then removed
-> by `20260818110000_remove_legacy_login_rate_rpc.sql`. The limiter is now
+> `cms_check_login_rate(text)` and its temporary anon/authenticated grant
+> were retained until the split-bucket limiter was live, then removed by
+> `20260818110000_remove_legacy_login_rate_rpc.sql`. The limiter is now
 > service-role only.
 
-## Scripts
-
-```bash
-bun run dev       # Development server
-bun run build     # Production build
-bun run start     # Production server
-bun run lint      # Biome lint
-bun run test      # Vitest
-```
-
-## Tests and CI
-
-Unit/integration tests run with Vitest (`bun run test`); suites cover the
-cache-tag vocabulary, invalidation descriptors, the mutation result contract,
-route matching, validators, auth helpers and the login rate limiter — the
-limiter SQL policy is executed against a real (WASM) Postgres via PGlite.
-CI (`.github/workflows/ci.yml`, `main` + PRs) runs install → lint → test →
-build → typecheck (`bunx tsc --noEmit`).
-
-## Routes
-
-The CMS serves root paths (no `/cms` prefix):
-
-- `/en`, `/it` — dashboard (redirects to login when unauthenticated)
-- `/en/login` — sign-in
-- `/en/auth/github/start`, `/en/auth/callback` — GitHub OAuth start/callback
-
-## GitHub OAuth
-
-- `/auth/github/start` builds the canonical locale-prefixed callback URL
-  (`{origin}/{locale}/auth/callback?next=…`) and starts the provider flow.
-- `/auth/callback` finalizes the whole flow in one request boundary: exchanges
-  the code, enforces the allowlist (email OR GitHub username, signing out
-  unauthorized identities), syncs the CMS profile and redirects directly to
-  the canonical `/{locale}` (or a validated same-origin `next`).
-- All failure paths land on canonical `/{locale}/login` with a fixed
-  user-safe message. No `/auth/ready` hop, no `/cms` routes internally.
-- The GitHub username is read from Supabase `user_metadata.user_name`
-  (`getUserGithubUsername`).
-
-Legacy `/{locale}/cms*` URLs 307-redirect to the equivalent root paths.
-
-## Auth and account semantics
+## Auth & Account Semantics
 
 - **Login:** allowlist-gated email/password or GitHub OAuth; roles
   `admin` / `editor`. The hidden navigation is never an authorization
@@ -164,10 +145,53 @@ Legacy `/{locale}/cms*` URLs 307-redirect to the equivalent root paths.
   per-IP and per-email buckets (5/min, 15-minute lockout), cleared on
   successful login.
 
+## Routes
+
+The CMS serves root paths (no `/cms` prefix):
+
+- `/en`, `/it` — dashboard (redirects to login when unauthenticated)
+- `/en/login` — sign-in
+- `/en/auth/github/start`, `/en/auth/callback` — GitHub OAuth start/callback
+
+Legacy `/{locale}/cms*` URLs 307-redirect to the equivalent root paths.
+
+### GitHub OAuth
+
+- `/auth/github/start` builds the canonical locale-prefixed callback URL
+  (`{origin}/{locale}/auth/callback?next=…`) and starts the provider flow.
+- `/auth/callback` finalizes the whole flow in one request boundary: exchanges
+  the code, enforces the allowlist (email OR GitHub username, signing out
+  unauthorized identities), syncs the CMS profile and redirects directly to
+  the canonical `/{locale}` (or a validated same-origin `next`).
+- All failure paths land on canonical `/{locale}/login` with a fixed
+  user-safe message. No `/auth/ready` hop, no `/cms` routes internally.
+- The GitHub username is read from Supabase `user_metadata.user_name`
+  (`getUserGithubUsername`).
+
+## Scripts
+
+```bash
+bun run dev       # Development server
+bun run build     # Production build
+bun run start     # Production server
+bun run lint      # Biome lint
+bun run test      # Vitest
+```
+
+## Tests & CI
+
+Unit/integration tests run with Vitest (`bun run test`); suites cover the
+cache-tag vocabulary, invalidation descriptors, the mutation result contract,
+route matching, validators, auth helpers and the login rate limiter — the
+limiter SQL policy is executed against a real (WASM) Postgres via PGlite.
+
+CI (`.github/workflows/ci.yml`, `main` + PRs) runs install → lint → test →
+build → typecheck (`bunx tsc --noEmit`).
+
 ## Origin
 
-Extracted from `Okazakee/okazakee-ws` at commit `234b064` (2026-08-17) as
-part of the CMS decoupling migration. The original repository remains the
+Extracted from `Okazakee/okazakee-ws` at commit `234b064` (2026-08-17) as part
+of the CMS decoupling migration. The original repository remains the
 historical source of truth; see its `docs/cms-decoupling/` directory for the
 migration plan, behavior matrix and cutover checklist.
 
