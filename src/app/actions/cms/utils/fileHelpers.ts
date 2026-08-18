@@ -53,11 +53,20 @@ export async function getCmsActionContext(
   }
 
   const githubUsername = getUserGithubUsername(user);
+  // Trust boundary: the session client authenticates the requester
+  // (auth.getUser() above). The CMS role lookup must go through the
+  // service_role admin client — authenticated has no SELECT on
+  // cms_allowed_users since the hardening (anon/authenticated = no access).
   const role =
     requiredRole === 'authenticated'
       ? null
-      : (await findAllowedCmsUser(supabase, user.email, githubUsername))
-          ?.role || null;
+      : (
+          await findAllowedCmsUser(
+            getCmsAdminClient(),
+            user.email,
+            githubUsername
+          )
+        )?.role || null;
 
   if (requiredRole === 'admin' && role !== 'admin') {
     throw new Error('Unauthorized: Admin access required');
