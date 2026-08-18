@@ -7,7 +7,7 @@
  * - the signed revalidation endpoint (Phase 9) allowlist.
  *
  * Do NOT write tag string literals elsewhere. Adding a tag here extends the
- * public cache contract; keep docs/cms-decoupling/behavior-matrix.md in sync.
+ * public cache contract.
  */
 export const cacheTags = {
   translations: 'translations',

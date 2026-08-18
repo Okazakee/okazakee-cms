@@ -192,8 +192,7 @@ build → typecheck (`bunx tsc --noEmit`).
 
 Extracted from `Okazakee/okazakee-ws` at commit `234b064` (2026-08-17) as part
 of the CMS decoupling migration. The original repository remains the
-historical source of truth; see its `docs/cms-decoupling/` directory for the
-migration plan, behavior matrix and cutover checklist.
+historical source of truth.
 
 ## License
 

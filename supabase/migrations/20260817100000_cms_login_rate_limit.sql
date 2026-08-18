@@ -3,8 +3,7 @@
 -- Replaces the process-local in-memory limiter (src/libs/rateLimiters.ts):
 -- 5 attempts / minute, 15-minute lockout, per identifier.
 --
--- APPLY BEFORE PRODUCTION CUTOVER (see docs/cms-decoupling/implementation-log.md
--- pre-cutover checklist):
+-- APPLY BEFORE PRODUCTION CUTOVER:
 --   supabase db push
 -- or run this file via the Supabase SQL editor.
 
