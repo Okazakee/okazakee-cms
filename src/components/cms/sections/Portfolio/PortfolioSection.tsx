@@ -338,8 +338,8 @@ export default function PortfolioSection() {
         </div>
         {transLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-main" /></div> : (
           <div className="space-y-4">
-            <TranslationField label={t('portfolio.translationTitleLabel')} enValue={getField('en', 'title2')} itValue={getField('it', 'title2')} onChangeEn={(v) => setField('en', 'title2', v)} onChangeIt={(v) => setField('it', 'title2', v)} activeLocale={activeLocale} />
-            <TranslationField label={t('portfolio.translationSubtitleLabel')} enValue={getField('en', 'subtitle2')} itValue={getField('it', 'subtitle2')} onChangeEn={(v) => setField('en', 'subtitle2', v)} onChangeIt={(v) => setField('it', 'subtitle2', v)} type="textarea" rows={3} activeLocale={activeLocale} />
+            <TranslationField label={t('portfolio.translationTitleLabel')} enValue={getField('en', 'title1')} itValue={getField('it', 'title1')} onChangeEn={(v) => setField('en', 'title1', v)} onChangeIt={(v) => setField('it', 'title1', v)} activeLocale={activeLocale} />
+            <TranslationField label={t('portfolio.translationSubtitleLabel')} enValue={getField('en', 'subtitle1')} itValue={getField('it', 'subtitle1')} onChangeEn={(v) => setField('en', 'subtitle1', v)} onChangeIt={(v) => setField('it', 'subtitle1', v)} type="textarea" rows={3} activeLocale={activeLocale} />
           </div>
         )}
       </div>
