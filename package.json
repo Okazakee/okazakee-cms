@@ -18,7 +18,7 @@
     "@img/sharp-linux-x64": "0.35.3",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
-    "blurkit": "^0.1.7",
+    "blurkit": "^0.1.10",
     "lucide-react": "^1.31.0",
     "markdown-to-jsx": "^9.10.2",
     "next": "^16.3.1",

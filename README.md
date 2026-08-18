@@ -37,7 +37,10 @@ rendering and caching.
   translations, draft/publish state, and live previews
 - **Uploads** — images (client-side WebP preprocessing, server fallback via
   Sharp, SVG rejected) and PDF resumes, stored in the shared `website`
-  bucket with format-aware extensions/MIME
+  bucket with format-aware extensions/MIME. BlurHash placeholders are
+  generated with [blurkit](https://github.com/Okazakee/blurkit): Sharp
+  handles server-side resize/format, Blurkit the placeholder hash
+  (`blurkit/node` on upload, `blurkit/browser` client-side)
 - **Consistent limits** — 10 MB for images and PDFs, enforced at every layer:
   client (`useFileUpload` `maxSizeMB`), server validators
   (`MAX_UPLOAD_SIZE_BYTES` in `src/utils/cms/validation.ts`) and the

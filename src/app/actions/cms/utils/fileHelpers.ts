@@ -211,10 +211,7 @@ export async function processImage(
       format = 'png';
     }
 
-    const { hash: blurhash } = await blurkitEncode(
-      inputBuffer.buffer as ArrayBuffer,
-      { size: 32 }
-    );
+    const { hash: blurhash } = await blurkitEncode(inputBuffer, { size: 32 });
 
     const outMeta = await sharp(processedBuffer).metadata();
 
@@ -242,9 +239,7 @@ export async function generateBlurhashFromBuffer(
   buffer: Buffer
 ): Promise<string> {
   try {
-    const { hash } = await blurkitEncode(buffer.buffer as ArrayBuffer, {
-      size: 32,
-    });
+    const { hash } = await blurkitEncode(buffer, { size: 32 });
     return hash;
   } catch {
     return FALLBACK_BLURHASH;
