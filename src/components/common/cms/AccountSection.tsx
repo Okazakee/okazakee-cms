@@ -12,7 +12,7 @@ import {
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { useTranslations } from 'next-intl';
 import Image from 'next/image';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
@@ -24,7 +24,6 @@ import { processImageToWebP } from '@/utils/imageProcessor';
 export default function AccountSection() {
   const t = useTranslations('cms');
   const { user, setUser } = useCmsStore();
-  const router = useRouter();
   const pathname = usePathname();
   const locale = pathname.split('/')[1] || 'en';
   const [error, setError] = useState<string | null>(null);
@@ -133,13 +132,24 @@ export default function AccountSection() {
     setError(null);
 
     try {
-      const result = await deleteMyAccount();
-      if (!result.success) {
+      const result = await deleteMyAccount(locale);
+      // On success the action calls redirect() — the framework owns the
+      // navigation and the awaited promise rejects with NEXT_REDIRECT, so a
+      // RESOLVED result here is always a typed failure. Never navigate from
+      // the client on the success path.
+      if (result && !result.success) {
         throw new Error(result.error || 'Failed to delete account');
       }
-      // Redirect to login page after successful deletion
-      router.push(`/${locale}/cms/login`);
     } catch (err) {
+      // The framework's redirect control flow surfaces as a NEXT_REDIRECT
+      // rejection after the action threw; navigation is already in flight —
+      // do not turn it into an error.
+      const isRedirect =
+        (err instanceof Error && err.message.startsWith('NEXT_REDIRECT')) ||
+        String((err as { digest?: unknown })?.digest ?? '').startsWith(
+          'NEXT_REDIRECT'
+        );
+      if (isRedirect) return;
       console.error('Error deleting account:', err);
       setError(
         err instanceof Error ? err.message : t('account.errorDeleteAccount')

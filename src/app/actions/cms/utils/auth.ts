@@ -52,6 +52,36 @@ export function resolvePostAuthPath(locale: string, next: string): string {
     : target;
 }
 
+/**
+ * Builds the OAuth callback URL Supabase must redirect back to: the
+ * canonical /{locale}/auth/callback with the sanitized `next` param. This is
+ * the URL that must be allowlisted in Supabase (see the CMS README).
+ */
+export function buildOAuthCallbackUrl(
+  origin: string,
+  locale: string,
+  next: string
+): string {
+  return `${origin}/${locale}/auth/callback?next=${encodeURIComponent(
+    getSafeCmsNext(next)
+  )}`;
+}
+
+/**
+ * Builds a canonical login error redirect: /{locale}/login?error=<message>.
+ * NEVER the legacy /{locale}/cms/login path. `message` must be a fixed,
+ * user-safe string — never raw provider/Supabase error details.
+ */
+export function buildAuthErrorRedirect(
+  origin: string,
+  locale: string,
+  message: string
+): URL {
+  const url = new URL(`/${locale}/login`, origin);
+  url.searchParams.set('error', message);
+  return url;
+}
+
 export function getRequestOrigin(request: Request): string {
   const canonical = cmsConfig.cmsPublicUrl;
   if (canonical && process.env.NODE_ENV !== 'development') {

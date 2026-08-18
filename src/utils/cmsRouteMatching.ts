@@ -13,7 +13,6 @@ const CMS_PUBLIC_PATHS = [
   '/login',
   '/auth/callback',
   '/auth/github/start',
-  '/auth/ready',
 ] as const;
 
 /** Strips a `/<locale>` prefix when it is a full leading segment. */

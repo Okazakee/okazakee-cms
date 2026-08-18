@@ -1,6 +1,8 @@
 import type { User } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildAuthErrorRedirect,
+  buildOAuthCallbackUrl,
   findAllowedCmsUser,
   getSafeCmsNext,
   getUserAuthProvider,
@@ -61,6 +63,57 @@ describe('resolvePostAuthPath', () => {
     expect(resolvePostAuthPath('it', '/\\evil.com')).toBe('/it');
     expect(resolvePostAuthPath('it', 'https://evil.com')).toBe('/it');
     expect(resolvePostAuthPath('it', null as unknown as string)).toBe('/it');
+  });
+});
+
+describe('buildOAuthCallbackUrl', () => {
+  it('builds the canonical locale-prefixed callback URL', () => {
+    expect(
+      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'en', '/')
+    ).toBe(
+      'https://cms.okazakee.dev/en/auth/callback?next=%2F'
+    );
+    expect(
+      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'it', '/blog')
+    ).toBe(
+      'https://cms.okazakee.dev/it/auth/callback?next=%2Fblog'
+    );
+  });
+
+  it('sanitizes unsafe next values before encoding', () => {
+    expect(
+      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'en', '//evil.com')
+    ).toBe('https://cms.okazakee.dev/en/auth/callback?next=%2F');
+    expect(
+      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'en', '/\\evil.com')
+    ).toBe('https://cms.okazakee.dev/en/auth/callback?next=%2F');
+  });
+});
+
+describe('buildAuthErrorRedirect', () => {
+  it('always redirects to canonical /{locale}/login, never a /cms path', () => {
+    const url = buildAuthErrorRedirect(
+      'https://cms.okazakee.dev',
+      'it',
+      'Access denied. Please contact the administrator.'
+    );
+    expect(url.origin).toBe('https://cms.okazakee.dev');
+    expect(url.pathname).toBe('/it/login');
+    expect(url.pathname).not.toContain('/cms');
+    expect(url.searchParams.get('error')).toBe(
+      'Access denied. Please contact the administrator.'
+    );
+  });
+
+  it('encodes the error message safely', () => {
+    const url = buildAuthErrorRedirect(
+      'https://cms.okazakee.dev',
+      'en',
+      'Authentication failed'
+    );
+    expect(url.toString()).toBe(
+      'https://cms.okazakee.dev/en/login?error=Authentication+failed'
+    );
   });
 });
 

@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import {
+  buildAuthErrorRedirect,
+  buildOAuthCallbackUrl,
   getRequestOrigin,
   getSafeCmsNext,
   logCmsAuth,
 } from '@/app/actions/cms/utils/auth';
 import { createClient } from '@/utils/supabase/server';
 
+/**
+ * GitHub OAuth entry: builds the canonical locale-prefixed callback URL
+ * (allowlisted in Supabase) and starts the provider flow. All failure paths
+ * land on canonical /{locale}/login with a fixed user-safe message.
+ */
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const pathname = requestUrl.pathname;
@@ -13,7 +20,7 @@ export async function GET(request: Request) {
   const locale = localeMatch?.[1] || 'en';
   const next = getSafeCmsNext(requestUrl.searchParams.get('next'));
   const origin = getRequestOrigin(request);
-  const redirectTo = `${origin}/${locale}/auth/callback?next=${encodeURIComponent(next)}`;
+  const redirectTo = buildOAuthCallbackUrl(origin, locale, next);
 
   try {
     const supabase = await createClient();
@@ -30,9 +37,9 @@ export async function GET(request: Request) {
     });
 
     if (error || !data.url) {
-      const errorUrl = new URL(`/${locale}/login`, origin);
-      errorUrl.searchParams.set('error', 'Failed to start GitHub login');
-      return NextResponse.redirect(errorUrl);
+      return NextResponse.redirect(
+        buildAuthErrorRedirect(origin, locale, 'Failed to start GitHub login')
+      );
     }
 
     return NextResponse.redirect(data.url);
@@ -42,8 +49,8 @@ export async function GET(request: Request) {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
 
-    const errorUrl = new URL(`/${locale}/cms/login`, origin);
-    errorUrl.searchParams.set('error', 'Failed to start GitHub login');
-    return NextResponse.redirect(errorUrl);
+    return NextResponse.redirect(
+      buildAuthErrorRedirect(origin, locale, 'Failed to start GitHub login')
+    );
   }
 }

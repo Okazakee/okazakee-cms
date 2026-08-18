@@ -1,11 +1,22 @@
 'use server';
 
-import { refresh } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import { defaultLocale, isValidLocale } from '@/i18n/routing';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
-export async function deleteMyAccount() {
+/**
+ * Deletes the current user's CMS account (allowlist row + profile), clears
+ * the session and performs a framework-owned redirect to canonical
+ * /{locale}/login. The client never navigates on the success path — the same
+ * single-owner navigation architecture as password login.
+ *
+ * The redirect() call is OUTSIDE the try/catch: it throws NEXT_REDIRECT and
+ * must escape as control flow, never be converted into a typed error.
+ * Failure paths return typed { success: false, error } results.
+ */
+export async function deleteMyAccount(locale: string) {
   const supabase = await createClient();
 
   // Get current authenticated user
@@ -92,7 +103,8 @@ export async function deleteMyAccount() {
       // Don't throw - profile deletion is not critical if it fails
     }
 
-    const revalidation = await invalidatePublicContent({
+    // Public-site revalidation (author tag) for the deleted author identity.
+    await invalidatePublicContent({
       entity: 'author',
       operation: 'update',
       id: authUser.id,
@@ -104,10 +116,6 @@ export async function deleteMyAccount() {
       console.error('Error signing out:', signOutError);
       // Continue even if sign out fails
     }
-
-    refresh();
-
-    return { success: true, revalidation };
   } catch (error) {
     console.error('Error deleting account:', error);
     return {
@@ -116,4 +124,10 @@ export async function deleteMyAccount() {
         error instanceof Error ? error.message : 'Failed to delete account',
     };
   }
+
+  // Success: framework-owned navigation. OUTSIDE the try/catch — redirect()
+  // throws NEXT_REDIRECT and must escape as control flow, never be swallowed
+  // by the error handler above.
+  const safeLocale = isValidLocale(locale) ? locale : defaultLocale;
+  redirect(`/${safeLocale}/login`);
 }

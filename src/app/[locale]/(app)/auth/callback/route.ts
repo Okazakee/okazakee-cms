@@ -1,14 +1,29 @@
 import { NextResponse } from 'next/server';
 import {
+  buildAuthErrorRedirect,
   findAllowedCmsUser,
   getRequestOrigin,
   getSafeCmsNext,
   getUserGithubUsername,
   logCmsAuth,
+  resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
 import { syncCmsUserProfile } from '@/app/actions/cms/utils/profileSync';
 import { createClient } from '@/utils/supabase/server';
 
+/**
+ * GitHub OAuth callback.
+ *
+ * Finalizes the whole flow in this one request boundary: exchanges the code
+ * for a session (cookies are set on the redirect response), enforces the CMS
+ * allowlist (signing out unauthorized identities), syncs the CMS profile and
+ * redirects directly to the canonical /{locale} (or a validated same-origin
+ * `next`) — no intermediate hop, no legacy /cms paths, no client-side
+ * navigation. The password flow uses the same direct-redirect architecture.
+ *
+ * Failure paths always land on canonical /{locale}/login with a fixed,
+ * user-safe message (never raw provider/Supabase error details).
+ */
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const { searchParams } = requestUrl;
@@ -16,7 +31,8 @@ export async function GET(request: Request) {
   const next = getSafeCmsNext(searchParams.get('next'));
   const origin = getRequestOrigin(request);
 
-  // Extract locale from the URL path
+  // Locale comes from the URL path; the start route always builds a
+  // locale-prefixed callback URL.
   const pathname = requestUrl.pathname;
   const localeMatch = pathname.match(/^\/([a-z]{2})\//);
   const locale = localeMatch ? localeMatch[1] : 'en';
@@ -25,21 +41,21 @@ export async function GET(request: Request) {
     try {
       const supabase = await createClient();
 
-      // Exchange the code for a session - this replaces any existing session
+      // Exchange the code for a session - this replaces any existing session.
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (!error && data.session) {
-        // Use the user from the exchanged session directly, not getUser()
+        // Use the user from the exchanged session directly, not getUser().
         const user = data.session.user;
 
         if (!user) {
           logCmsAuth('callback-missing-user', { locale });
-          const errorUrl = new URL(`/${locale}/login`, origin);
-          errorUrl.searchParams.set('error', 'Authentication failed');
-          return NextResponse.redirect(errorUrl);
+          return NextResponse.redirect(
+            buildAuthErrorRedirect(origin, locale, 'Authentication failed')
+          );
         }
 
-        // Check allowlist by email or GitHub username
+        // Enforce the allowlist by email OR GitHub username.
         const githubUsername = getUserGithubUsername(user);
         const allowlistMatch = await findAllowedCmsUser(
           supabase,
@@ -56,20 +72,38 @@ export async function GET(request: Request) {
         });
 
         if (!allowlistMatch) {
+          // Explicitly clear the unauthorized session before redirecting.
           await supabase.auth.signOut();
-          const errorUrl = new URL(`/${locale}/cms/login`, origin);
-          errorUrl.searchParams.set(
-            'error',
-            'Access denied. Please contact the administrator.'
+          logCmsAuth('callback-unauthorized', {
+            locale,
+            userId: user.id,
+            hasEmail: Boolean(user.email),
+            hasGithubUsername: Boolean(githubUsername),
+          });
+          return NextResponse.redirect(
+            buildAuthErrorRedirect(
+              origin,
+              locale,
+              'Access denied. Please contact the administrator.'
+            )
           );
-          return NextResponse.redirect(errorUrl);
         }
 
         await syncCmsUserProfile(user);
 
-        const readyUrl = new URL(`/${locale}/auth/ready`, origin);
-        readyUrl.searchParams.set('next', next);
-        return NextResponse.redirect(readyUrl);
+        logCmsAuth('callback-success', {
+          locale,
+          userId: user.id,
+          role: allowlistMatch.role,
+          matchSource: allowlistMatch.matchSource,
+          next,
+        });
+
+        // Direct canonical redirect: /{locale} or a validated same-origin
+        // `next`, no trailing slash, no intermediate hop.
+        return NextResponse.redirect(
+          new URL(resolvePostAuthPath(locale, next), origin)
+        );
       }
 
       logCmsAuth('callback-exchange-failed', {
@@ -84,8 +118,9 @@ export async function GET(request: Request) {
     }
   }
 
-  // Auth code error, redirect to login with error
-  const errorUrl = new URL(`/${locale}/cms/login`, origin);
-  errorUrl.searchParams.set('error', 'Authentication failed');
-  return NextResponse.redirect(errorUrl);
+  // Missing, invalid, expired or reused OAuth code (or exchange failure):
+  // safe generic message, canonical login.
+  return NextResponse.redirect(
+    buildAuthErrorRedirect(origin, locale, 'Authentication failed')
+  );
 }

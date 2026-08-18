@@ -26,7 +26,6 @@ src/
         auth/
           github/start/           # /{locale}/auth/github/start
           callback/               # /{locale}/auth/callback
-          ready/                  # /{locale}/auth/ready
     actions/
       cms/
         login.ts                  # Email/password login + durable rate limit
@@ -80,10 +79,14 @@ src/
   `getCmsActionContext` / `requireAuth` / `requireAdmin` /
   `requireAllowedPostWriter`.
 - Public (unauthenticated) routes are EXACT segments only:
-  `/login`, `/auth/callback`, `/auth/github/start`, `/auth/ready` (see
+  `/login`, `/auth/callback`, `/auth/github/start` (see
   `src/utils/cmsRouteMatching.ts`). Everything else requires a session.
-- Email/password + GitHub OAuth. The OAuth/redirect flows are scheduled for a
-  dedicated review session — do not redesign them opportunistically.
+- Email/password + GitHub OAuth. Password login owns its success navigation
+  via `redirect()` in the action (see §15). GitHub OAuth: `/auth/github/start`
+  → Supabase → `/auth/callback`, which finalizes the flow in one request
+  boundary (code exchange, allowlist enforcement with sign-out on
+  unauthorized identities, profile sync, canonical `/{locale}` redirect) —
+  there is no `/auth/ready` hop and no legacy `/cms` path used internally.
 
 ## 4. Mutations, storage ordering and revalidation
 
@@ -357,7 +360,9 @@ typecheck (build first: fresh checkouts need `.next/types`).
   the login action (a client hard-navigation racing the action's RSC/cookie
   lifecycle caused a transient load error in Firefox). The client treats the
   `NEXT_REDIRECT` promise rejection as control flow — see
-  `src/app/actions/cms/login.test.ts`.
+  `src/app/actions/cms/login.test.ts`. The same single-owner pattern applies
+  to account deletion (`deleteMyAccount` → canonical `/{locale}/login`;
+  guards in `src/app/actions/cms/deleteAccount.test.ts`).
 - **Never call the limiter RPCs with the publishable-key client** — execution
   is service_role only (use `getCmsAdminClient`). The legacy single-identifier
   `cms_check_login_rate(text)` and its temporary anon grant were removed by

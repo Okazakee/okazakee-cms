@@ -13,7 +13,6 @@ describe('isCmsPublicPath', () => {
     expect(isCmsPublicPath('/en/login', 'en')).toBe(true);
     expect(isCmsPublicPath('/en/auth/callback', 'en')).toBe(true);
     expect(isCmsPublicPath('/en/auth/github/start', 'en')).toBe(true);
-    expect(isCmsPublicPath('/en/auth/ready', 'en')).toBe(true);
     expect(isCmsPublicPath('/it/login', 'it')).toBe(true);
   });
 
@@ -25,7 +24,6 @@ describe('isCmsPublicPath', () => {
     expect(isCmsPublicPath('/en/login-foo', 'en')).toBe(false);
     expect(isCmsPublicPath('/en/logins', 'en')).toBe(false);
     expect(isCmsPublicPath('/en/auth/callback-evil', 'en')).toBe(false);
-    expect(isCmsPublicPath('/en/auth/readyx', 'en')).toBe(false);
     expect(isCmsPublicPath('/en/auth/github/start/extra', 'en')).toBe(false);
   });
 
