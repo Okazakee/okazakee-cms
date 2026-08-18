@@ -18,7 +18,35 @@ type LegacyMediaQueryList = Omit<
   removeListener?: (listener: (event: MediaQueryListEvent) => void) => void;
 };
 
+const cookieMaxAge = 365 * 24 * 60 * 60;
+
+// Handles from the most recent initializeTheme() run. Re-initialization
+// detaches the previous listener before attaching a new one, so repeated
+// calls (e.g. provider remounts) never leak duplicate matchMedia listeners.
+let mediaQuery: LegacyMediaQueryList | null = null;
+let mediaChangeHandler: (() => void) | null = null;
+
 const useThemeStore = create<ThemeState>((set, get) => {
+  // Canonical theme application: mirror the resolved theme onto the DOM so
+  // Tailwind's `darkMode: 'selector'` (`dark:` variants) follows without a
+  // reload. The blocking pre-paint script in the layout applies the same
+  // class for the first paint.
+  const applyResolvedTheme = (isDark: boolean): void => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.classList.toggle('dark', isDark);
+  };
+
+  const writeModeCookie = (mode: ThemeMode): void => {
+    if (typeof document === 'undefined') return;
+    document.cookie = `themeMode=${mode}; path=/; max-age=${cookieMaxAge}`;
+  };
+
+  const writeResolvedThemeCookie = (isDark: boolean): void => {
+    if (typeof document === 'undefined') return;
+    const resolvedTheme = isDark ? 'dark' : 'light';
+    document.cookie = `resolvedTheme=${resolvedTheme}; path=/; max-age=${cookieMaxAge}`;
+  };
+
   // Helper function to determine if dark mode is active
   const isDarkActive = (mode: ThemeMode): boolean => {
     if (mode === 'dark') return true;
@@ -60,34 +88,44 @@ const useThemeStore = create<ThemeState>((set, get) => {
 
       const isDark = isDarkActive(mode);
       set({ mode, isDark });
+      applyResolvedTheme(isDark);
 
       // Sync with cookie for SSR - store the resolved theme, not the mode
-      const resolvedTheme = isDark ? 'dark' : 'light';
-      document.cookie = `themeMode=${mode}; path=/; max-age=${365 * 24 * 60 * 60}`;
-      document.cookie = `resolvedTheme=${resolvedTheme}; path=/; max-age=${365 * 24 * 60 * 60}`;
+      writeModeCookie(mode);
+      writeResolvedThemeCookie(isDark);
+
+      // Detach any listener from a previous initialization before
+      // registering a new one (prevents duplicate matchMedia listeners).
+      if (mediaQuery && mediaChangeHandler) {
+        if (typeof mediaQuery.removeEventListener === 'function') {
+          mediaQuery.removeEventListener('change', mediaChangeHandler);
+        } else if (typeof mediaQuery.removeListener === 'function') {
+          mediaQuery.removeListener(mediaChangeHandler);
+        }
+      }
 
       // Listen for system theme changes when in auto mode
-      const mediaQuery = window.matchMedia(
+      const newMediaQuery = window.matchMedia(
         '(prefers-color-scheme: dark)'
       ) as LegacyMediaQueryList;
       const handleSystemThemeChange = () => {
-        const currentMode = get().mode;
-        if (currentMode === 'auto') {
-          const isDark = mediaQuery.matches;
-          set({ isDark });
-          // Update resolved theme cookie
-          const resolvedTheme = isDark ? 'dark' : 'light';
-          document.cookie = `resolvedTheme=${resolvedTheme}; path=/; max-age=${365 * 24 * 60 * 60}`;
-        }
+        if (get().mode !== 'auto') return;
+        const isDark = newMediaQuery.matches;
+        set({ isDark });
+        applyResolvedTheme(isDark);
+        writeResolvedThemeCookie(isDark);
       };
 
-      if (typeof mediaQuery.addEventListener === 'function') {
-        mediaQuery.addEventListener('change', handleSystemThemeChange);
+      mediaQuery = newMediaQuery;
+      mediaChangeHandler = handleSystemThemeChange;
+
+      if (typeof newMediaQuery.addEventListener === 'function') {
+        newMediaQuery.addEventListener('change', handleSystemThemeChange);
         return;
       }
 
-      if (typeof mediaQuery.addListener === 'function') {
-        mediaQuery.addListener(handleSystemThemeChange);
+      if (typeof newMediaQuery.addListener === 'function') {
+        newMediaQuery.addListener(handleSystemThemeChange);
       }
     },
 
@@ -95,16 +133,12 @@ const useThemeStore = create<ThemeState>((set, get) => {
       if (typeof window !== 'undefined') {
         localStorage.setItem('themeMode', newMode);
         // Also set cookie for SSR
-        document.cookie = `themeMode=${newMode}; path=/; max-age=${365 * 24 * 60 * 60}`;
+        writeModeCookie(newMode);
       }
       const isDark = isDarkActive(newMode);
       set({ mode: newMode, isDark });
-
-      // Update resolved theme cookie
-      if (typeof window !== 'undefined') {
-        const resolvedTheme = isDark ? 'dark' : 'light';
-        document.cookie = `resolvedTheme=${resolvedTheme}; path=/; max-age=${365 * 24 * 60 * 60}`;
-      }
+      applyResolvedTheme(isDark);
+      writeResolvedThemeCookie(isDark);
     },
 
     toggleTheme: () => {
@@ -113,16 +147,12 @@ const useThemeStore = create<ThemeState>((set, get) => {
       if (typeof window !== 'undefined') {
         localStorage.setItem('themeMode', newMode);
         // Also set cookie for SSR
-        document.cookie = `themeMode=${newMode}; path=/; max-age=${365 * 24 * 60 * 60}`;
+        writeModeCookie(newMode);
       }
       const isDark = isDarkActive(newMode);
       set({ mode: newMode, isDark });
-
-      // Update resolved theme cookie
-      if (typeof window !== 'undefined') {
-        const resolvedTheme = isDark ? 'dark' : 'light';
-        document.cookie = `resolvedTheme=${resolvedTheme}; path=/; max-age=${365 * 24 * 60 * 60}`;
-      }
+      applyResolvedTheme(isDark);
+      writeResolvedThemeCookie(isDark);
     },
   };
 });
