@@ -49,4 +49,7 @@ end;
 $$;
 
 revoke all on function public.cms_lookup_allowed_user from public;
-grant execute on function public.cms_lookup_allowed_user to authenticated, service_role;
+-- Supabase grants anon/authenticated EXECUTE on new public functions by
+-- default; revoke explicitly so the allowlist RPC is not callable by anon.
+revoke execute on function public.cms_lookup_allowed_user(text, text) from anon, authenticated;
+grant execute on function public.cms_lookup_allowed_user(text, text) to authenticated, service_role;
