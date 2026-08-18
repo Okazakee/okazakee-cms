@@ -246,20 +246,19 @@ describe('lookupAllowedCmsUserViaRpc', () => {
 
   it('returns role + matchSource from an RPC result', async () => {
     const supabase = mockRpc({ role: 'admin', match_source: 'email' });
-    expect(
-      await lookupAllowedCmsUserViaRpc(supabase, 'admin@example.com')
-    ).toEqual({ role: 'admin', matchSource: 'email' });
+    expect(await lookupAllowedCmsUserViaRpc(supabase)).toEqual({
+      role: 'admin',
+      matchSource: 'email',
+    });
   });
 
   it('returns null for unknown users', async () => {
     const supabase = mockRpc(null);
-    expect(
-      await lookupAllowedCmsUserViaRpc(supabase, 'nope@b.com', 'nobody')
-    ).toBeNull();
+    expect(await lookupAllowedCmsUserViaRpc(supabase)).toBeNull();
   });
 
   it('returns null when role is not a valid CMS role', async () => {
     const supabase = mockRpc({ role: 'viewer', match_source: 'email' });
-    expect(await lookupAllowedCmsUserViaRpc(supabase, 'x@y.com')).toBeNull();
+    expect(await lookupAllowedCmsUserViaRpc(supabase)).toBeNull();
   });
 });

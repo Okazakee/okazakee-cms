@@ -103,12 +103,8 @@ export async function updateSession(request: NextRequest, locale: string) {
 
   if (user && !isPublic) {
     // Allowlist is internal data: the middleware (Edge Runtime) calls the
-    // SECURITY DEFINER RPC instead of reading the table directly.
-    const allowlistMatch = await lookupAllowedCmsUserViaRpc(
-      supabase,
-      user.email,
-      getUserGithubUsername(user)
-    );
+    // SECURITY DEFINER RPC — identity derived from the JWT, no parameters.
+    const allowlistMatch = await lookupAllowedCmsUserViaRpc(supabase);
 
     if (!allowlistMatch) {
       logCmsAuth('middleware-unauthorized', {

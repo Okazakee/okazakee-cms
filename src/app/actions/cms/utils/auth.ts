@@ -163,19 +163,17 @@ export async function findAllowedCmsUser(
  *
  * The middleware cannot use the service_role client (anti-pattern: the
  * server secret would be embedded in the edge bundle). Instead it calls the
- * `cms_lookup_allowed_user` SECURITY DEFINER RPC, which has a fixed
- * `search_path` and full-qualified table names. The RPC is granted EXECUTE
- * to `authenticated` only; anon has no path to the allowlist.
+ * `cms_lookup_current_user` SECURITY DEFINER RPC, which derives the caller's
+ * identity from the JWT (auth.uid()) — no caller-supplied identity
+ * parameters, so an authenticated session cannot be used to enumerate the
+ * allowlist by probing arbitrary emails/usernames. The RPC has a fixed
+ * `search_path` and fully qualified table names, and is granted EXECUTE to
+ * `authenticated` only; anon has no path to the allowlist.
  */
 export async function lookupAllowedCmsUserViaRpc(
-  supabase: Pick<SupabaseClient, 'rpc'>,
-  email?: string | null,
-  githubUsername?: string | null
+  supabase: Pick<SupabaseClient, 'rpc'>
 ): Promise<CmsAllowlistMatch | null> {
-  const { data } = await supabase.rpc('cms_lookup_allowed_user', {
-    p_email: email ?? null,
-    p_github_username: githubUsername ?? null,
-  });
+  const { data } = await supabase.rpc('cms_lookup_current_user');
 
   if (
     data &&
