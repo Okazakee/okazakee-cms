@@ -1,12 +1,11 @@
 'use client';
 
-import { Menu } from 'lucide-react';
-import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { getCmsBootData } from '@/app/actions/cms/getUser';
 import AccountSection from '@/components/common/cms/AccountSection';
+import { CmsHeader } from '@/components/common/cms/CmsHeader';
 import SidePanel from '@/components/common/cms/SidePanel';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 
@@ -46,23 +45,11 @@ const UsersSection = dynamic(
   () => import('@/components/cms/sections/Users/UsersSection'),
   { ssr: false }
 );
+
 import { useCmsStore } from '@/store/cmsStore';
 
 export default function CMS() {
   const t = useTranslations('cms');
-  const sectionLabels: Record<string, string> = {
-    hero: t('page.sectionLabels.hero'),
-    skills: t('page.sectionLabels.skills'),
-    career: t('page.sectionLabels.career'),
-    portfolio: t('page.sectionLabels.portfolio'),
-    blog: t('page.sectionLabels.blog'),
-    contacts: t('page.sectionLabels.contacts'),
-    layout: t('page.sectionLabels.layout'),
-    'privacy-policy': t('page.sectionLabels.privacy-policy'),
-    users: t('page.sectionLabels.users'),
-    account: t('page.sectionLabels.account'),
-    settings: t('page.sectionLabels.settings'),
-  };
   const {
     setUser,
     activeSection,
@@ -236,43 +223,7 @@ export default function CMS() {
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Mobile Header - Sticky at top */}
-      <div className="lg:hidden flex-shrink-0 z-30 bg-bglight dark:bg-bgdark border-b border-gray-200 dark:border-darkgray px-4 py-3 flex items-center justify-between">
-        {user && (
-          <div className="flex items-center gap-2">
-            <div className="relative w-8 h-8 rounded-full overflow-hidden bg-gray-200 dark:bg-darkergray flex-shrink-0">
-              {user.avatarUrl && user.avatarUrl.length > 0 ? (
-                <Image
-                  src={user.avatarUrl}
-                  alt={user.displayName || 'User'}
-                  fill
-                  sizes="32px"
-                  className="object-cover"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-main text-white text-sm font-bold">
-                  {(user.displayName || 'U').charAt(0).toUpperCase()}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        <div className="flex-1 text-center">
-          <h1 className="text-lg font-bold text-main">
-            {activeSection
-              ? sectionLabels[activeSection] || 'CMS Dashboard'
-              : t('page.cmsDashboard')}
-          </h1>
-        </div>
-        <button
-          type="button"
-          onClick={() => setIsDrawerOpen(true)}
-          className="p-2 text-darktext dark:text-lighttext hover:text-main transition-colors"
-          aria-label="Open menu"
-        >
-          <Menu className="w-6 h-6" />
-        </button>
-      </div>
+      <CmsHeader onMenuClick={() => setIsDrawerOpen(true)} />
 
       {/* CMS Content Area */}
       <div className="bg-bglight dark:bg-bgdark flex-1 min-h-0 overflow-hidden">

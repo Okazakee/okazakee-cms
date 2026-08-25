@@ -3,7 +3,6 @@
 import {
   Briefcase,
   Contact,
-  Crown,
   FileText,
   Home,
   LayoutGrid,
@@ -15,10 +14,6 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { GithubIcon } from '@/components/common/BrandIcons';
-import titleCms from '@public/title-cms.png';
-import titleCmsLight from '@public/title-cms-lightmode.png';
-import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import LanguageToggle from '@/components/layout/LanguageToggle';
@@ -184,28 +179,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             : 'relative'
         }`}
       >
-        {/* Mobile Header */}
+        {/* Mobile drawer close */}
         {onClose && (
-          <div className="p-4 border-b border-gray-200 dark:border-darkgray flex-shrink-0 flex items-start justify-between lg:hidden">
-            <div className="flex-1">
-              <Image
-                src={titleCms}
-                alt="Okazakee CMS"
-                width={2172}
-                height={724}
-                className="w-52 h-auto relative -left-3 hidden dark:block"
-              />
-              <Image
-                src={titleCmsLight}
-                alt="Okazakee CMS"
-                width={2172}
-                height={724}
-                className="w-52 h-auto relative -left-3 dark:hidden"
-              />
-              <p className="text-gray-500 dark:text-lighttext2 text-xs mt-1">
-                {t('sidebar.subtitle')}
-              </p>
-            </div>
+          <div className="flex justify-end p-3 lg:hidden flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
@@ -214,81 +190,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             >
               <X className="w-6 h-6" />
             </button>
-          </div>
-        )}
-
-        {/* Desktop Header */}
-        <div className="hidden lg:block p-4 border-b border-gray-200 dark:border-darkgray flex-shrink-0">
-          <div className="flex flex-col items-center text-center">
-            <Image
-              src={titleCms}
-              alt="Okazakee CMS"
-              width={2172}
-              height={724}
-              className="w-44 h-auto hidden dark:block"
-            />
-            <Image
-              src={titleCmsLight}
-              alt="Okazakee CMS"
-              width={2172}
-              height={724}
-              className="w-44 h-auto dark:hidden"
-            />
-            <p className="text-gray-500 dark:text-lighttext2 text-xs mt-1">
-              {t('sidebar.subtitle')}
-            </p>
-          </div>
-        </div>
-
-        {/* User Profile */}
-        {user && (
-          <div className="p-4 border-b border-gray-200 dark:border-darkgray flex-shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gray-200 dark:bg-darkergray flex-shrink-0">
-                {user.avatarUrl && user.avatarUrl.length > 0 ? (
-                  <Image
-                    src={user.avatarUrl}
-                    alt={user.displayName || 'User'}
-                    fill
-                    sizes="48px"
-                    className="object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-main text-white text-lg font-bold">
-                    {(user.displayName || 'U').charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-darktext dark:text-lighttext truncate">
-                    {user.displayName}
-                  </span>
-                  {isAdmin && (
-                    <Crown className="w-4 h-4 text-yellow-500 flex-shrink-0" />
-                  )}
-                </div>
-                <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-lighttext2">
-                  {user.authProvider === 'github' ? (
-                    <>
-                      <GithubIcon className="w-3 h-3" />
-                      <span>@{user.githubUsername}</span>
-                    </>
-                  ) : (
-                    <span className="truncate">{user.email}</span>
-                  )}
-                </div>
-                <span
-                  className={`text-xs px-1.5 py-0.5 rounded ${
-                    isAdmin
-                      ? 'bg-yellow-500/20 text-yellow-500'
-                      : 'bg-blue-500/20 text-blue-400'
-                  }`}
-                >
-                  {user.role || 'user'}
-                </span>
-              </div>
-            </div>
           </div>
         )}
 
