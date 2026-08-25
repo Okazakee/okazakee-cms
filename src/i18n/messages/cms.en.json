@@ -386,7 +386,20 @@
     "deleting": "Deleting...",
     "errorUploadAvatar": "Failed to upload avatar",
     "errorUpdateName": "Failed to update display name",
-    "errorDeleteAccount": "Failed to delete account"
+    "errorDeleteAccount": "Failed to delete account",
+    "passkeysTitle": "Passkeys",
+    "passkeysDesc": "Sign in with your fingerprint, face or device PIN, no password needed.",
+    "passkeysEmpty": "No passkeys registered yet. Add one to sign in without GitHub.",
+    "addPasskey": "Add passkey",
+    "addingPasskey": "Waiting for authenticator...",
+    "passkeyUnnamed": "Unnamed passkey",
+    "passkeyLastUsed": "Last used {lastUsed}",
+    "passkeyNeverUsed": "Never used",
+    "passkeyDeleteConfirm": "Delete \"{name}\"? You can add it back later.",
+    "passkeyDeleteButton": "Delete",
+    "passkeysLoadError": "Failed to load passkeys",
+    "passkeysRegisterError": "Failed to register passkey",
+    "passkeysDeleteError": "Failed to delete passkey"
   },
   "users": {
     "title": "Manage Users",

@@ -1,10 +1,11 @@
 'use client';
 
-import { CircleUserRound, Loader2 } from 'lucide-react';
-import { GithubIcon } from '@/components/common/BrandIcons';
-import { useSearchParams } from 'next/navigation';
+import { CircleUserRound, Fingerprint, Loader2 } from 'lucide-react';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
+import { GithubIcon } from '@/components/common/BrandIcons';
+import { createClient } from '@/utils/supabase/client';
 
 // Remembered identity from the last successful boot: lets a returning user
 // (stale session, expired token, logout) see who they signed in as last time.
@@ -31,6 +32,9 @@ function readLastUser(): LastCmsUser | null {
 function LoginFormContent({ initialError }: { initialError?: string | null }) {
   const [error, setError] = useState<string | null>(initialError || null);
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
+  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  // WebAuthn platform-authenticator availability (browser-only signal).
+  const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   // Starts null so SSR and hydration match; filled after mount from
   // localStorage only (never from cookies — there is no usable session here).
   const [lastUser, setLastUser] = useState<LastCmsUser | null>(null);
@@ -38,6 +42,19 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
 
   useEffect(() => {
     setLastUser(readLastUser());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof window.PublicKeyCredential === 'undefined') return;
+    window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable?.()
+      .then((available) => {
+        if (!cancelled) setPasskeyAvailable(Boolean(available));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Check for error from OAuth callback
@@ -57,6 +74,29 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
     window.location.href = '/auth/github/start';
   };
 
+  // Standalone passkey sign-in: creates a full session (same authority as
+  // OAuth). The browser client persists session cookies; a full navigation
+  // lets the proxy validate the session and the allowlist.
+  const handlePasskeyLogin = async () => {
+    setIsPasskeyLoading(true);
+    setError(null);
+    try {
+      const { error } = await createClient().auth.signInWithPasskey();
+      if (error) {
+        setError('Passkey sign-in failed. Please try again.');
+        setIsPasskeyLoading(false);
+        return;
+      }
+      window.location.href = '/';
+    } catch (err) {
+      const cancelled = err instanceof Error && err.name === 'NotAllowedError';
+      if (!cancelled) {
+        setError('Passkey sign-in failed. Please try again.');
+      }
+      setIsPasskeyLoading(false);
+    }
+  };
+
   return (
     <>
       {lastUser?.avatarUrl ? (
@@ -74,9 +114,14 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
       )}
 
       <h1 className="text-3xl font-bold text-center mb-8 text-darktext dark:text-lighttext">
-        {lastUser?.displayName
-          ? `Welcome back, ${lastUser.displayName}`
-          : 'CMS Login'}
+        {lastUser?.displayName ? (
+          <>
+            Welcome back
+            <span className="block text-main">{lastUser.displayName}</span>
+          </>
+        ) : (
+          'CMS Login'
+        )}
       </h1>
 
       {error && (
@@ -88,7 +133,7 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
       <button
         type="button"
         onClick={handleGitHubLogin}
-        disabled={isGitHubLoading}
+        disabled={isGitHubLoading || isPasskeyLoading}
         className="w-full flex items-center justify-center gap-3 text-xl bg-[#24292e] text-white transition-all py-3.5 rounded-lg hover:bg-[#1b1f23] focus:outline-hidden disabled:opacity-50"
       >
         {isGitHubLoading ? (
@@ -98,6 +143,22 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
         )}
         Continue with GitHub
       </button>
+
+      {passkeyAvailable && (
+        <button
+          type="button"
+          onClick={handlePasskeyLogin}
+          disabled={isGitHubLoading || isPasskeyLoading}
+          className="w-full flex items-center justify-center gap-3 text-lg text-main border border-main/60 transition-all py-3 rounded-lg hover:bg-main/10 focus:outline-hidden disabled:opacity-50 mt-3"
+        >
+          {isPasskeyLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Fingerprint className="w-5 h-5" />
+          )}
+          Use passkey
+        </button>
+      )}
     </>
   );
 }

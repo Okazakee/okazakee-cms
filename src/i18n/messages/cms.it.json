@@ -386,7 +386,20 @@
     "deleting": "Eliminazione...",
     "errorUploadAvatar": "Impossibile caricare l'avatar",
     "errorUpdateName": "Impossibile aggiornare il nome visualizzato",
-    "errorDeleteAccount": "Impossibile eliminare l'account"
+    "errorDeleteAccount": "Impossibile eliminare l'account",
+    "passkeysTitle": "Passkey",
+    "passkeysDesc": "Accedi con impronta, volto o PIN del dispositivo, senza password.",
+    "passkeysEmpty": "Nessuna passkey registrata. Aggiungine una per accedere senza GitHub.",
+    "addPasskey": "Aggiungi passkey",
+    "addingPasskey": "In attesa dell'autenticatore...",
+    "passkeyUnnamed": "Passkey senza nome",
+    "passkeyLastUsed": "Ultimo uso {lastUsed}",
+    "passkeyNeverUsed": "Mai usata",
+    "passkeyDeleteConfirm": "Eliminare \"{name}\"? Potrai aggiungerla di nuovo in seguito.",
+    "passkeyDeleteButton": "Elimina",
+    "passkeysLoadError": "Impossibile caricare le passkey",
+    "passkeysRegisterError": "Impossibile registrare la passkey",
+    "passkeysDeleteError": "Impossibile eliminare la passkey"
   },
   "users": {
     "title": "Gestisci Utenti",

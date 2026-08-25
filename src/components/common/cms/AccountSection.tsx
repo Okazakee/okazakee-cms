@@ -1,10 +1,22 @@
 'use client';
 
-import { Camera, Check, Mail, Pencil, Trash2, User, X } from 'lucide-react';
+import {
+  Camera,
+  Check,
+  Fingerprint,
+  Mail,
+  Pencil,
+  Plus,
+  Trash2,
+  User,
+  X,
+} from 'lucide-react';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { useTranslations } from 'next-intl';
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
+import { createClient } from '@/utils/supabase/client';
+import type { PasskeyListItem } from '@supabase/auth-js';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
 import { updateMyProfile } from '@/app/actions/cms/sections/usersActions';
@@ -22,6 +34,13 @@ export default function AccountSection() {
   const [savingName, setSavingName] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [passkeys, setPasskeys] = useState<PasskeyListItem[]>([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(true);
+  const [isRegisteringPasskey, setIsRegisteringPasskey] = useState(false);
+  const [passkeyToDelete, setPasskeyToDelete] =
+    useState<PasskeyListItem | null>(null);
+  const [isDeletingPasskey, setIsDeletingPasskey] = useState(false);
+  const [passkeysError, setPasskeysError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -29,6 +48,81 @@ export default function AccountSection() {
       setEditedName(user.displayName);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    createClient()
+      .auth.passkey.list()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          setPasskeysError(t('account.passkeysLoadError'));
+          return;
+        }
+        setPasskeys(data ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setPasskeysError(t('account.passkeysLoadError'));
+      })
+      .finally(() => {
+        if (!cancelled) setPasskeysLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, t]);
+
+  const refreshPasskeys = async () => {
+    const { data, error } = await createClient().auth.passkey.list();
+    if (error) {
+      setPasskeysError(t('account.passkeysLoadError'));
+      return;
+    }
+    setPasskeys(data ?? []);
+  };
+
+  const handleRegisterPasskey = async () => {
+    setIsRegisteringPasskey(true);
+    setPasskeysError(null);
+    try {
+      const { error } = await createClient().auth.registerPasskey();
+      if (error) {
+        setPasskeysError(t('account.passkeysRegisterError'));
+        return;
+      }
+      await refreshPasskeys();
+    } catch (err) {
+      // User dismissed the authenticator prompt — not a failure.
+      const cancelled = err instanceof Error && err.name === 'NotAllowedError';
+      if (!cancelled) {
+        setPasskeysError(t('account.passkeysRegisterError'));
+      }
+    } finally {
+      setIsRegisteringPasskey(false);
+    }
+  };
+
+  const handleDeletePasskey = async () => {
+    if (!passkeyToDelete) return;
+    setIsDeletingPasskey(true);
+    setPasskeysError(null);
+    try {
+      const { error } = await createClient().auth.passkey.delete({
+        passkeyId: passkeyToDelete.id,
+      });
+      if (error) {
+        setPasskeysError(t('account.passkeysDeleteError'));
+        return;
+      }
+      setPasskeys((prev) => prev.filter((p) => p.id !== passkeyToDelete.id));
+      setPasskeyToDelete(null);
+    } catch {
+      setPasskeysError(t('account.passkeysDeleteError'));
+    } finally {
+      setIsDeletingPasskey(false);
+    }
+  };
 
   const handleAvatarClick = () => {
     fileInputRef.current?.click();
@@ -349,6 +443,114 @@ export default function AccountSection() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Passkeys */}
+      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-6">
+        <h2 className="text-xl font-bold text-darktext dark:text-lighttext mb-4 flex items-center gap-2">
+          <Fingerprint className="w-5 h-5" />
+          {t('account.passkeysTitle')}
+        </h2>
+        <p className="text-gray-500 dark:text-lighttext2 mb-4">
+          {t('account.passkeysDesc')}
+        </p>
+
+        {passkeysError && (
+          <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 mb-4">
+            <p className="text-red-500 text-sm">{passkeysError}</p>
+          </div>
+        )}
+
+        {passkeysLoading ? (
+          <div className="flex justify-center py-4">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-main" />
+          </div>
+        ) : passkeys.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-lighttext2 mb-4">
+            {t('account.passkeysEmpty')}
+          </p>
+        ) : (
+          <ul className="space-y-2 mb-4">
+            {passkeys.map((passkey) => (
+              <li
+                key={passkey.id}
+                className="flex items-center justify-between gap-3 px-3 py-2 bg-white dark:bg-darkestgray rounded-lg"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm text-darktext dark:text-lighttext truncate">
+                    {passkey.friendly_name || t('account.passkeyUnnamed')}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-lighttext2">
+                    {passkey.last_used_at
+                      ? t('account.passkeyLastUsed', {
+                          lastUsed: new Date(
+                            passkey.last_used_at
+                          ).toLocaleDateString(),
+                        })
+                      : t('account.passkeyNeverUsed')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPasskeyToDelete(passkey)}
+                  disabled={isDeletingPasskey}
+                  className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 disabled:opacity-50 flex-shrink-0"
+                  aria-label={t('account.passkeyDeleteButton')}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {passkeyToDelete ? (
+          <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/50 rounded-lg p-3">
+            <p className="text-sm text-red-400">
+              {t('account.passkeyDeleteConfirm', {
+                name:
+                  passkeyToDelete.friendly_name || t('account.passkeyUnnamed'),
+              })}
+            </p>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setPasskeyToDelete(null)}
+                disabled={isDeletingPasskey}
+                className="px-3 py-1.5 text-sm rounded-lg text-gray-500 dark:text-lighttext2 hover:bg-gray-200 dark:hover:bg-darkgray"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleDeletePasskey}
+                disabled={isDeletingPasskey}
+                className="px-3 py-1.5 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center gap-2"
+              >
+                {isDeletingPasskey && (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {t('account.passkeyDeleteButton')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={handleRegisterPasskey}
+            disabled={isRegisteringPasskey}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-main text-white hover:opacity-90 disabled:opacity-50 text-sm"
+          >
+            {isRegisteringPasskey ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Plus className="w-4 h-4" />
+            )}
+            {isRegisteringPasskey
+              ? t('account.addingPasskey')
+              : t('account.addPasskey')}
+          </button>
+        )}
       </div>
 
       {/* Danger Zone */}
