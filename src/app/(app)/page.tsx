@@ -119,6 +119,20 @@ export default function CMS() {
         const fetchedUser = bootData.user;
         setUser(fetchedUser);
 
+        // Remember the identity for the login screen ("Welcome back" +
+        // avatar when the next visit arrives with a dead session).
+        try {
+          localStorage.setItem(
+            'cms_last_user',
+            JSON.stringify({
+              displayName: fetchedUser.displayName,
+              avatarUrl: fetchedUser.avatarUrl,
+            })
+          );
+        } catch {
+          // Private mode / storage full: purely cosmetic, ignore.
+        }
+
         // Validate saved section based on user role
         const defaultSection = fetchedUser.role === 'admin' ? 'hero' : 'blog';
         const adminOnlySections = [

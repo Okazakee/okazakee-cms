@@ -118,6 +118,11 @@ export default function AccountSection() {
 
   const handleDeleteAccount = async () => {
     try {
+      localStorage.removeItem('cms_last_user');
+    } catch {
+      // Ignore storage failures: deletion must proceed regardless.
+    }
+    try {
       setIsDeleting(true);
       setError(null);
       const result = await deleteMyAccount();
