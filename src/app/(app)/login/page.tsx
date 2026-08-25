@@ -1,12 +1,17 @@
 'use client';
 
+import type { PasskeyAuthenticationOptionsResponse } from '@supabase/auth-js';
 import { CircleUserRound, Fingerprint, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { createClient } from '@/utils/supabase/client';
-import { signInWithRequiredPasskeyMediation } from '@/utils/supabase/passkeys';
+import {
+  getPasskeyAssertion,
+  isPasskeyChallengeFresh,
+  verifyPasskeyAssertion,
+} from '@/utils/supabase/passkeys';
 
 // Remembered identity from the last successful boot: lets a returning user
 // (stale session, expired token, logout) see who they signed in as last time.
@@ -34,6 +39,10 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
   const [error, setError] = useState<string | null>(initialError || null);
   const [isGitHubLoading, setIsGitHubLoading] = useState(false);
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  const [isPasskeyPreparing, setIsPasskeyPreparing] = useState(false);
+  const passkeyChallengeRef =
+    useRef<PasskeyAuthenticationOptionsResponse | null>(null);
+  const isPasskeyPreparingRef = useRef(false);
   // WebAuthn platform-authenticator availability (browser-only signal).
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   // Starts null so SSR and hydration match; filled after mount from
@@ -57,6 +66,30 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
       cancelled = true;
     };
   }, []);
+  const preparePasskeyLogin = useCallback(async () => {
+    if (isPasskeyPreparingRef.current) return;
+
+    isPasskeyPreparingRef.current = true;
+    setIsPasskeyPreparing(true);
+    try {
+      const { data, error } = await createClient().auth.passkey.startAuthentication();
+      if (error || !data) {
+        throw error ?? new Error('Passkey authentication options are missing');
+      }
+      passkeyChallengeRef.current = data;
+    } catch (err) {
+      console.error('Passkey sign-in preparation failed:', err);
+      setError('Passkey sign-in could not be prepared. Please try again.');
+    } finally {
+      isPasskeyPreparingRef.current = false;
+      setIsPasskeyPreparing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (passkeyAvailable) void preparePasskeyLogin();
+  }, [passkeyAvailable, preparePasskeyLogin]);
+
 
   // Check for error from OAuth callback
   useEffect(() => {
@@ -75,39 +108,53 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
     window.location.href = '/auth/github/start';
   };
 
-  // Standalone passkey sign-in: creates a full session (same authority as
-  // OAuth). The browser client persists session cookies; a full navigation
-  // lets the proxy validate the session and the allowlist.
-  const handlePasskeyLogin = async () => {
-    setIsPasskeyLoading(true);
+  // Waterfox Android requires navigator.credentials.get() while transient
+  // user activation is still active. The challenge is prepared before click;
+  // this handler synchronously starts the assertion without a network await.
+  const handlePasskeyLogin = () => {
     setError(null);
-    try {
-      const { error } = await signInWithRequiredPasskeyMediation(
-        createClient().auth
-      );
-      if (error) {
-        console.error('Passkey sign-in failed:', error);
-        setError(
-          `Passkey sign-in failed: ${error.message || error.name}. Please try again.`
+    const challenge = passkeyChallengeRef.current;
+    if (
+      !challenge ||
+      !isPasskeyChallengeFresh(challenge.expires_at)
+    ) {
+      void preparePasskeyLogin();
+      return;
+    }
+
+    passkeyChallengeRef.current = null;
+    setIsPasskeyLoading(true);
+
+    void getPasskeyAssertion(challenge.options)
+      .then(async ({ data, error: assertionError }) => {
+        if (assertionError) throw assertionError;
+        if (!data) {
+          throw new Error('Passkey authentication did not return a credential');
+        }
+
+        const { error: verificationError } = await verifyPasskeyAssertion(
+          createClient().auth,
+          challenge.challenge_id,
+          data
         );
-        setIsPasskeyLoading(false);
-        return;
-      }
-      window.location.href = '/';
-    } catch (err) {
-      const name = err instanceof Error ? err.name : '';
-      const message = err instanceof Error ? err.message : '';
-      // NotAllowedError: the user dismissed the authenticator prompt.
-      if (name !== 'NotAllowedError') {
+        if (verificationError) throw verificationError;
+
+        window.location.href = '/';
+      })
+      .catch((err) => {
+        const name = err instanceof Error ? err.name : '';
+        const message = err instanceof Error ? err.message : '';
         console.error('Passkey sign-in failed:', err);
         setError(
           name === 'NotFoundError'
             ? 'No passkey found on this device. Sign in with GitHub, then add one from the Account tab.'
             : `Passkey sign-in failed: ${message || name || 'unknown error'}. Please try again.`
         );
-      }
-      setIsPasskeyLoading(false);
-    }
+      })
+      .finally(() => {
+        setIsPasskeyLoading(false);
+        void preparePasskeyLogin();
+      });
   };
 
   return (
@@ -161,15 +208,17 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
         <button
           type="button"
           onClick={handlePasskeyLogin}
-          disabled={isGitHubLoading || isPasskeyLoading}
+          disabled={
+            isGitHubLoading || isPasskeyLoading || isPasskeyPreparing
+          }
           className="w-full flex items-center justify-center gap-3 text-lg text-main border border-main/60 transition-all py-3 rounded-lg hover:bg-main/10 focus:outline-hidden disabled:opacity-50 mt-3"
         >
-          {isPasskeyLoading ? (
+          {isPasskeyLoading || isPasskeyPreparing ? (
             <Loader2 className="w-5 h-5 animate-spin" />
           ) : (
             <Fingerprint className="w-5 h-5" />
           )}
-          Use passkey
+          {isPasskeyPreparing ? 'Preparing passkey...' : 'Use passkey'}
         </button>
       )}
     </>

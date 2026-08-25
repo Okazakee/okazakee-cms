@@ -8,6 +8,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 type PasskeyAuth = Pick<SupabaseClient['auth'], 'passkey'>;
 type PasskeyCredentialRequest = Parameters<typeof getCredential>[0];
+type PasskeyOptions = Parameters<typeof deserializeCredentialRequestOptions>[0];
+type PasskeyCredential = Parameters<
+  typeof serializeCredentialRequestResponse
+>[0];
+
+export function isPasskeyChallengeFresh(
+  expiresAt: number,
+  now: number = Date.now()
+): boolean {
+  return expiresAt * 1000 > now + 10_000;
+}
 
 export function requirePasskeyMediation(
   publicKey: PasskeyCredentialRequest['publicKey']
@@ -15,24 +26,19 @@ export function requirePasskeyMediation(
   return { mediation: 'required', publicKey };
 }
 
-export async function signInWithRequiredPasskeyMediation(
-  auth: PasskeyAuth
-): Promise<AuthPasskeyAuthenticationVerifyResponse> {
-  const { data, error } = await auth.passkey.startAuthentication();
-  if (error) return { data: null, error };
-  if (!data) throw new Error('Passkey authentication options are missing');
-
-  const { data: credential, error: credentialError } = await getCredential(
-    requirePasskeyMediation(deserializeCredentialRequestOptions(data.options))
+export function getPasskeyAssertion(options: PasskeyOptions) {
+  return getCredential(
+    requirePasskeyMediation(deserializeCredentialRequestOptions(options))
   );
+}
 
-  if (credentialError) return { data: null, error: credentialError };
-  if (!credential) {
-    throw new Error('Passkey authentication did not return a credential');
-  }
-
+export async function verifyPasskeyAssertion(
+  auth: PasskeyAuth,
+  challengeId: string,
+  credential: PasskeyCredential
+): Promise<AuthPasskeyAuthenticationVerifyResponse> {
   return auth.passkey.verifyAuthentication({
-    challengeId: data.challenge_id,
+    challengeId,
     credential: serializeCredentialRequestResponse(credential),
   });
 }

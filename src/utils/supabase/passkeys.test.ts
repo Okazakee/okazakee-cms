@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { requirePasskeyMediation } from '@/utils/supabase/passkeys';
+import {
+  isPasskeyChallengeFresh,
+  requirePasskeyMediation,
+} from '@/utils/supabase/passkeys';
+
+describe('isPasskeyChallengeFresh', () => {
+  it('reserves time to obtain a replacement challenge', () => {
+    const now = 1_000_000;
+
+    expect(isPasskeyChallengeFresh(1_011, now)).toBe(true);
+    expect(isPasskeyChallengeFresh(1_010, now)).toBe(false);
+  });
+});
 
 describe('requirePasskeyMediation', () => {
   it('uses a modal request for an explicit sign-in button', () => {
