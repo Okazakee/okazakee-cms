@@ -399,7 +399,8 @@
     "passkeyDeleteButton": "Elimina",
     "passkeysLoadError": "Impossibile caricare le passkey",
     "passkeysRegisterError": "Impossibile registrare la passkey",
-    "passkeysDeleteError": "Impossibile eliminare la passkey"
+    "passkeysDeleteError": "Impossibile eliminare la passkey",
+    "passkeyAlreadyRegistered": "Questa passkey è già registrata."
   },
   "users": {
     "title": "Gestisci Utenti",

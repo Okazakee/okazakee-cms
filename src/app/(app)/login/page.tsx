@@ -83,15 +83,22 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
     try {
       const { error } = await createClient().auth.signInWithPasskey();
       if (error) {
-        setError('Passkey sign-in failed. Please try again.');
+        console.error('Passkey sign-in failed:', error);
+        setError(`Passkey sign-in failed (${error.name}). Please try again.`);
         setIsPasskeyLoading(false);
         return;
       }
       window.location.href = '/';
     } catch (err) {
-      const cancelled = err instanceof Error && err.name === 'NotAllowedError';
-      if (!cancelled) {
-        setError('Passkey sign-in failed. Please try again.');
+      const name = err instanceof Error ? err.name : '';
+      // NotAllowedError: the user dismissed the authenticator prompt.
+      if (name !== 'NotAllowedError') {
+        console.error('Passkey sign-in failed:', err);
+        setError(
+          name === 'NotFoundError'
+            ? 'No passkey found on this device. Sign in with GitHub, then add one from the Account tab.'
+            : `Passkey sign-in failed (${name || 'unknown error'}). Please try again.`
+        );
       }
       setIsPasskeyLoading(false);
     }

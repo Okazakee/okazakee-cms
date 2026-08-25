@@ -399,7 +399,8 @@
     "passkeyDeleteButton": "Delete",
     "passkeysLoadError": "Failed to load passkeys",
     "passkeysRegisterError": "Failed to register passkey",
-    "passkeysDeleteError": "Failed to delete passkey"
+    "passkeysDeleteError": "Failed to delete passkey",
+    "passkeyAlreadyRegistered": "This passkey is already registered."
   },
   "users": {
     "title": "Manage Users",

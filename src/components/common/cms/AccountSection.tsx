@@ -82,26 +82,6 @@ export default function AccountSection() {
     setPasskeys(data ?? []);
   };
 
-  const handleRegisterPasskey = async () => {
-    setIsRegisteringPasskey(true);
-    setPasskeysError(null);
-    try {
-      const { error } = await createClient().auth.registerPasskey();
-      if (error) {
-        setPasskeysError(t('account.passkeysRegisterError'));
-        return;
-      }
-      await refreshPasskeys();
-    } catch (err) {
-      // User dismissed the authenticator prompt — not a failure.
-      const cancelled = err instanceof Error && err.name === 'NotAllowedError';
-      if (!cancelled) {
-        setPasskeysError(t('account.passkeysRegisterError'));
-      }
-    } finally {
-      setIsRegisteringPasskey(false);
-    }
-  };
 
   const handleDeletePasskey = async () => {
     if (!passkeyToDelete) return;
@@ -153,10 +133,10 @@ export default function AccountSection() {
       }
       const warning = revalidationWarning(result);
       if (warning) setError(warning);
-      // Refresh user data
-      const refreshedUser = await getUser();
-      if (refreshedUser) {
-        setUser(refreshedUser);
+
+      const updated = await getUser();
+      if (updated) {
+        setUser(updated);
       }
     } catch (err) {
       console.error('Error uploading avatar:', err);
@@ -165,6 +145,33 @@ export default function AccountSection() {
       );
     } finally {
       setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleRegisterPasskey = async () => {
+    setIsRegisteringPasskey(true);
+    setPasskeysError(null);
+    try {
+      const { error } = await createClient().auth.registerPasskey();
+      if (error) {
+        console.error('Passkey registration failed:', error);
+        setPasskeysError(t('account.passkeysRegisterError'));
+        return;
+      }
+      await refreshPasskeys();
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      // NotAllowedError: the user dismissed the authenticator prompt.
+      if (name !== 'NotAllowedError') {
+        console.error('Passkey registration failed:', err);
+        setPasskeysError(
+          name === 'InvalidStateError'
+            ? t('account.passkeyAlreadyRegistered')
+            : t('account.passkeysRegisterError')
+        );
+      }
+    } finally {
+      setIsRegisteringPasskey(false);
     }
   };
 
