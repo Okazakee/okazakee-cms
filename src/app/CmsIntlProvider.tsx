@@ -1,7 +1,7 @@
 'use client';
 
 import { NextIntlClientProvider } from 'next-intl';
-import { useEffect, type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import useUiLocaleStore from '@/store/uiLocaleStore';
 
 export type CmsLocaleMessages = {
@@ -35,6 +35,7 @@ export function CmsIntlProvider({
   return (
     <NextIntlClientProvider
       locale={locale}
+      timeZone="Europe/Rome"
       messages={messages[locale] as Record<string, never>}
     >
       {children}
