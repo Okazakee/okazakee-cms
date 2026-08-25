@@ -7,7 +7,7 @@ import { diffMonths, formatMonthYear } from '@/utils/formatDate';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { defaultLocale } from '@/i18n/routing';
+import useUiLocaleStore from '@/store/uiLocaleStore';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface PreviewCareerEntry {
@@ -34,7 +34,7 @@ interface CareerPreviewProps {
 }
 
 export function CareerPreview({ entries }: CareerPreviewProps) {
-  const locale = defaultLocale;
+  const locale = useUiLocaleStore((s) => s.locale);
   const t = useTranslations('career-section');
 
   const formatDate = (dateString: string | null) => {

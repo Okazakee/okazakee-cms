@@ -7,7 +7,7 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import ResumeButton from '@/components/common/ResumeButton';
 import type { Contact, ResumeData } from '@/types/fetchedData.types';
-import { defaultLocale } from '@/i18n/routing';
+import useUiLocaleStore from '@/store/uiLocaleStore';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface ContactsPreviewProps {
@@ -80,7 +80,7 @@ export function ContactsPreview({
   contacts,
   resumeData,
 }: ContactsPreviewProps) {
-  const locale = defaultLocale;
+  const locale = useUiLocaleStore((s) => s.locale);
   const t = useTranslations('contacts-section');
 
   // Sort contacts by position

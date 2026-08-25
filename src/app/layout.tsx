@@ -1,11 +1,11 @@
 import './globals.css';
 import localFont from 'next/font/local';
-import { NextIntlClientProvider } from 'next-intl';
 import { Suspense } from 'react';
 import cmsEn from '@/i18n/messages/cms.en.json';
+import cmsIt from '@/i18n/messages/cms.it.json';
 import { publicConfig } from '@/config/public';
-import { defaultLocale } from '@/i18n/routing';
 import { getTranslationsSupabase } from '@/utils/getData';
+import { CmsIntlProvider } from './CmsIntlProvider';
 import { Providers } from './providers';
 
 const whiteRabbit = localFont({
@@ -17,15 +17,23 @@ const whiteRabbit = localFont({
 async function CmsShell({ children }: { children: React.ReactNode }) {
   // Public translations are still merged here: CMS previews render public
   // section content (hero, skills, posts, header/footer, ...) which is data
-  // in Supabase, not static CMS UI labels. The CMS UI itself is English-only;
-  // there is no URL locale anymore.
-  const publicMessages = await getTranslationsSupabase(defaultLocale);
-  const messages = { ...publicMessages, cms: cmsEn };
+  // in Supabase, not static CMS UI labels. Both locales are delivered so
+  // the SidePanel selector can switch the UI language client-side, without
+  // URL locales.
+  const [publicEn, publicIt] = await Promise.all([
+    getTranslationsSupabase('en'),
+    getTranslationsSupabase('it'),
+  ]);
 
   return (
-    <NextIntlClientProvider messages={messages} locale={defaultLocale}>
+    <CmsIntlProvider
+      messages={{
+        en: { ...publicEn, cms: cmsEn },
+        it: { ...publicIt, cms: cmsIt },
+      }}
+    >
       {children}
-    </NextIntlClientProvider>
+    </CmsIntlProvider>
   );
 }
 
@@ -38,7 +46,7 @@ export default async function RootLayout({
 
   return (
     <html
-      lang={defaultLocale}
+      lang="en"
       data-scroll-behavior="smooth"
       suppressHydrationWarning
     >

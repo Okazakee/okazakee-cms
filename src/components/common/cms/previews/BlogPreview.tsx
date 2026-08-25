@@ -4,7 +4,7 @@ import PostCard from '@components/common/PostCard';
 import { CircleX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { BlogPost } from '@/types/fetchedData.types';
-import { defaultLocale } from '@/i18n/routing';
+import useUiLocaleStore from '@/store/uiLocaleStore';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface BlogPreviewProps {
@@ -16,9 +16,8 @@ export function BlogPreview({
   posts,
   deletedPostIds = new Set(),
 }: BlogPreviewProps) {
-  const locale = defaultLocale;
+  const locale = useUiLocaleStore((s) => s.locale);
   const t = useTranslations('posts-section');
-
   // Filter out deleted posts
   const visiblePosts = posts.filter((post) => !deletedPostIds.has(post.id));
 

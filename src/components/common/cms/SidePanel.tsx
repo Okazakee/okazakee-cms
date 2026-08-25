@@ -21,6 +21,7 @@ import titleCmsLight from '@public/title-cms-lightmode.png';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
+import LanguageToggle from '@/components/layout/LanguageToggle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
@@ -344,8 +345,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
 
           {/* Account, Home & Logout */}
           <div className="px-4 pt-4 pb-4 border-t border-gray-200 dark:border-darkgray space-y-1">
-            <div className="mb-2">
+            <div className="grid grid-cols-2 gap-2 mb-2">
               <ThemeToggle sidebar />
+              <LanguageToggle sidebar />
             </div>
 
             <button
