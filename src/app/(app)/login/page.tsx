@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { createClient } from '@/utils/supabase/client';
+import { signInWithRequiredPasskeyMediation } from '@/utils/supabase/passkeys';
 
 // Remembered identity from the last successful boot: lets a returning user
 // (stale session, expired token, logout) see who they signed in as last time.
@@ -81,7 +82,9 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
     setIsPasskeyLoading(true);
     setError(null);
     try {
-      const { error } = await createClient().auth.signInWithPasskey();
+      const { error } = await signInWithRequiredPasskeyMediation(
+        createClient().auth
+      );
       if (error) {
         console.error('Passkey sign-in failed:', error);
         setError(

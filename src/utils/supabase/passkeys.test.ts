@@ -1,25 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { requireDiscoverablePasskey } from '@/utils/supabase/passkeys';
+import { requirePasskeyMediation } from '@/utils/supabase/passkeys';
 
-const registrationOptions = {
-  challenge: 'challenge',
-  rp: { id: 'cms.okazakee.dev', name: 'Okazakee CMS' },
-  user: {
-    displayName: 'CMS user',
-    id: 'user-id',
-    name: 'cms@example.com',
-  },
-  pubKeyCredParams: [{ alg: -7, type: 'public-key' as const }],
-};
+describe('requirePasskeyMediation', () => {
+  it('uses a modal request for an explicit sign-in button', () => {
+    const publicKey = {
+      challenge: new ArrayBuffer(0),
+      rpId: 'cms.okazakee.dev',
+      userVerification: 'required' as const,
+    };
 
-describe('requireDiscoverablePasskey', () => {
-  it('requires a discoverable credential without mutating server options', () => {
-    const result = requireDiscoverablePasskey(registrationOptions);
+    const request = requirePasskeyMediation(publicKey);
 
-    expect(result.authenticatorSelection).toEqual({
-      requireResidentKey: true,
-      residentKey: 'required',
-    });
-    expect(registrationOptions).not.toHaveProperty('authenticatorSelection');
+    expect(request.mediation).toBe('required');
+    expect(request.publicKey).toBe(publicKey);
   });
 });

@@ -1,51 +1,38 @@
-import type { AuthPasskeyRegistrationVerifyResponse } from '@supabase/auth-js';
+import type { AuthPasskeyAuthenticationVerifyResponse } from '@supabase/auth-js';
 import {
-  createCredential,
-  deserializeCredentialCreationOptions,
-  serializeCredentialCreationResponse,
+  deserializeCredentialRequestOptions,
+  getCredential,
+  serializeCredentialRequestResponse,
 } from '@supabase/auth-js/dist/module/lib/webauthn';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 type PasskeyAuth = Pick<SupabaseClient['auth'], 'passkey'>;
-type RegistrationOptions = Parameters<
-  typeof deserializeCredentialCreationOptions
->[0];
+type PasskeyCredentialRequest = Parameters<typeof getCredential>[0];
 
-export function requireDiscoverablePasskey(
-  options: RegistrationOptions
-): RegistrationOptions {
-  return {
-    ...options,
-    authenticatorSelection: {
-      ...options.authenticatorSelection,
-      residentKey: 'required',
-      requireResidentKey: true,
-    },
-  };
+export function requirePasskeyMediation(
+  publicKey: PasskeyCredentialRequest['publicKey']
+): PasskeyCredentialRequest {
+  return { mediation: 'required', publicKey };
 }
 
-export async function registerDiscoverablePasskey(
+export async function signInWithRequiredPasskeyMediation(
   auth: PasskeyAuth
-): Promise<AuthPasskeyRegistrationVerifyResponse> {
-  const { data, error } = await auth.passkey.startRegistration();
+): Promise<AuthPasskeyAuthenticationVerifyResponse> {
+  const { data, error } = await auth.passkey.startAuthentication();
   if (error) return { data: null, error };
-  if (!data) throw new Error('Passkey registration options are missing');
+  if (!data) throw new Error('Passkey authentication options are missing');
 
-  const { data: credential, error: credentialError } = await createCredential({
-    publicKey: deserializeCredentialCreationOptions(
-      requireDiscoverablePasskey(data.options)
-    ),
-  });
+  const { data: credential, error: credentialError } = await getCredential(
+    requirePasskeyMediation(deserializeCredentialRequestOptions(data.options))
+  );
 
   if (credentialError) return { data: null, error: credentialError };
   if (!credential) {
-    throw new Error(
-      'Passkey registration did not return a public-key credential'
-    );
+    throw new Error('Passkey authentication did not return a credential');
   }
 
-  return auth.passkey.verifyRegistration({
+  return auth.passkey.verifyAuthentication({
     challengeId: data.challenge_id,
-    credential: serializeCredentialCreationResponse(credential),
+    credential: serializeCredentialRequestResponse(credential),
   });
 }
