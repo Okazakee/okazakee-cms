@@ -3,8 +3,8 @@
 import PostCard from '@components/common/PostCard';
 import { CircleX } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import type { PortfolioPost } from '@/types/fetchedData.types';
 import useUiLocaleStore from '@/store/uiLocaleStore';
+import type { PortfolioPost } from '@/types/fetchedData.types';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface PortfolioPreviewProps {

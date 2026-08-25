@@ -1,5 +1,6 @@
 'use client';
 
+import type { PasskeyListItem } from '@supabase/auth-js';
 import {
   Camera,
   Check,
@@ -11,18 +12,17 @@ import {
   User,
   X,
 } from 'lucide-react';
-import { GithubIcon } from '@/components/common/BrandIcons';
-import { useTranslations } from 'next-intl';
 import Image from 'next/image';
+import { useTranslations } from 'next-intl';
 import { useEffect, useRef, useState } from 'react';
-import { createClient } from '@/utils/supabase/client';
-import type { PasskeyListItem } from '@supabase/auth-js';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
 import { updateMyProfile } from '@/app/actions/cms/sections/usersActions';
+import { GithubIcon } from '@/components/common/BrandIcons';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
+import { createClient } from '@/utils/supabase/client';
 
 export default function AccountSection() {
   const t = useTranslations('cms');

@@ -1,8 +1,8 @@
 'use client';
 
 import { Languages } from 'lucide-react';
-import useUiLocaleStore from '@/store/uiLocaleStore';
 import type { AppLocale } from '@/i18n/routing';
+import useUiLocaleStore from '@/store/uiLocaleStore';
 
 // CMS UI language selector. Switching mutates uiLocaleStore: CmsIntlProvider
 // re-renders every useTranslations() consumer in place — no navigation, no

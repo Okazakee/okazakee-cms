@@ -6,8 +6,8 @@ import { useTranslations } from 'next-intl';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import ResumeButton from '@/components/common/ResumeButton';
-import type { Contact, ResumeData } from '@/types/fetchedData.types';
 import useUiLocaleStore from '@/store/uiLocaleStore';
+import type { Contact, ResumeData } from '@/types/fetchedData.types';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface ContactsPreviewProps {

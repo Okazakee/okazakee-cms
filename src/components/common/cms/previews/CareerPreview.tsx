@@ -3,11 +3,11 @@
 import { SkillsCarousel } from '@components/common/SkillsCarousel';
 import { Calendar, MapPin } from 'lucide-react';
 import Markdown from 'markdown-to-jsx';
-import { diffMonths, formatMonthYear } from '@/utils/formatDate';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import useUiLocaleStore from '@/store/uiLocaleStore';
+import { diffMonths, formatMonthYear } from '@/utils/formatDate';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface PreviewCareerEntry {
