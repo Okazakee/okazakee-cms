@@ -23,7 +23,6 @@ import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
 import { createClient } from '@/utils/supabase/client';
-import { registerPasskeyAndRememberCredential } from '@/utils/supabase/passkeys';
 
 export default function AccountSection() {
   const t = useTranslations('cms');
@@ -152,9 +151,7 @@ export default function AccountSection() {
     setIsRegisteringPasskey(true);
     setPasskeysError(null);
     try {
-      const { error } = await registerPasskeyAndRememberCredential(
-        createClient().auth
-      );
+      const { error } = await createClient().auth.registerPasskey();
       if (error) {
         console.error('Passkey registration failed:', error);
         setPasskeysError(t('account.passkeysRegisterError'));
@@ -528,7 +525,7 @@ export default function AccountSection() {
                 disabled={isDeletingPasskey}
                 className="px-3 py-1.5 text-sm rounded-lg text-gray-500 dark:text-lighttext2 hover:bg-gray-200 dark:hover:bg-darkgray"
               >
-                {t('cancel')}
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
