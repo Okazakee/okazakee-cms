@@ -19,18 +19,15 @@ import { GithubIcon } from '@/components/common/BrandIcons';
 import titleCms from '@public/title-cms.png';
 import titleCmsLight from '@public/title-cms-lightmode.png';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
-import LanguageToggle from '@/components/layout/LanguageToggle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
 
 // Public website URL for cross-app links (CMS Home button).
 const publicSiteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ||
-  'https://okazakee.dev';
+  process.env.NEXT_PUBLIC_SITE_URL || 'https://okazakee.dev';
 
 interface SidePanelProps {
   isOpen?: boolean;
@@ -62,8 +59,6 @@ const CONFIG_ITEMS: MenuItem[] = [
 const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   const t = useTranslations('cms');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
 
   const {
     activeSection,
@@ -103,7 +98,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     setHeroSection(null);
     const supabase = createClient();
     await supabase.auth.signOut();
-    window.location.href = `/${locale}/login`;
+    window.location.href = '/login';
   };
 
   const pendingCount = Object.values(publishQueue).reduce(
@@ -119,14 +114,16 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
 
   useEffect(() => {
     if (!user || isAdmin) return;
-    if (
-      typeof window !== 'undefined' &&
-      activeSection
-    ) {
+    if (typeof window !== 'undefined' && activeSection) {
       const savedSection = localStorage.getItem('cms_active_section');
       const adminOnlySections = [
-        'hero', 'skills', 'career', 'contacts', 'layout',
-        'privacy-policy', 'users',
+        'hero',
+        'skills',
+        'career',
+        'contacts',
+        'layout',
+        'privacy-policy',
+        'users',
       ];
       if (
         adminOnlySections.includes(activeSection) &&
@@ -300,8 +297,10 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             <div className="flex items-center gap-2 mb-1">
               <span className="w-2 h-2 bg-amber-400 rounded-full flex-shrink-0" />
               <span className="text-xs text-amber-700 dark:text-amber-300 font-medium flex-1">
-                {pendingCount} {pendingCount === 1 ? 'change' : 'changes'} across{' '}
-                {Object.values(publishQueue).filter((s) => s.isDirty).length} section(s)
+                {pendingCount} {pendingCount === 1 ? 'change' : 'changes'}{' '}
+                across{' '}
+                {Object.values(publishQueue).filter((s) => s.isDirty).length}{' '}
+                section(s)
               </span>
             </div>
             <div className="flex gap-1.5">
@@ -314,7 +313,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               </button>
               <button
                 type="button"
-                onClick={() => useCmsStore.getState().sectionPublishCallback?.()}
+                onClick={() =>
+                  useCmsStore.getState().sectionPublishCallback?.()
+                }
                 className="flex-1 px-2 py-1 text-xs bg-main hover:bg-secondary text-white rounded transition-colors min-h-[28px]"
               >
                 {t('common.publish')}
@@ -343,9 +344,8 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
 
           {/* Account, Home & Logout */}
           <div className="px-4 pt-4 pb-4 border-t border-gray-200 dark:border-darkgray space-y-1">
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            <div className="mb-2">
               <ThemeToggle sidebar />
-              <LanguageToggle sidebar />
             </div>
 
             <button

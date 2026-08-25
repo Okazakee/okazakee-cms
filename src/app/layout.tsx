@@ -1,43 +1,29 @@
-import '../globals.css';
+import './globals.css';
 import localFont from 'next/font/local';
-import { notFound } from 'next/navigation';
 import { NextIntlClientProvider } from 'next-intl';
 import { Suspense } from 'react';
 import cmsEn from '@/i18n/messages/cms.en.json';
-import cmsIt from '@/i18n/messages/cms.it.json';
 import { publicConfig } from '@/config/public';
-import { isValidLocale, locales } from '@/i18n/routing';
+import { defaultLocale } from '@/i18n/routing';
 import { getTranslationsSupabase } from '@/utils/getData';
-import { Providers } from '../providers';
+import { Providers } from './providers';
 
 const whiteRabbit = localFont({
-  src: '../public/fonts/whiterabbit.woff2',
+  src: './public/fonts/whiterabbit.woff2',
   variable: '--font-whiterabt',
   weight: '400',
 });
 
-export function generateStaticParams() {
-  return locales.map((locale) => ({ locale }));
-}
-
-async function CmsShell({
-  params,
-  children,
-}: {
-  params: Promise<{ locale: string }>;
-  children: React.ReactNode;
-}) {
-  const { locale } = await params;
-
+async function CmsShell({ children }: { children: React.ReactNode }) {
   // Public translations are still merged here: CMS previews render public
   // section content (hero, skills, posts, header/footer, ...) which is data
-  // in Supabase, not static CMS UI labels.
-  const publicMessages = await getTranslationsSupabase(locale);
-  const cmsMessages = locale === 'it' ? cmsIt : cmsEn;
-  const messages = { ...publicMessages, cms: cmsMessages };
+  // in Supabase, not static CMS UI labels. The CMS UI itself is English-only;
+  // there is no URL locale anymore.
+  const publicMessages = await getTranslationsSupabase(defaultLocale);
+  const messages = { ...publicMessages, cms: cmsEn };
 
   return (
-    <NextIntlClientProvider messages={messages} locale={locale}>
+    <NextIntlClientProvider messages={messages} locale={defaultLocale}>
       {children}
     </NextIntlClientProvider>
   );
@@ -45,21 +31,17 @@ async function CmsShell({
 
 export default async function RootLayout({
   children,
-  params,
 }: Readonly<{
   children: React.ReactNode;
-  params: Promise<{ locale: string }>;
 }>) {
-  const { locale } = await params;
-
-  if (!isValidLocale(locale)) {
-    notFound();
-  }
-
   const supabasePreconnect = publicConfig.supabaseHostname;
 
   return (
-    <html lang={locale} data-scroll-behavior="smooth" suppressHydrationWarning>
+    <html
+      lang={defaultLocale}
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+    >
       <head>
         <meta
           name="viewport"
@@ -87,7 +69,7 @@ export default async function RootLayout({
       >
         <Providers>
           <Suspense>
-            <CmsShell params={params}>{children}</CmsShell>
+            <CmsShell>{children}</CmsShell>
           </Suspense>
         </Providers>
       </body>

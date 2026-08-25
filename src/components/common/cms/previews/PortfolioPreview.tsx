@@ -2,9 +2,9 @@
 
 import PostCard from '@components/common/PostCard';
 import { CircleX } from 'lucide-react';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type { PortfolioPost } from '@/types/fetchedData.types';
+import { defaultLocale } from '@/i18n/routing';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface PortfolioPreviewProps {
@@ -16,8 +16,7 @@ export function PortfolioPreview({
   posts,
   deletedPostIds = new Set(),
 }: PortfolioPreviewProps) {
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
+  const locale = defaultLocale;
   const t = useTranslations('posts-section');
 
   // Filter out deleted posts

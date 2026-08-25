@@ -29,13 +29,6 @@ const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => globalThis.clearTimeout(idleHandle);
   }, [initializeTheme]);
 
-  useEffect(() => {
-    const pathLocale = window.location.pathname.split('/')[1];
-    if (['en', 'it'].includes(pathLocale)) {
-      document.documentElement.lang = pathLocale;
-    }
-  }, []);
-
   return <>{children}</>;
 };
 

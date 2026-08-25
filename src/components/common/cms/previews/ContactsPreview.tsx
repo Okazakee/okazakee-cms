@@ -2,12 +2,12 @@
 
 import type { LucideProps } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import ResumeButton from '@/components/common/ResumeButton';
 import type { Contact, ResumeData } from '@/types/fetchedData.types';
+import { defaultLocale } from '@/i18n/routing';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface ContactsPreviewProps {
@@ -80,8 +80,7 @@ export function ContactsPreview({
   contacts,
   resumeData,
 }: ContactsPreviewProps) {
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
+  const locale = defaultLocale;
   const t = useTranslations('contacts-section');
 
   // Sort contacts by position

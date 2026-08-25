@@ -3,7 +3,6 @@
 import { Menu } from 'lucide-react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useState } from 'react';
 import { getCmsBootData } from '@/app/actions/cms/getUser';
@@ -11,21 +10,46 @@ import AccountSection from '@/components/common/cms/AccountSection';
 import SidePanel from '@/components/common/cms/SidePanel';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 
-const BlogSection = dynamic(() => import('@/components/cms/sections/Blog/BlogSection'), { ssr: false });
-const CareerSection = dynamic(() => import('@/components/cms/sections/Career/CareerSection'), { ssr: false });
-const ContactsSection = dynamic(() => import('@/components/cms/sections/Contacts/ContactsSection'), { ssr: false });
-const HeroSection = dynamic(() => import('@/components/cms/sections/Hero/HeroSection'), { ssr: false });
-const LayoutSection = dynamic(() => import('@/components/cms/sections/Layout/LayoutSection'), { ssr: false });
-const PortfolioSection = dynamic(() => import('@/components/cms/sections/Portfolio/PortfolioSection'), { ssr: false });
-const PrivacyPolicySection = dynamic(() => import('@/components/cms/sections/Privacy/PrivacyPolicySection'), { ssr: false });
-const SkillsSection = dynamic(() => import('@/components/cms/sections/Skills/SkillsSection'), { ssr: false });
-const UsersSection = dynamic(() => import('@/components/cms/sections/Users/UsersSection'), { ssr: false });
+const BlogSection = dynamic(
+  () => import('@/components/cms/sections/Blog/BlogSection'),
+  { ssr: false }
+);
+const CareerSection = dynamic(
+  () => import('@/components/cms/sections/Career/CareerSection'),
+  { ssr: false }
+);
+const ContactsSection = dynamic(
+  () => import('@/components/cms/sections/Contacts/ContactsSection'),
+  { ssr: false }
+);
+const HeroSection = dynamic(
+  () => import('@/components/cms/sections/Hero/HeroSection'),
+  { ssr: false }
+);
+const LayoutSection = dynamic(
+  () => import('@/components/cms/sections/Layout/LayoutSection'),
+  { ssr: false }
+);
+const PortfolioSection = dynamic(
+  () => import('@/components/cms/sections/Portfolio/PortfolioSection'),
+  { ssr: false }
+);
+const PrivacyPolicySection = dynamic(
+  () => import('@/components/cms/sections/Privacy/PrivacyPolicySection'),
+  { ssr: false }
+);
+const SkillsSection = dynamic(
+  () => import('@/components/cms/sections/Skills/SkillsSection'),
+  { ssr: false }
+);
+const UsersSection = dynamic(
+  () => import('@/components/cms/sections/Users/UsersSection'),
+  { ssr: false }
+);
 import { useCmsStore } from '@/store/cmsStore';
 
 export default function CMS() {
   const t = useTranslations('cms');
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
   const sectionLabels: Record<string, string> = {
     hero: t('page.sectionLabels.hero'),
     skills: t('page.sectionLabels.skills'),
@@ -71,9 +95,8 @@ export default function CMS() {
             : null;
 
         const bootData = await getCmsBootData();
-
         if (bootData.status === 'unauthenticated') {
-          window.location.href = `/${locale}/login`;
+          window.location.href = '/login';
           return;
         }
 
@@ -81,7 +104,7 @@ export default function CMS() {
           const errorMessage = encodeURIComponent(
             'Access denied. Please contact the administrator.'
           );
-          window.location.href = `/${locale}/login?error=${errorMessage}`;
+          window.location.href = `/login?error=${errorMessage}`;
           return;
         }
 
@@ -159,21 +182,13 @@ export default function CMS() {
         setBootComplete(true);
         setLoading(false);
       }
-
     };
 
     initializeCMS();
     return () => {
       cancelled = true;
     };
-  }, [
-    locale,
-    setUser,
-    setActiveSection,
-    setHeroSection,
-    setLoading,
-    setError,
-  ]);
+  }, [setUser, setActiveSection, setHeroSection, setLoading, setError]);
 
   const needsAdminBootData = user?.role === 'admin' && !bootComplete;
   const waitingForUser = !user && !(error && canShowError);

@@ -1,7 +1,6 @@
 'use client';
 
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { formatLabels } from '@/utils/formatLabels';
 
@@ -25,8 +24,6 @@ interface HeroPreviewProps {
 }
 
 export function HeroPreview({ mainImage, blurhashURL }: HeroPreviewProps) {
-  const pathname = usePathname();
-  const _locale = pathname.split('/')[1] || 'en';
   const t = useTranslations('hero-section');
 
   return (

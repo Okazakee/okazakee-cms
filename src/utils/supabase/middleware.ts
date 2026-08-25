@@ -26,32 +26,31 @@ function clearSupabaseAuthCookies(
 // The whole app is the CMS: every route is protected except the public
 // auth paths (login + OAuth routes). Matching is EXACT-segment based (see
 // src/utils/cmsRouteMatching.ts): `/login-foo` is NOT a public route.
-export async function updateSession(request: NextRequest, locale: string) {
+export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(supabaseUrl, supabasePublishableKey, {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          for (const { name, value } of cookiesToSet) {
-            request.cookies.set(name, value);
-          }
-
-          supabaseResponse = NextResponse.next({ request });
-
-          for (const { name, value, options } of cookiesToSet) {
-            supabaseResponse.cookies.set(name, value, options);
-          }
-        },
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        for (const { name, value } of cookiesToSet) {
+          request.cookies.set(name, value);
+        }
+
+        supabaseResponse = NextResponse.next({ request });
+
+        for (const { name, value, options } of cookiesToSet) {
+          supabaseResponse.cookies.set(name, value, options);
+        }
+      },
+    },
+  });
 
   const pathname = request.nextUrl.pathname;
-  const isPublic = isCmsPublicPath(pathname, locale);
-  const isAuthPath = isAuthPagePath(pathname, locale);
+  const isPublic = isCmsPublicPath(pathname);
+  const isAuthPath = isAuthPagePath(pathname);
 
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>['data']['user'] =
     null;
@@ -94,7 +93,7 @@ export async function updateSession(request: NextRequest, locale: string) {
   // Secure path checking - only allow exact public paths
   if (!user && !isPublic) {
     const redirectResponse = NextResponse.redirect(
-      new URL(`/${locale}/login`, request.url)
+      new URL('/login', request.url)
     );
     return shouldClearAuthCookies
       ? clearSupabaseAuthCookies(redirectResponse, request)
@@ -114,7 +113,7 @@ export async function updateSession(request: NextRequest, locale: string) {
         hasGithubUsername: Boolean(getUserGithubUsername(user)),
       });
       await supabase.auth.signOut();
-      const redirectUrl = new URL(`/${locale}/login`, request.url);
+      const redirectUrl = new URL('/login', request.url);
       redirectUrl.searchParams.set(
         'error',
         'Access denied. Please contact the administrator.'
@@ -136,7 +135,7 @@ export async function updateSession(request: NextRequest, locale: string) {
 
   // Redirect authenticated users away from auth pages
   if (user && isAuthPath) {
-    return NextResponse.redirect(new URL(`/${locale}`, request.url));
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   return supabaseResponse;

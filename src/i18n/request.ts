@@ -1,20 +1,17 @@
 import { getRequestConfig } from 'next-intl/server';
-import { defaultLocale, isValidLocale } from '@/i18n/routing';
+import { defaultLocale } from '@/i18n/routing';
 import { getTranslationsSupabase } from '@/utils/getData';
 import cmsEn from './messages/cms.en.json';
-import cmsIt from './messages/cms.it.json';
 
-export default getRequestConfig(async ({ requestLocale }) => {
-  const requestedLocale = await requestLocale;
-  const locale =
-    requestedLocale && isValidLocale(requestedLocale)
-      ? requestedLocale
-      : defaultLocale;
-  const messages = await getTranslationsSupabase(locale);
-  const cmsMessages = locale === 'it' ? cmsIt : cmsEn;
+// The CMS has no URL locale: routes live at the root and the UI language is
+// pinned to the default locale. Public-site content translations remain
+// per-locale data in Supabase (edited via the i18n section), merged here so
+// previews can render public content.
+export default getRequestConfig(async () => {
+  const messages = await getTranslationsSupabase(defaultLocale);
 
   return {
-    locale,
-    messages: { ...messages, cms: cmsMessages },
+    locale: defaultLocale,
+    messages: { ...messages, cms: cmsEn },
   };
 });

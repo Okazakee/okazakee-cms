@@ -2,7 +2,6 @@
 
 import { redirect } from 'next/navigation';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { defaultLocale, isValidLocale } from '@/i18n/routing';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
@@ -10,13 +9,13 @@ import { createClient } from '@/utils/supabase/server';
  * Deletes the current user's CMS account (allowlist row + profile), clears
  * the session and performs a framework-owned redirect to canonical
  * /{locale}/login. The client never navigates on the success path — the same
- * single-owner navigation architecture as password login.
+ * single-owner navigation architecture as the GitHub OAuth callback.
  *
  * The redirect() call is OUTSIDE the try/catch: it throws NEXT_REDIRECT and
  * must escape as control flow, never be converted into a typed error.
  * Failure paths return typed { success: false, error } results.
  */
-export async function deleteMyAccount(locale: string) {
+export async function deleteMyAccount() {
   const supabase = await createClient();
 
   // Get current authenticated user
@@ -132,6 +131,5 @@ export async function deleteMyAccount(locale: string) {
   // Success: framework-owned navigation. OUTSIDE the try/catch — redirect()
   // throws NEXT_REDIRECT and must escape as control flow, never be swallowed
   // by the error handler above.
-  const safeLocale = isValidLocale(locale) ? locale : defaultLocale;
-  redirect(`/${safeLocale}/login`);
+  redirect('/login');
 }

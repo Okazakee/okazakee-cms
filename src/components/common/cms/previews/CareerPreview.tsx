@@ -6,8 +6,8 @@ import Markdown from 'markdown-to-jsx';
 import { diffMonths, formatMonthYear } from '@/utils/formatDate';
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { defaultLocale } from '@/i18n/routing';
 import { formatLabels } from '@/utils/formatLabels';
 
 interface PreviewCareerEntry {
@@ -34,8 +34,7 @@ interface CareerPreviewProps {
 }
 
 export function CareerPreview({ entries }: CareerPreviewProps) {
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
+  const locale = defaultLocale;
   const t = useTranslations('career-section');
 
   const formatDate = (dateString: string | null) => {
@@ -43,7 +42,10 @@ export function CareerPreview({ entries }: CareerPreviewProps) {
     return formatMonthYear(dateString);
   };
 
-  const calculateDuration = (startDate: string | null, endDate?: string | null) => {
+  const calculateDuration = (
+    startDate: string | null,
+    endDate?: string | null
+  ) => {
     const end = endDate || new Date().toISOString();
     const months = Math.max(0, diffMonths(end, startDate));
 
@@ -77,9 +79,7 @@ export function CareerPreview({ entries }: CareerPreviewProps) {
 
     return Object.entries(grouped).map(([company, positions]) => ({
       company,
-      positions: positions.sort((a, b) =>
-        diffMonths(b.startDate, a.startDate)
-      ),
+      positions: positions.sort((a, b) => diffMonths(b.startDate, a.startDate)),
     }));
   };
 

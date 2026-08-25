@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  *
  * Previously the action called refresh() and AccountSection performed
  * router.push — the same competing-navigation architecture that produced the
- * transient load failure in the password login flow.
+ * transient load failure in the former password login flow.
  *
  * Source-level on purpose: the flow depends on a live Supabase session.
  */
@@ -23,7 +23,10 @@ const actionSource = readFileSync(
 
 const accountSectionSource = readFileSync(
   fileURLToPath(
-    new URL('../../../components/common/cms/AccountSection.tsx', import.meta.url)
+    new URL(
+      '../../../components/common/cms/AccountSection.tsx',
+      import.meta.url
+    )
   ),
   'utf8'
 );
@@ -34,13 +37,8 @@ describe('deleteMyAccount navigation contract', () => {
     expect(actionSource).toMatch(/redirect\(/);
   });
 
-  it('redirects to the canonical /{locale}/login target', () => {
-    expect(actionSource).toMatch(/redirect\(`\/\$\{safeLocale\}\/login`\)/);
-  });
-
-  it('validates the locale like the password login flow', () => {
-    expect(actionSource).toContain('isValidLocale');
-    expect(actionSource).toContain('defaultLocale');
+  it('redirects to the canonical /login target', () => {
+    expect(actionSource).toContain("redirect('/login')");
   });
 
   it('imports nothing from next/cache (no router refresh mechanism)', () => {
@@ -58,7 +56,7 @@ describe('deleteMyAccount navigation contract', () => {
     // Assert the source order: try ... catch ... redirect.
     const tryIdx = actionSource.indexOf('try {');
     const catchIdx = actionSource.indexOf('} catch (');
-    const redirectIdx = actionSource.indexOf('redirect(`');
+    const redirectIdx = actionSource.indexOf("redirect('/login')");
     expect(tryIdx).toBeGreaterThanOrEqual(0);
     expect(catchIdx).toBeGreaterThan(tryIdx);
     expect(redirectIdx).toBeGreaterThan(catchIdx);
@@ -76,8 +74,8 @@ describe('AccountSection navigation contract', () => {
     expect(accountSectionSource).not.toContain('window.location');
   });
 
-  it('passes the locale so the action redirects canonically', () => {
-    expect(accountSectionSource).toContain('deleteMyAccount(locale)');
+  it('calls the locale-free deleteMyAccount action', () => {
+    expect(accountSectionSource).toContain('deleteMyAccount()');
   });
 
   it('recognizes the framework NEXT_REDIRECT rejection as control flow', () => {

@@ -49,57 +49,51 @@ describe('getSafeCmsNext', () => {
 });
 
 describe('resolvePostAuthPath', () => {
-  it('builds the canonical /{locale} target from next=/', () => {
-    expect(resolvePostAuthPath('it', '/')).toBe('/it');
-    expect(resolvePostAuthPath('en', '/')).toBe('/en');
+  it('keeps the root target from next=/', () => {
+    expect(resolvePostAuthPath('/')).toBe('/');
   });
 
   it('strips a redundant trailing slash from deeper targets', () => {
-    expect(resolvePostAuthPath('it', '/blog/')).toBe('/it/blog');
-    expect(resolvePostAuthPath('it', '/blog')).toBe('/it/blog');
+    expect(resolvePostAuthPath('/blog/')).toBe('/blog');
+    expect(resolvePostAuthPath('/blog')).toBe('/blog');
   });
 
-  it('falls back to /{locale} for unsafe next values', () => {
-    expect(resolvePostAuthPath('it', '//evil.com')).toBe('/it');
-    expect(resolvePostAuthPath('it', '/\\evil.com')).toBe('/it');
-    expect(resolvePostAuthPath('it', 'https://evil.com')).toBe('/it');
-    expect(resolvePostAuthPath('it', null as unknown as string)).toBe('/it');
+  it('falls back to / for unsafe next values', () => {
+    expect(resolvePostAuthPath('//evil.com')).toBe('/');
+    expect(resolvePostAuthPath('/\\evil.com')).toBe('/');
+    expect(resolvePostAuthPath('https://evil.com')).toBe('/');
+    expect(resolvePostAuthPath(null as unknown as string)).toBe('/');
   });
 });
 
 describe('buildOAuthCallbackUrl', () => {
-  it('builds the canonical locale-prefixed callback URL', () => {
-    expect(
-      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'en', '/')
-    ).toBe(
-      'https://cms.okazakee.dev/en/auth/callback?next=%2F'
+  it('builds the canonical callback URL', () => {
+    expect(buildOAuthCallbackUrl('https://cms.okazakee.dev', '/')).toBe(
+      'https://cms.okazakee.dev/auth/callback?next=%2F'
     );
-    expect(
-      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'it', '/blog')
-    ).toBe(
-      'https://cms.okazakee.dev/it/auth/callback?next=%2Fblog'
+    expect(buildOAuthCallbackUrl('https://cms.okazakee.dev', '/blog')).toBe(
+      'https://cms.okazakee.dev/auth/callback?next=%2Fblog'
     );
   });
 
   it('sanitizes unsafe next values before encoding', () => {
     expect(
-      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'en', '//evil.com')
-    ).toBe('https://cms.okazakee.dev/en/auth/callback?next=%2F');
+      buildOAuthCallbackUrl('https://cms.okazakee.dev', '//evil.com')
+    ).toBe('https://cms.okazakee.dev/auth/callback?next=%2F');
     expect(
-      buildOAuthCallbackUrl('https://cms.okazakee.dev', 'en', '/\\evil.com')
-    ).toBe('https://cms.okazakee.dev/en/auth/callback?next=%2F');
+      buildOAuthCallbackUrl('https://cms.okazakee.dev', '/\\evil.com')
+    ).toBe('https://cms.okazakee.dev/auth/callback?next=%2F');
   });
 });
 
 describe('buildAuthErrorRedirect', () => {
-  it('always redirects to canonical /{locale}/login, never a /cms path', () => {
+  it('always redirects to canonical /login, never a /cms path', () => {
     const url = buildAuthErrorRedirect(
       'https://cms.okazakee.dev',
-      'it',
       'Access denied. Please contact the administrator.'
     );
     expect(url.origin).toBe('https://cms.okazakee.dev');
-    expect(url.pathname).toBe('/it/login');
+    expect(url.pathname).toBe('/login');
     expect(url.pathname).not.toContain('/cms');
     expect(url.searchParams.get('error')).toBe(
       'Access denied. Please contact the administrator.'
@@ -109,11 +103,10 @@ describe('buildAuthErrorRedirect', () => {
   it('encodes the error message safely', () => {
     const url = buildAuthErrorRedirect(
       'https://cms.okazakee.dev',
-      'en',
       'Authentication failed'
     );
     expect(url.toString()).toBe(
-      'https://cms.okazakee.dev/en/login?error=Authentication+failed'
+      'https://cms.okazakee.dev/login?error=Authentication+failed'
     );
   });
 });

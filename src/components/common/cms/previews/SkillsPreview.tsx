@@ -1,7 +1,6 @@
 'use client';
 
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { formatLabels } from '@/utils/formatLabels';
 
@@ -24,8 +23,6 @@ interface SkillsPreviewProps {
 }
 
 export function SkillsPreview({ categories }: SkillsPreviewProps) {
-  const pathname = usePathname();
-  const _locale = pathname.split('/')[1] || 'en';
   const t = useTranslations('skills-section');
 
   return (

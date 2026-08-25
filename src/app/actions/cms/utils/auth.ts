@@ -39,45 +39,36 @@ export function getSafeCmsNext(rawNext: string | null | undefined): string {
 }
 
 /**
- * Builds the canonical post-auth redirect path: '/' + locale + safe next,
- * with the trailing slash stripped so auth never triggers the framework's
- * 308 trailing-slash redirect (/{locale}/ -> /{locale}). The result is
- * always a same-origin path (never an open redirect).
+ * Builds the canonical post-auth redirect path: the safe next path, with
+ * any trailing slash stripped so auth never triggers the framework's
+ * 308 trailing-slash redirect. The result is always a same-origin path
+ * (never an open redirect).
  */
-export function resolvePostAuthPath(locale: string, next: string): string {
+export function resolvePostAuthPath(next: string): string {
   const safeNext = getSafeCmsNext(next);
-  const target = `/${locale}${safeNext}`;
-  return target.length > 1 && target.endsWith('/')
-    ? target.slice(0, -1)
-    : target;
+  return safeNext.length > 1 && safeNext.endsWith('/')
+    ? safeNext.slice(0, -1)
+    : safeNext;
 }
 
 /**
  * Builds the OAuth callback URL Supabase must redirect back to: the
- * canonical /{locale}/auth/callback with the sanitized `next` param. This is
- * the URL that must be allowlisted in Supabase (see the CMS README).
+ * canonical /auth/callback with the sanitized `next` param. This is the URL
+ * that must be allowlisted in Supabase (see the CMS README).
  */
-export function buildOAuthCallbackUrl(
-  origin: string,
-  locale: string,
-  next: string
-): string {
-  return `${origin}/${locale}/auth/callback?next=${encodeURIComponent(
+export function buildOAuthCallbackUrl(origin: string, next: string): string {
+  return `${origin}/auth/callback?next=${encodeURIComponent(
     getSafeCmsNext(next)
   )}`;
 }
 
 /**
- * Builds a canonical login error redirect: /{locale}/login?error=<message>.
- * NEVER the legacy /{locale}/cms/login path. `message` must be a fixed,
- * user-safe string — never raw provider/Supabase error details.
+ * Builds a canonical login error redirect: /login?error=<message>. `message`
+ * must be a fixed, user-safe string — never raw provider/Supabase error
+ * details.
  */
-export function buildAuthErrorRedirect(
-  origin: string,
-  locale: string,
-  message: string
-): URL {
-  const url = new URL(`/${locale}/login`, origin);
+export function buildAuthErrorRedirect(origin: string, message: string): URL {
+  const url = new URL('/login', origin);
   url.searchParams.set('error', message);
   return url;
 }

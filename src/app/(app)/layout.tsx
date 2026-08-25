@@ -1,6 +1,11 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
 
+// The whole app is the CMS: every route renders per-request (see AppLayout),
+// so we declare it instead of letting Cache Components flag the connection()
+// call as an accidental blocker during prerendering.
+export const instant = false;
+
 export const metadata: Metadata = {
   title: {
     default: 'Okazakee CMS',

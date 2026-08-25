@@ -1,18 +1,9 @@
 'use client';
 
-import {
-  Camera,
-  Check,
-  Mail,
-  Pencil,
-  Trash2,
-  User,
-  X,
-} from 'lucide-react';
+import { Camera, Check, Mail, Pencil, Trash2, User, X } from 'lucide-react';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { useTranslations } from 'next-intl';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
@@ -24,8 +15,6 @@ import { processImageToWebP } from '@/utils/imageProcessor';
 export default function AccountSection() {
   const t = useTranslations('cms');
   const { user, setUser } = useCmsStore();
-  const pathname = usePathname();
-  const locale = pathname.split('/')[1] || 'en';
   const [error, setError] = useState<string | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -128,11 +117,10 @@ export default function AccountSection() {
   };
 
   const handleDeleteAccount = async () => {
-    setIsDeleting(true);
-    setError(null);
-
     try {
-      const result = await deleteMyAccount(locale);
+      setIsDeleting(true);
+      setError(null);
+      const result = await deleteMyAccount();
       // On success the action calls redirect() — the framework owns the
       // navigation and the awaited promise rejects with NEXT_REDIRECT, so a
       // RESOLVED result here is always a typed failure. Never navigate from

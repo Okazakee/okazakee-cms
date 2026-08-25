@@ -30,7 +30,10 @@ const loginPageSource = readFileSync(
 );
 const accountSectionSource = readFileSync(
   fileURLToPath(
-    new URL('../../../../components/common/cms/AccountSection.tsx', import.meta.url)
+    new URL(
+      '../../../components/common/cms/AccountSection.tsx',
+      import.meta.url
+    )
   ),
   'utf8'
 );
@@ -53,9 +56,9 @@ describe('no legacy /cms routes used internally', () => {
 
 describe('no /auth/ready hop remains', () => {
   it('the ready route is removed', () => {
-    expect(existsSync(fileURLToPath(new URL('./ready/route.ts', import.meta.url)))).toBe(
-      false
-    );
+    expect(
+      existsSync(fileURLToPath(new URL('./ready/route.ts', import.meta.url)))
+    ).toBe(false);
   });
 
   it('callback, start and login page never reference /auth/ready', () => {
@@ -81,7 +84,7 @@ describe('callback finalizes the OAuth flow in one boundary', () => {
 });
 
 describe('github/start builds the canonical callback URL', () => {
-  it('starts the provider flow against the locale-prefixed callback', () => {
+  it('starts the provider flow against the canonical callback', () => {
     expect(startSource).toContain('signInWithOAuth');
     expect(startSource).toContain('buildOAuthCallbackUrl');
     expect(startSource).toContain('buildAuthErrorRedirect');
