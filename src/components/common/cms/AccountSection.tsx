@@ -23,6 +23,7 @@ import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
 import { createClient } from '@/utils/supabase/client';
+import { registerPasskeyAndRememberCredential } from '@/utils/supabase/passkeys';
 
 export default function AccountSection() {
   const t = useTranslations('cms');
@@ -151,7 +152,9 @@ export default function AccountSection() {
     setIsRegisteringPasskey(true);
     setPasskeysError(null);
     try {
-      const { error } = await createClient().auth.registerPasskey();
+      const { error } = await registerPasskeyAndRememberCredential(
+        createClient().auth
+      );
       if (error) {
         console.error('Passkey registration failed:', error);
         setPasskeysError(t('account.passkeysRegisterError'));

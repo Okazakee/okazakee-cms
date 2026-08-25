@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isPasskeyChallengeFresh,
   requirePasskeyMediation,
+  withKnownPasskeyCredentials,
 } from '@/utils/supabase/passkeys';
 
 describe('isPasskeyChallengeFresh', () => {
@@ -10,6 +11,23 @@ describe('isPasskeyChallengeFresh', () => {
 
     expect(isPasskeyChallengeFresh(1_011, now)).toBe(true);
     expect(isPasskeyChallengeFresh(1_010, now)).toBe(false);
+  });
+});
+
+describe('withKnownPasskeyCredentials', () => {
+  it('adds local credential ids without mutating server options', () => {
+    const options = {
+      challenge: 'challenge',
+      rpId: 'cms.okazakee.dev',
+      userVerification: 'preferred' as const,
+    };
+
+    const result = withKnownPasskeyCredentials(options, ['credential-id']);
+
+    expect(result.allowCredentials).toEqual([
+      { id: 'credential-id', type: 'public-key' },
+    ]);
+    expect(options).not.toHaveProperty('allowCredentials');
   });
 });
 
