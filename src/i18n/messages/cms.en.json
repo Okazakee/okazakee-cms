@@ -407,7 +407,7 @@
     "roleLabel": "Role",
     "roleEditor": "Editor",
     "roleAdmin": "Admin",
-    "emailInviteInfo": "An invitation email will be sent automatically. The user will set their password.",
+    "emailInviteInfo": "The user can sign in later using GitHub OAuth with this email address.",
     "githubInviteInfo": "The user can log in immediately using GitHub OAuth (no invite needed).",
     "dummyUserInfo": "Creates a dummy user profile that can be assigned to articles. No authentication required.",
     "allowedUsersTitle": "Allowed Users",

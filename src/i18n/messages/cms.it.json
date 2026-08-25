@@ -407,7 +407,7 @@
     "roleLabel": "Ruolo",
     "roleEditor": "Editor",
     "roleAdmin": "Amministratore",
-    "emailInviteInfo": "Verrà inviata automaticamente un'email di invito. L'utente imposterà la propria password.",
+    "emailInviteInfo": "L'utente potrà accedere in seguito usando GitHub OAuth con questo indirizzo email.",
     "githubInviteInfo": "L'utente può accedere immediatamente usando GitHub OAuth (nessun invito necessario).",
     "dummyUserInfo": "Crea un profilo utente fittizio che può essere assegnato agli articoli. Nessuna autenticazione richiesta.",
     "allowedUsersTitle": "Utenti Autorizzati",

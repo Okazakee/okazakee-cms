@@ -2,7 +2,6 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { cmsConfig } from '@/config/cms';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import type {
   MutationResult,
@@ -290,57 +289,9 @@ async function addEmailUser(
 
   if (insertError) throw insertError;
 
-  // Create user and send password reset email using admin client
-  try {
-    const adminClient = getCmsAdminClient();
-
-    // Create the user with a random password (they'll reset it)
-    const tempPassword = crypto.randomUUID();
-    const { error: createError } = await adminClient.auth.admin.createUser({
-      email: normalizedEmail,
-      password: tempPassword,
-      email_confirm: true, // Auto-confirm the email
-    });
-
-    if (createError) {
-      console.error('Failed to create user:', createError.message, createError);
-      return {
-        success: true,
-        data: newUser as AllowedUser,
-        error: `User added to allowlist but account creation failed: ${createError.message}`,
-      };
-    }
-
-    // Send password reset email so they can set their own password.
-    // Canonical CMS origin; locale-aware recovery destination.
-    const siteUrl =
-      cmsConfig.cmsPublicUrl || 'http://localhost:3000';
-    const { error: emailError } = await adminClient.auth.resetPasswordForEmail(
-      normalizedEmail,
-      {
-        redirectTo: `${siteUrl}/`,
-      }
-    );
-
-    if (emailError) {
-      console.error('Failed to send reset email:', emailError.message);
-    } else {
-      console.log('User created and reset email sent to:', normalizedEmail);
-      // Update invited_at timestamp
-      await getCmsAdminClient()
-        .from('cms_allowed_users')
-        .update({ invited_at: new Date().toISOString() })
-        .eq('id', newUser.id);
-    }
-  } catch (inviteErr) {
-    console.error('Invite error:', inviteErr);
-    return {
-      success: true,
-      data: newUser as AllowedUser,
-      error: `User added to allowlist but invite failed.`,
-    };
-  }
-
+  // Password login no longer exists: an allowlisted email is claimed by
+  // signing in with GitHub OAuth using that same address. No Supabase auth
+  // user is provisioned and no invite email is sent.
   return { success: true, data: newUser as AllowedUser };
 }
 
