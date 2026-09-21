@@ -102,6 +102,15 @@ src/
   - Delete: commit the DB row delete FIRST, then remove the Storage object
     best-effort (`removePublicFileIfPresent` / `removeStorageObjectBestEffort`
     never throw).
+- Image uploads keep animations: the browser canvas preprocessor
+  (`src/utils/imageProcessor.ts`) returns an animated WebP untouched — a
+  canvas round-trip keeps only the first frame — and the server pipeline
+  (`processImage` in `src/app/actions/cms/utils/fileHelpers.ts`) resizes it
+  frame-by-frame when it exceeds the requested bounds. Static WebP stays
+  passthrough (never re-encoded). Detection lives in
+  `src/utils/cms/webpAnimation.ts` and must be used by any new upload path.
+  Animated frames are decoded into one tall surface, so an animation above
+  32 MPx total is rejected before decoding.
 - Local CMS `'use cache'` entries (e.g. `getTranslationsSupabase`) are
   invalidated from Server Actions with `updateTag(tag)` + `refresh()`
   (`src/libs/cms/localInvalidation.ts`); remote invalidation goes through
