@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { encode as encodeBlurhash } from 'blurkit/browser';
 import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
+import { isAnimatedWebpFile } from '@/utils/cms/webpAnimation';
 import { processImageToWebP } from '@/utils/imageProcessor';
 
 interface ImageProcessingOptions {
@@ -110,7 +111,13 @@ export function useFileUpload({
         return objUrl;
       });
 
-      if (imageProcessing) {
+      // Animated WebP is uploaded untouched: the canvas pipeline would keep
+      // only its first frame. The server resizes it frame-by-frame and
+      // derives the blurhash from the first frame, so no client-side blurhash
+      // is generated here either.
+      const animatedWebp = await isAnimatedWebpFile(f);
+
+      if (imageProcessing && !animatedWebp) {
         setIsProcessing(true);
         try {
           const processed = await processImageToWebP(f, {
@@ -137,7 +144,7 @@ export function useFileUpload({
         } finally {
           setIsProcessing(false);
         }
-      } else if (generateBlurhash) {
+      } else if (generateBlurhash && !animatedWebp) {
         const bh = await generateBlurhashFromFile(f);
         setBlurhash(bh);
       }

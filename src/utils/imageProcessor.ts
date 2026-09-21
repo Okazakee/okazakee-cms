@@ -1,9 +1,14 @@
 /**
  * Client-side image processing utility
  * Converts images to WebP format using browser Canvas API and generates blurhash
+ *
+ * Animated WebP files are returned untouched (the canvas would flatten them to
+ * a single frame); their resize/encode happens server-side in the sharp
+ * pipeline (see src/app/actions/cms/utils/fileHelpers.ts).
  */
 import { encode as blurkitEncode } from 'blurkit/browser';
 import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
+import { isAnimatedWebpFile } from '@/utils/cms/webpAnimation';
 
 type ProcessImageOptions = {
   maxWidth?: number;
@@ -30,6 +35,14 @@ export async function processImageToWebP(
     const maxWidth = options?.maxWidth;
     const maxHeight = options?.maxHeight;
     const quality = options?.quality ?? 0.85;
+
+    // Animated WebP cannot survive a canvas round-trip: drawing it on a 2D
+    // canvas and re-encoding keeps only the first frame. Hand the original
+    // file to the server pipeline, which resizes animations frame-by-frame
+    // with sharp and derives the blurhash from the first frame.
+    if (await isAnimatedWebpFile(file)) {
+      return { success: true, file };
+    }
 
     // If file is already WebP and no resizing needed, return as-is
     if (file.type === 'image/webp' && !maxWidth && !maxHeight) {

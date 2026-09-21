@@ -4,6 +4,7 @@ import { findAllowedCmsUser, getUserGithubUsername } from './auth';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { createClient } from '@/utils/supabase/server';
 import { FALLBACK_BLURHASH, isValidBlurhash } from '@/utils/blurhashUtils';
+import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
 
 // Pure validation helpers live in @/utils/cms/validation (unit-tested).
 // Re-exported here to keep every existing call site unchanged.
@@ -151,6 +152,14 @@ export type AuthResult =
 const DEFAULT_MAX_HEIGHT = 1080;
 const DEFAULT_WEBP_QUALITY = 80;
 
+/**
+ * Animated WebP is decoded frame-by-frame into a single tall surface, so the
+ * total decoded pixel count is capped before libvips touches any frame
+ * (~128 MB as RGBA). A 512x512 animation still fits ~120 frames; a larger
+ * upload is rejected instead of risking an OOM in the serverless function.
+ */
+const MAX_ANIMATED_DECODED_PIXELS = 32 * 1024 * 1024;
+
 type ProcessImageOptions = {
   maxWidth?: number;
   maxHeight?: number;
@@ -177,6 +186,11 @@ type PreparedImageUpload = {
 /**
  * Processes an image: resize to max dimensions, convert to WebP
  * Returns the processed buffer and metadata
+ *
+ * Animated WebP keeps every frame: sharp is told to read all pages and the
+ * resize is applied per frame (libvips honours the animation's page height).
+ * An animation that already fits the requested bounds is returned unchanged,
+ * since re-encoding it would only add generation loss.
  */
 export async function processImage(
   file: File,
@@ -193,22 +207,51 @@ export async function processImage(
 
     const arrayBuffer = await file.arrayBuffer();
     const inputBuffer = Buffer.from(arrayBuffer);
+    const animated = isAnimatedWebpBytes(inputBuffer);
 
-    let pipeline = sharp(inputBuffer);
+    // Container metadata only (no frame decode): page dimensions and frame
+    // count are enough for both guards below.
+    const metadata = await sharp(inputBuffer).metadata();
+    const pageWidth = metadata.width || 0;
+    const pageHeight = metadata.height || 0;
+    const pages = metadata.pages || 1;
+
+    if (animated) {
+      if (pageWidth * pageHeight * pages > MAX_ANIMATED_DECODED_PIXELS) {
+        return {
+          success: false,
+          error:
+            'Animated image is too large to process (over 32 megapixels across all frames). Please export a smaller animation.',
+        };
+      }
+
+      if (
+        (!maxWidth || pageWidth <= maxWidth) &&
+        (!maxHeight || pageHeight <= maxHeight)
+      ) {
+        return {
+          success: true,
+          buffer: inputBuffer,
+          width: pageWidth,
+          height: pageHeight,
+          blurhash: await generateBlurhashFromBuffer(inputBuffer),
+          format: 'webp',
+        };
+      }
+    }
+
+    let pipeline = sharp(inputBuffer, { animated });
 
     if (maxWidth && maxHeight) {
       pipeline = pipeline.resize(maxWidth, maxHeight, {
         fit: 'cover',
         position: 'center',
       });
-    } else {
-      const metadata = await sharp(inputBuffer).metadata();
-      if ((metadata.height || 0) > maxHeight) {
-        pipeline = pipeline.resize(undefined, maxHeight, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
+    } else if (pageHeight > maxHeight) {
+      pipeline = pipeline.resize(undefined, maxHeight, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
     }
 
     let processedBuffer: Buffer;
@@ -270,19 +313,26 @@ export async function prepareImageUpload(
 
   if (file.type === 'image/webp') {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const blurhash = isValidBlurhash(blurhashURL)
-      ? blurhashURL
-      : await generateBlurhashFromBuffer(buffer);
 
-    return {
-      success: true,
-      image: {
-        buffer,
-        blurhash,
-        extension: 'webp',
-        contentType: 'image/webp',
-      },
-    };
+    // Static WebP is already the canonical upload format (the browser canvas
+    // pipeline wrote it), so it is stored as-is: re-encoding would only add
+    // generation loss. Animated WebP is NOT passed through here — it falls
+    // through to processImage(), which keeps every frame while resizing.
+    if (!isAnimatedWebpBytes(buffer)) {
+      const blurhash = isValidBlurhash(blurhashURL)
+        ? blurhashURL
+        : await generateBlurhashFromBuffer(buffer);
+
+      return {
+        success: true,
+        image: {
+          buffer,
+          blurhash,
+          extension: 'webp',
+          contentType: 'image/webp',
+        },
+      };
+    }
   }
 
   const processed = await processImage(file, options);
