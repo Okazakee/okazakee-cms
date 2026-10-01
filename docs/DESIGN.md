@@ -19,15 +19,27 @@ document owns the system: tokens, type, layout, component behaviour and the data
 
 ### 1.1 Token mechanism
 
-Tokens are consumed through **channel triplets**, never as raw hex in components:
+Tokens are consumed through CSS custom properties, never as raw hex in
+components. The declaration differs by Tailwind version:
 
 ```css
-:root { --c-surface-base: 244 245 249; }   /* light  */
-.dark { --c-surface-base: 10 10 10; }      /* dark   */
+/* repo — Tailwind v4: hex values, opacity comes from color-mix */
+:root { --c-surface-base: #f4f5f9; }
+.dark { --c-surface-base: #0a0a0a; }
 ```
 
 ```js
-// tailwind config — keeps opacity modifiers working with themed colours
+// repo — v4 resolves `bg-surface-base/85` with color-mix, no placeholder needed
+colors: { 'surface-base': 'var(--c-surface-base)' }
+```
+
+```css
+/* mockups — the Stitch files run the v3 Play CDN, which needs channel triplets */
+:root { --c-surface-base: 244 245 249; }
+```
+
+```js
+// mockups only — `<alpha-value>` keeps v3 opacity modifiers working
 colors: { 'surface-base': 'rgb(var(--c-surface-base) / <alpha-value>)' }
 ```
 
@@ -144,6 +156,9 @@ the terminal traffic-light dots (`#ff5f57` / `#febc2e` / `#28c840`) and `::selec
   desktop nav and the drawer.
 - No settings dropdown: it is dropped by design; language and theme stay as inline
   controls.
+- The bespoke `xs:` / `tablet:` / `mdh:` utilities are retired: standard Tailwind tiers
+  cover every case. `SkillsCarousel` and the old `ResumeButton` card went with them,
+  replaced by the canon chips and the header's resume action.
 
 ---
 
@@ -249,7 +264,7 @@ Invented copy is a defect, not a placeholder.
 
 | UI | source |
 |---|---|
-| all copy | `i18n_translations.translations` (namespaces: `header`, `hero-section`, `skills-section`, `career-section`, `contacts-section`, `posts-section`, `footer`, `privacyPolicy`) |
+| all copy | `i18n_translations.translations` (namespaces: `header`, `hero-section`, `skills-section`, `career-section`, `contacts-section`, `posts-section`, `footer`, `privacyPolicy`, `request-form`, `errors`) |
 | hero name/role/about | `hero-section.top.*`, `hero-section.aboutme.*` |
 | skills | `skills_categories` + nested `skills` (`icon` URL, `invert`) |
 | career | `career_entries` (`logo`, `website_url`, `location_*`, `remote`, `startDate`/`endDate`, `description_*`, `skills`) |
@@ -269,11 +284,21 @@ Invented copy is a defect, not a placeholder.
   hint.
 - Code fences → the "Code" block with copy; markdown tables render as panels.
 
-**Known real-data quirks** (fix in the repo, not in the design): `source_link` for
-MinePanel points at a GitHub *org*, so the star component resolves nothing and the page
-shows ★ 0; `sitemap.ts` slugs posts differently from `PostCard`, advertising
-`/blog/12/dear-mom...` while the card links `/blog/12/dear-mom`; and the live
-`body.dark::before` grain rule never matches because the theme class lives on `<html>`.
+**Known quirks** found while porting:
+
+- Fixed: `GitHubStars` now ignores profile/organisation links (`source_link` for
+  MinePanel is an org URL, which used to fetch a repo that 404s and render ★ 0).
+- Fixed: the grain rule matched `body.dark` while the theme class lives on `<html>`, so
+  dark mode had no grain at all.
+- Open: the 404 routes answer **HTTP 200** (soft 404). The dev server also logs
+  `Could not validate 'instant' …` on that path. Both predate the redesign and come from
+  how unknown single-segment paths land on `/[post_type]` and call `notFound()`.
+- Open: `sitemap.ts` slugs posts differently from the card link helper, so it advertises
+  `/blog/12/dear-mom...` while the card links `/blog/12/dear-mom`.
+
+**Writing CMS copy:** read the current `translations` object, merge the change and patch
+it back. Patching from an older snapshot silently reverts whatever was added in between —
+that already cost the `request-form` namespace and the `Top` label once.
 
 **New copy that will need i18n keys** when the request form and drawer land: the form
 labels and options, `Project request` / `Send me a request` / `Send request`, the consent
