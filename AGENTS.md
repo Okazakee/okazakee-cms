@@ -318,17 +318,24 @@ typecheck (build first: fresh checkouts need `.next/types`).
 
 `main` is the integration branch and must stay releasable. Every change —
 feature, fix, refactor, docs, dependency bump — is made on a dedicated branch
-and merged through a pull request:
+and merged through a pull request.
+
+**Two owner gates.** Nothing opens or merges on the agent's own initiative:
+the PR is opened only after the owner confirms the branch is complete, and
+the merge follows review. Pushing a branch is not permission to open a PR,
+and being asked to make a change is not permission to open one either.
 
 1. Branch from the latest `main`: `<type>/<short-slug>`, e.g.
    `fix/animated-webp-upload`, `feat/passkey-signin`.
 2. Commit only on that branch. `main` never receives direct commits.
-3. Push the branch and open a PR against `main` with `gh pr create`,
-   describing the change, the affected contract, and the checks run.
-4. CI (`.github/workflows/ci.yml`) must be green before merge.
-5. Merge with a merge commit (`gh pr merge --merge`); never squash or rebase,
+3. Push the branch when the work is ready — and stop there.
+4. Open the PR against `main` with `gh pr create` only after the owner
+   confirms the branch is done. The body describes the change, the affected
+   contract, and the checks run.
+5. CI (`.github/workflows/ci.yml`) must be green before merge.
+6. Merge with a merge commit (`gh pr merge --merge`); never squash or rebase,
    never force-push `main`.
-6. Delete the merged branch.
+7. Delete the merged branch.
 
 **Exception — you ask for it.** A direct commit/push to `main` is allowed
 only when you explicitly ask for one in the session (for example "push this
@@ -388,6 +395,7 @@ urgent it feels.
 - **Never call Supabase directly from client components (browser).** Use server actions (`'use server'`) to proxy all Supabase calls.
 - **Never commit `.env.local`** or any file containing secrets.
 - **Never commit or push directly to `main`.** Work on a branch and open a PR — the only exception is a direct push you explicitly asked for in the session (§13.1).
+- **Never open a PR, or merge one, without the owner's go-ahead.** A pushed branch is not a PR request; wait for confirmation (§13.1).
 - **Never add a `'use server'` directive inside a file that also has `'use client'`.** These directives are mutually exclusive at the file level.
 - **Never import server-only modules (like `next/headers`, `next/cache`) into client components.** Keep server and client code separated. Client-safe contracts live in `src/libs/cms/mutationResult.ts` and route/validation utils.
 - **Never use `console.log` in production paths.** Use `console.error` for server-side error logging (limiter/revalidation failures are logged with event/identifier context).
