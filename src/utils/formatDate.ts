@@ -1,8 +1,18 @@
 type DateInput = string | number | Date | null | undefined;
 
 const MONTHS_SHORT = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ] as const;
 
 function toDate(input: DateInput): Date {
@@ -25,6 +35,7 @@ export function formatDMY(input: DateInput): string {
 export function diffMonths(a: DateInput, b: DateInput): number {
   const da = toDate(a);
   const db = toDate(b);
-  return (da.getFullYear() - db.getFullYear()) * 12 +
-    (da.getMonth() - db.getMonth());
+  return (
+    (da.getFullYear() - db.getFullYear()) * 12 + (da.getMonth() - db.getMonth())
+  );
 }

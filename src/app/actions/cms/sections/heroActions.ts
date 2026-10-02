@@ -5,13 +5,15 @@ import {
   getAdminClient,
   prepareImageUpload,
   removePublicFileIfDifferent,
+  removeStorageObjectBestEffort,
   requireAdmin,
-  uploadPreparedImage,
+  uploadImmutablePreparedImage,
+  uploadPdfBuffer,
   validateImageFile,
   validatePdfFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import type { MutationResult } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
@@ -187,7 +189,7 @@ async function updateHero(
 async function uploadHeroImage(
   _supabase: SupabaseClient,
   file: File,
-  currentImageUrl?: string,
+  _currentImageUrl?: string,
   blurhashURL?: string
 ): Promise<HeroResult> {
   try {
@@ -205,10 +207,23 @@ async function uploadHeroImage(
     if (!prepared.success) {
       return { success: false, error: prepared.error };
     }
-    const upload = await uploadPreparedImage(
+
+    // Trusted replacement source: read the previous propic from the DB rather
+    // than trusting the client payload.
+    const { data: currentRow, error: fetchError } = await admin
+      .from('hero_section')
+      .select('propic')
+      .eq('id', 1)
+      .single();
+    if (fetchError || !currentRow)
+      throw fetchError ?? new Error('Hero row not found');
+
+    // Unique immutable path: the new object never overwrites the previous one.
+    const upload = await uploadImmutablePreparedImage(
       admin,
       'website',
-      'avatar/avatar',
+      'avatar',
+      'avatar',
       prepared.image
     );
 
@@ -223,16 +238,18 @@ async function uploadHeroImage(
     const { error: updateError } = await admin
       .from('hero_section')
       .update(updateData)
-      .eq('id', 1);
+      .eq('id', 1)
+      .select('id')
+      .single();
 
     if (updateError) {
-      await admin.storage.from('website').remove([upload.path]);
+      await removeStorageObjectBestEffort(admin, 'website', upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
-      currentImageUrl,
+      currentRow.propic,
       'website',
       upload.path
     );
@@ -257,10 +274,10 @@ async function uploadHeroImage(
 }
 
 async function uploadResume(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   file: File,
   field: 'resume_en' | 'resume_it',
-  currentResumeUrl?: string
+  _currentResumeUrl?: string
 ): Promise<HeroResult> {
   try {
     const fileValidation = validatePdfFile(file);
@@ -268,41 +285,42 @@ async function uploadResume(
       return { success: false, error: fileValidation.error };
     }
 
-    const fileName = `resumes/${field}.pdf`;
     const admin = getAdminClient();
+    const { data: currentRow, error: fetchError } = await admin
+      .from('hero_section')
+      .select('resume_en, resume_it')
+      .eq('id', 1)
+      .single();
+    if (fetchError || !currentRow)
+      throw fetchError ?? new Error('Hero row not found');
 
-    // No pre-upload deletion: the new PDF is uploaded with `upsert` to the
-    // same path (replacing the previous one). Deleting first would leave the
-    // row pointing at a deleted resume if the upload or DB update failed.
-    const { error: uploadError } = await admin.storage
-      .from('website')
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        contentType: 'application/pdf',
-        upsert: true,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data: urlData } = admin.storage
-      .from('website')
-      .getPublicUrl(fileName);
+    // Unique immutable PDF path: never overwrites the previous resume.
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const upload = await uploadPdfBuffer(
+      admin,
+      'website',
+      'resumes',
+      field,
+      buffer
+    );
 
     const { error: updateError } = await admin
       .from('hero_section')
-      .update({ [field]: urlData.publicUrl })
-      .eq('id', 1);
+      .update({ [field]: upload.publicUrl })
+      .eq('id', 1)
+      .select('id')
+      .single();
 
     if (updateError) {
-      await admin.storage.from('website').remove([fileName]);
+      await removeStorageObjectBestEffort(admin, 'website', upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
-      supabase,
-      currentResumeUrl,
+      admin,
+      currentRow[field] as string | null,
       'website',
-      fileName
+      upload.path
     );
 
     const revalidation = await invalidatePublicContent({
@@ -312,7 +330,7 @@ async function uploadResume(
 
     return {
       success: true,
-      data: { [field]: urlData.publicUrl },
+      data: { [field]: upload.publicUrl },
       revalidation,
     };
   } catch (error) {
@@ -325,92 +343,157 @@ async function uploadResume(
 }
 
 async function updateWithFiles(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   files: HeroFileData,
-  currentData?: HeroCurrentData,
+  _currentData?: HeroCurrentData,
   blurhashURL?: string
 ): Promise<HeroResult> {
-  try {
-    const updates: HeroUpdateData = {};
-    const resumeUpdates: Record<string, string> = {};
-    const revalidationStates: RevalidationStatus[] = [];
+  const admin = getAdminClient();
+  const propicFile = files.propic ?? files.mainImage;
 
-    // Handle profile picture upload (frontend sends mainImage, backend also accepts propic)
-    const propicFile = files.propic ?? files.mainImage;
-    const currentPropic = currentData?.propic ?? currentData?.mainImage;
+  // 1. Validate every file before touching storage or the DB. A single invalid
+  //    file must produce zero uploads and zero commits.
+  if (propicFile) {
+    const validation = validateImageFile(propicFile);
+    if (!validation.isValid) {
+      return { success: false, error: validation.error };
+    }
+  }
+  if (files.resume_en) {
+    const validation = validatePdfFile(files.resume_en);
+    if (!validation.isValid) {
+      return { success: false, error: validation.error };
+    }
+  }
+  if (files.resume_it) {
+    const validation = validatePdfFile(files.resume_it);
+    if (!validation.isValid) {
+      return { success: false, error: validation.error };
+    }
+  }
+
+  const updates: HeroUpdateData = {};
+  const staged: Array<{
+    path: string;
+    field: 'propic' | 'resume_en' | 'resume_it';
+  }> = [];
+
+  // 2. Stage all objects. If any staging step fails, remove everything already
+  //    staged and commit nothing.
+  try {
     if (propicFile) {
-      const imageResult = await uploadHeroImage(
-        supabase,
-        propicFile,
-        currentPropic,
-        blurhashURL
+      const prepared = await prepareImageUpload(propicFile, blurhashURL, {
+        maxWidth: 512,
+        maxHeight: 512,
+        quality: 80,
+      });
+      if (!prepared.success) {
+        throw new Error(prepared.error ?? 'Image processing failed');
+      }
+
+      const upload = await uploadImmutablePreparedImage(
+        admin,
+        'website',
+        'avatar',
+        'avatar',
+        prepared.image
       );
-      if (!imageResult.success) {
-        return imageResult;
-      }
-      if (imageResult.revalidation) {
-        revalidationStates.push(imageResult.revalidation);
-      }
-      const imageData = imageResult.data as {
-        propic: string;
-        blurhashURL: string;
-      };
-      updates.propic = imageData.propic;
-      updates.blurhashURL = imageData.blurhashURL;
+      staged.push({ path: upload.path, field: 'propic' });
+      updates.propic = `${upload.publicUrl}?t=${Date.now()}`;
+      updates.blurhashURL = prepared.image.blurhash;
     }
 
-    // Handle resume uploads
     if (files.resume_en) {
-      const resumeResult = await uploadResume(
-        supabase,
-        files.resume_en,
+      const buffer = Buffer.from(await files.resume_en.arrayBuffer());
+      const upload = await uploadPdfBuffer(
+        admin,
+        'website',
+        'resumes',
         'resume_en',
-        currentData?.resume_en
+        buffer
       );
-      if (!resumeResult.success) {
-        return resumeResult;
-      }
-      if (resumeResult.revalidation) {
-        revalidationStates.push(resumeResult.revalidation);
-      }
-      const resumeData = resumeResult.data as { resume_en: string };
-      resumeUpdates.resume_en = resumeData.resume_en;
+      staged.push({ path: upload.path, field: 'resume_en' });
+      updates.resume_en = upload.publicUrl;
     }
 
     if (files.resume_it) {
-      const resumeResult = await uploadResume(
-        supabase,
-        files.resume_it,
+      const buffer = Buffer.from(await files.resume_it.arrayBuffer());
+      const upload = await uploadPdfBuffer(
+        admin,
+        'website',
+        'resumes',
         'resume_it',
-        currentData?.resume_it
+        buffer
       );
-      if (!resumeResult.success) {
-        return resumeResult;
-      }
-      if (resumeResult.revalidation) {
-        revalidationStates.push(resumeResult.revalidation);
-      }
-      const resumeData = resumeResult.data as { resume_it: string };
-      resumeUpdates.resume_it = resumeData.resume_it;
+      staged.push({ path: upload.path, field: 'resume_it' });
+      updates.resume_it = upload.publicUrl;
     }
-
-    // Composite status: any failure wins, else any sent, else skipped.
-    const revalidation = revalidationStates.includes('failed')
-      ? 'failed'
-      : revalidationStates.includes('sent')
-        ? 'sent'
-        : 'skipped';
-
-    return {
-      success: true,
-      data: { ...updates, ...resumeUpdates },
-      revalidation,
-    };
-  } catch (error) {
-    console.error('Error updating with files:', error);
+  } catch (stageError) {
+    for (const object of staged) {
+      await removeStorageObjectBestEffort(admin, 'website', object.path);
+    }
     return {
       success: false,
-      error: 'Failed to update with files',
+      error:
+        stageError instanceof Error
+          ? stageError.message
+          : 'Failed to stage files',
     };
   }
+
+  if (Object.keys(updates).length === 0) {
+    return { success: false, error: 'No changes to save' };
+  }
+
+  // 3. Trusted previous values, then a single DB commit for every staged file.
+  const { data: currentRow, error: fetchError } = await admin
+    .from('hero_section')
+    .select('propic, resume_en, resume_it')
+    .eq('id', 1)
+    .single();
+
+  if (fetchError || !currentRow) {
+    for (const object of staged)
+      await removeStorageObjectBestEffort(admin, 'website', object.path);
+    return {
+      success: false,
+      error: fetchError?.message ?? 'Hero row not found',
+    };
+  }
+
+  const { error: updateError } = await admin
+    .from('hero_section')
+    .update(updates)
+    .eq('id', 1)
+    .select('id')
+    .single();
+
+  if (updateError) {
+    for (const object of staged) {
+      await removeStorageObjectBestEffort(admin, 'website', object.path);
+    }
+    return { success: false, error: updateError.message };
+  }
+
+  // 4. Commit succeeded: remove the previous DB-referenced objects (never the
+  //    newly committed ones). Best-effort, never throws.
+  for (const object of staged) {
+    const previous =
+      object.field === 'propic'
+        ? currentRow?.propic
+        : (currentRow?.[object.field] as string | null | undefined);
+    await removePublicFileIfDifferent(
+      admin,
+      previous ?? null,
+      'website',
+      object.path
+    );
+  }
+
+  const revalidation = await invalidatePublicContent({
+    entity: 'hero',
+    operation: 'asset-update',
+  });
+
+  return { success: true, data: updates, revalidation };
 }

@@ -1,11 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { encode as blurkitEncode } from 'blurkit/node';
-import { findAllowedCmsUser, getUserGithubUsername } from './auth';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { createClient } from '@/utils/supabase/server';
 import { FALLBACK_BLURHASH, isValidBlurhash } from '@/utils/blurhashUtils';
-import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
-
 // Pure validation helpers live in @/utils/cms/validation (unit-tested).
 // Re-exported here to keep every existing call site unchanged.
 import {
@@ -18,6 +15,9 @@ import {
   validateImageFile,
   validatePdfFile,
 } from '@/utils/cms/validation';
+import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
+import { createClient } from '@/utils/supabase/server';
+import { findAllowedCmsUser, getUserGithubUsername } from './auth';
 
 export {
   getStoragePathFromPublicUrl,
@@ -32,7 +32,7 @@ export {
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
-type CmsActionRole = 'authenticated' | 'admin' | 'post-writer';
+type CmsActionRole = 'authenticated' | 'allowlisted' | 'admin' | 'post-writer';
 
 export type CmsActionContext = {
   supabase: ServerSupabaseClient;
@@ -41,7 +41,7 @@ export type CmsActionContext = {
 };
 
 export async function getCmsActionContext(
-  requiredRole: CmsActionRole = 'authenticated'
+  requiredRole: CmsActionRole = 'allowlisted'
 ): Promise<CmsActionContext> {
   const supabase = await createClient();
   const {
@@ -68,6 +68,10 @@ export async function getCmsActionContext(
             githubUsername
           )
         )?.role || null;
+
+  if (requiredRole === 'allowlisted' && !role) {
+    throw new Error('Unauthorized: You are not allowlisted for the CMS');
+  }
 
   if (requiredRole === 'admin' && role !== 'admin') {
     throw new Error('Unauthorized: Admin access required');
@@ -96,11 +100,13 @@ export async function getCmsActionContext(
 }
 
 /**
- * Verifies the user is authenticated before allowing CMS operations.
+ * Verifies the user is authenticated AND allowlisted before allowing CMS
+ * operations. Authentication alone is not authorization: an authenticated
+ * Supabase account that is not in cms_allowed_users must not reach CMS data.
  * Delegates to the canonical authorization implementation.
  */
 export async function requireAuth(): Promise<{ id: string; email: string }> {
-  const context = await getCmsActionContext();
+  const context = await getCmsActionContext('allowlisted');
   return { id: context.user.id, email: context.user.email };
 }
 
@@ -356,20 +362,63 @@ export async function prepareImageUpload(
   };
 }
 
-export async function uploadPreparedImage(
+/**
+ * Builds a unique, immutable storage path (without extension) for a new asset:
+ * `<prefix>/<timestamp>-<random>-<sanitized-label>`. Because every upload gets
+ * a fresh path, an upload can never overwrite an existing object, so a failed
+ * DB write leaves the previous DB-referenced object untouched.
+ */
+export function buildUniqueAssetPath(prefix: string, label?: string): string {
+  const safeLabel = sanitizeFilename(label || 'file').slice(0, 40);
+  const stamp = Date.now();
+  const random = randomUUID();
+  return `${prefix}/${stamp}-${random}-${safeLabel}`;
+}
+
+/**
+ * Uploads a prepared image to a freshly generated unique path. Never upserts:
+ * an existing object is never overwritten. Returns the stored path so callers
+ * can remove it if the subsequent DB write fails.
+ */
+export async function uploadImmutablePreparedImage(
   supabase: SupabaseClient,
   bucket: string,
-  pathWithoutExtension: string,
+  prefix: string,
+  label: string | undefined,
   prepared: PreparedImageUpload
 ): Promise<{ publicUrl: string; path: string }> {
-  const path = `${pathWithoutExtension}.${prepared.extension}`;
+  const path = `${buildUniqueAssetPath(prefix, label)}.${prepared.extension}`;
   const { error } = await supabase.storage
     .from(bucket)
     .upload(path, prepared.buffer, {
       cacheControl: '3600',
       contentType: prepared.contentType,
-      upsert: true,
+      upsert: false,
     });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  return { publicUrl: data.publicUrl, path };
+}
+
+/**
+ * Uploads a PDF to a freshly generated unique path. Immutable for the same
+ * reason as uploadImmutablePreparedImage.
+ */
+export async function uploadPdfBuffer(
+  supabase: SupabaseClient,
+  bucket: string,
+  prefix: string,
+  label: string | undefined,
+  buffer: Buffer
+): Promise<{ publicUrl: string; path: string }> {
+  const path = `${buildUniqueAssetPath(prefix, label)}.pdf`;
+  const { error } = await supabase.storage.from(bucket).upload(path, buffer, {
+    cacheControl: '3600',
+    contentType: 'application/pdf',
+    upsert: false,
+  });
 
   if (error) throw error;
 

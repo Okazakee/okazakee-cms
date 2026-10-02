@@ -26,20 +26,22 @@ const POPULAR_ICONS = [
   'Heart',
 ];
 
-type IconMap = Record<string, React.ComponentType<{ className?: string; size?: number | string }>>;
+type IconMap = Record<
+  string,
+  React.ComponentType<{ className?: string; size?: number | string }>
+>;
 
 let iconMapCache: IconMap | null = null;
 let iconNamesCache: string[] | null = null;
 
 async function loadIconMap(): Promise<{ map: IconMap; names: string[] }> {
-  if (iconMapCache && iconNamesCache) return { map: iconMapCache, names: iconNamesCache };
+  if (iconMapCache && iconNamesCache)
+    return { map: iconMapCache, names: iconNamesCache };
 
   const mod = await import('lucide-react');
   const names = Object.keys(mod).filter(
     (name) =>
-      name !== 'createLucideIcon' &&
-      name !== 'default' &&
-      /^[A-Z]/.test(name)
+      name !== 'createLucideIcon' && name !== 'default' && /^[A-Z]/.test(name)
   );
   const map = mod as unknown as IconMap;
   iconMapCache = map;
@@ -70,9 +72,9 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
       return POPULAR_ICONS.filter((name) => names.includes(name));
     }
     const lower = search.toLowerCase();
-    return names.filter((name) =>
-      name.toLowerCase().includes(lower)
-    ).slice(0, 50);
+    return names
+      .filter((name) => name.toLowerCase().includes(lower))
+      .slice(0, 50);
   }, [search, iconNames]);
 
   const SelectedIcon = value && iconMap ? (iconMap[value] ?? null) : null;
@@ -95,7 +97,7 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 min-h-[44px] bg-white dark:bg-darkestgray border border-gray-300 dark:border-lighttext2/30 rounded-lg text-darktext dark:text-lighttext hover:border-main transition-colors w-full"
+        className="flex items-center gap-2 px-3 py-2 min-h-[44px] bg-surface-base border border-border-subtle rounded-lg text-text-main hover:border-accent-violet transition-colors w-full"
       >
         {SelectedIcon ? (
           <>
@@ -103,29 +105,29 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
             <span className="text-sm">{value}</span>
           </>
         ) : (
-          <span className="text-sm text-gray-400">
+          <span className="text-sm text-text-dim">
             {t('common.chooseIcon')}
           </span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute z-30 mt-1 w-full sm:w-72 bg-bglight dark:bg-darkergray border border-gray-200 dark:border-darkgray rounded-xl shadow-lg overflow-hidden">
-          <div className="p-2 border-b border-gray-100 dark:border-darkgray/50">
+        <div className="absolute z-30 mt-1 w-full sm:w-72 bg-surface-base border border-border-subtle rounded-xl overflow-hidden">
+          <div className="p-2 border-b border-border-subtle ">
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-text-dim" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-8 pr-8 py-2 text-sm bg-gray-50 dark:bg-darkestgray border border-gray-200 dark:border-darkgray/50 rounded-lg text-darktext dark:text-lighttext focus:outline-none focus:border-main"
+                className="w-full pl-8 pr-8 py-2 text-sm bg-surface-card border border-border-subtle rounded-lg text-text-main focus:outline-none focus:border-accent-violet"
                 placeholder={t('common.searchSections')}
               />
               {search && (
                 <button
                   type="button"
                   onClick={() => setSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-darktext dark:hover:text-lighttext"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-text-dim hover:text-text-main "
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -134,7 +136,7 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
           </div>
 
           {!search.trim() && (
-            <div className="px-3 py-1.5 text-xs font-medium text-gray-400 uppercase">
+            <div className="px-3 py-1.5 text-xs font-medium text-text-dim uppercase">
               {t('common.icon')} — popular
             </div>
           )}
@@ -157,8 +159,8 @@ export function IconPicker({ value, onChange }: IconPickerProps) {
                     title={name}
                     className={`p-2 rounded-lg flex flex-col items-center gap-1 transition-colors ${
                       isSelected
-                        ? 'bg-main text-white'
-                        : 'hover:bg-gray-100 dark:hover:bg-darkgray text-darktext dark:text-lighttext'
+                        ? 'bg-accent-violet text-white'
+                        : 'hover:bg-surface-card text-text-main '
                     }`}
                   >
                     <Icon className="w-5 h-5" />

@@ -2,25 +2,30 @@
 
 import { Eye, EyeOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useState } from 'react';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
-import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
-import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
+import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
+import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { SectionActions } from '@/components/cms/shared/SectionActions';
+import { SectionHeader } from '@/components/cms/shared/SectionHeader';
+import { MarkdownRenderer } from '@/components/layout/MarkdownRenderer';
+import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import MarkdownRenderer from '@/components/layout/MarkdownRenderer';
+import { useCmsStore } from '@/store/cmsStore';
 
 export default function PrivacyPolicySection() {
   const t = useTranslations('cms');
+  const fetchLabels = useRef(t);
+  fetchLabels.current = t;
   const [enMarkdown, setEnMarkdown] = useState('');
   const [itMarkdown, setItMarkdown] = useState('');
   const [original, setOriginal] = useState({ en: '', it: '' });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [_isUpdating, setIsUpdating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
@@ -28,11 +33,16 @@ export default function PrivacyPolicySection() {
   const isDirty = enMarkdown !== original.en || itMarkdown !== original.it;
   useSectionDirty('privacy-policy', isDirty);
 
+  const beginLoad = useLatestRequest();
   const fetchData = useCallback(async () => {
+    const current = beginLoad();
     setIsLoading(true);
     try {
       const r = await i18nActions({ type: 'GET' });
-      if (r.success && r.data) {
+      if (!current()) return;
+      if (!r.success)
+        throw new Error(r.error || fetchLabels.current('privacy.errorFetch'));
+      if (r.data) {
         const d = r.data as Array<{ language: string; privacy_policy: string }>;
         const en = d.find((x) => x.language === 'en')?.privacy_policy || '';
         const it = d.find((x) => x.language === 'it')?.privacy_policy || '';
@@ -41,11 +51,11 @@ export default function PrivacyPolicySection() {
         setOriginal({ en, it });
       }
     } catch {
-      setError(t('privacy.errorFetch'));
+      if (current()) setError(fetchLabels.current('privacy.errorFetch'));
     } finally {
-      setIsLoading(false);
+      if (current()) setIsLoading(false);
     }
-  }, [t]);
+  }, [beginLoad]);
 
   useEffect(() => {
     fetchData();
@@ -54,23 +64,40 @@ export default function PrivacyPolicySection() {
   const handlePublish = useCallback(async () => {
     setIsUpdating(true);
     setError(null);
+    useCmsStore.getState().setError(null);
     const errors: string[] = [];
-    for (const locale of ['en', 'it'] as const) {
-      const r = await i18nActions({
-        type: 'UPDATE_PRIVACY',
-        locale,
-        markdown: locale === 'en' ? enMarkdown : itMarkdown,
-      });
-      if (!r.success) errors.push(`${locale}: ${r.error}`);
-      else {
-        const warning = revalidationWarning(r);
-        if (warning) errors.push(warning);
+    const submitted = { en: enMarkdown, it: itMarkdown };
+    try {
+      for (const locale of ['en', 'it'] as const) {
+        if (submitted[locale] === original[locale]) continue;
+        try {
+          const r = await i18nActions({
+            type: 'UPDATE_PRIVACY',
+            locale,
+            markdown: submitted[locale],
+          });
+          if (!r.success)
+            errors.push(`${locale}: ${r.error || 'Failed to save'}`);
+          else {
+            setOriginal((prev) => ({ ...prev, [locale]: submitted[locale] }));
+            const warning = revalidationWarning(r);
+            if (warning) useCmsStore.getState().setWarning(warning);
+          }
+        } catch (err) {
+          errors.push(
+            `${locale}: ${err instanceof Error ? err.message : 'Failed to save'}`
+          );
+        }
       }
+      if (errors.length > 0) {
+        const message = errors.join('\n');
+        setError(message);
+        useCmsStore.getState().setError(message);
+      }
+    } finally {
+      setIsUpdating(false);
     }
-    if (errors.length === 0) setOriginal({ en: enMarkdown, it: itMarkdown });
-    else setError(errors.join('\n'));
-    setIsUpdating(false);
-  }, [enMarkdown, itMarkdown]);
+  }, [enMarkdown, itMarkdown, original]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
@@ -79,23 +106,34 @@ export default function PrivacyPolicySection() {
     setError(null);
   };
 
-  useSectionCallbacks(handlePublish, () => setShowConfirmRevert(true));
+  useSectionCallbacks('privacy-policy', handlePublish, handleRevert);
 
   const textareaClass =
-    'w-full px-4 py-3 bg-white dark:bg-darkestgray border border-gray-300 dark:border-lighttext2/30 rounded-lg text-darktext dark:text-lighttext focus:border-main focus:outline-none font-mono text-sm resize-y';
+    'w-full px-4 py-3 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none font-mono text-sm resize-y';
 
   if (isLoading)
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-main" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
       </div>
     );
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    <fieldset
+      disabled={isUpdating}
+      className="space-y-6 md:space-y-8 border-0 p-0 m-0 min-w-0"
+    >
       <SectionHeader
         title={t('privacy.title')}
         description={t('privacy.subtitle')}
+        actions={
+          <SectionActions
+            isDirty={isDirty}
+            busy={isUpdating}
+            onPublish={handlePublish}
+            onRevert={() => setShowConfirmRevert(true)}
+          />
+        }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
@@ -104,7 +142,7 @@ export default function PrivacyPolicySection() {
         <button
           type="button"
           onClick={() => setShowPreview((p) => !p)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-gray-100 dark:bg-darkergray hover:bg-gray-200 dark:hover:bg-darkgray text-darktext dark:text-lighttext rounded-lg transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-surface-card hover:bg-surface-raised text-text-main rounded-lg transition-colors"
         >
           {showPreview ? (
             <EyeOff className="w-4 h-4" />
@@ -116,7 +154,7 @@ export default function PrivacyPolicySection() {
       </div>
 
       <div>
-        <h2 className="text-lg font-bold text-main mb-3">
+        <h2 className="text-lg font-bold text-accent-violet mb-3">
           {activeLocale === 'en' ? t('common.english') : t('common.italian')}
         </h2>
         <textarea
@@ -136,9 +174,11 @@ export default function PrivacyPolicySection() {
       </div>
 
       {showPreview && (
-        <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6">
-          <h3 className="text-lg font-bold text-main mb-4">Live Preview</h3>
-          <div className="prose dark:prose-invert max-w-none bg-white dark:bg-darkestgray rounded-lg p-4 md:p-6 border border-gray-200 dark:border-darkgray/50">
+        <div className="bg-surface-card rounded-xl p-4 md:p-6">
+          <h3 className="text-lg font-bold text-accent-violet mb-4">
+            Live Preview
+          </h3>
+          <div className="prose dark:prose-invert max-w-none bg-surface-base rounded-lg p-4 md:p-6 border border-border-subtle ">
             <MarkdownRenderer
               markdown={activeLocale === 'en' ? enMarkdown : itMarkdown}
             />
@@ -155,6 +195,6 @@ export default function PrivacyPolicySection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-    </div>
+    </fieldset>
   );
 }

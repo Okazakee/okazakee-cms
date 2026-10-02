@@ -16,22 +16,19 @@ export function SectionHeader({
   actions,
 }: SectionHeaderProps) {
   return (
-    <div className="text-center mb-6 md:mb-8">
-      <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-main mb-2 md:mb-4">
+    <div className="mb-8 text-center">
+      <h1 className="font-heading text-2xl font-semibold text-text-white sm:text-3xl">
         {title}
       </h1>
       {description && (
-        <p className="text-gray-500 dark:text-lighttext2 text-sm md:text-base lg:text-lg mb-4">
+        <p className="mt-2 font-mono text-xs text-accent-violet-light sm:text-sm">
           {description}
         </p>
       )}
-      {meta && (
-        <p className="text-sm text-gray-400 dark:text-lighttext2/70 mb-2">
-          {meta}
-        </p>
-      )}
+      <div className="mx-auto mt-3 h-0.5 w-10 rounded-full bg-accent-violet" />
+      {meta && <p className="text-sm text-text-dim mb-2">{meta}</p>}
       {actions && (
-        <div className="flex flex-col sm:flex-row justify-center gap-3 mt-4">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
           {actions}
         </div>
       )}

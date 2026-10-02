@@ -36,7 +36,7 @@ export function TranslationField({
 }: TranslationFieldProps) {
   const t = useTranslations('cms');
   const inputClass =
-    'w-full px-3 py-2 bg-white dark:bg-darkestgray border border-gray-300 dark:border-lighttext2/30 rounded-lg text-darktext dark:text-lighttext focus:border-main focus:outline-none';
+    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
 
   if (activeLocale) {
     const value = activeLocale === 'en' ? enValue : itValue;
@@ -47,12 +47,12 @@ export function TranslationField({
 
     return (
       <div>
-        <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-2">
+        <label className="block text-sm font-medium text-text-main mb-2">
           {label}
           {required && <span className="text-red-500 ml-1">*</span>}
         </label>
         <div className="flex items-center gap-1 mb-1">
-          <span className="text-xs font-medium text-gray-400 uppercase">
+          <span className="text-xs font-medium text-text-dim uppercase">
             {activeLocale === 'en' ? t('common.english') : t('common.italian')}
           </span>
         </div>
@@ -85,14 +85,14 @@ export function TranslationField({
 
   return (
     <div>
-      <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-2">
+      <label className="block text-sm font-medium text-text-main mb-2">
         {label}
         {required && <span className="text-red-500 ml-1">*</span>}
       </label>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <div className="flex items-center gap-1 mb-1">
-            <span className="text-xs font-medium text-gray-400 uppercase">
+            <span className="text-xs font-medium text-text-dim uppercase">
               {t('common.english')}
             </span>
           </div>
@@ -119,7 +119,7 @@ export function TranslationField({
         </div>
         <div>
           <div className="flex items-center gap-1 mb-1">
-            <span className="text-xs font-medium text-gray-400 uppercase">
+            <span className="text-xs font-medium text-text-dim uppercase">
               {t('common.italian')}
             </span>
           </div>

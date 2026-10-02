@@ -58,7 +58,7 @@ export const SkillsCarousel = ({
         {skills.map((skill) => (
           <span
             key={skill}
-            className="skill-tag bg-secondary text-white px-2 py-1 rounded-md text-xs mr-2"
+            className="skill-tag bg-accent-violet-deep text-white px-2 py-1 rounded-md text-xs mr-2"
           >
             {skill}
           </span>

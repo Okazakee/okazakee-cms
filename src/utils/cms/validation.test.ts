@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_UPLOAD_SIZE_BYTES,
   getStoragePathFromPublicUrl,
   isValidDate,
   isValidUrl,
+  MAX_UPLOAD_SIZE_BYTES,
   sanitizeFilename,
   validateImageFile,
   validatePdfFile,
@@ -155,9 +155,8 @@ describe('validatePdfFile', () => {
 
   it('accepts a PDF exactly at the 10MB boundary', () => {
     expect(
-      validatePdfFile(
-        makeFile('cv.pdf', 'application/pdf', 10 * 1024 * 1024)
-      ).isValid
+      validatePdfFile(makeFile('cv.pdf', 'application/pdf', 10 * 1024 * 1024))
+        .isValid
     ).toBe(true);
   });
 });

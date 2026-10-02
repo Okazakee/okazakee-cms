@@ -4,26 +4,27 @@ import { Copy, Download } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
+import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
+import { FileDropzone } from '@/components/cms/shared/FileDropzone';
+import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
-import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
-import { FileDropzone } from '@/components/cms/shared/FileDropzone';
-import { useFileUpload } from '@/hooks/cms/useFileUpload';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
-import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
-import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { HeroPreview } from '@/components/common/cms/previews/HeroPreview';
+import { useFileUpload } from '@/hooks/cms/useFileUpload';
+import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
+import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { useCmsStore } from '@/store/cmsStore';
 
 export default function HeroSection() {
   const t = useTranslations('cms');
   const { heroSection, setHeroSection } = useCmsStore();
 
-  const [_isUpdating, setIsUpdating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
@@ -37,6 +38,7 @@ export default function HeroSection() {
   });
 
   const {
+    translations,
     isDirty: transDirty,
     isLoading: transLoading,
     getField,
@@ -63,6 +65,7 @@ export default function HeroSection() {
   const handlePublish = useCallback(async () => {
     setIsUpdating(true);
     setError(null);
+    useCmsStore.getState().setError(null);
 
     try {
       let revalidationMessage: string | null = null;
@@ -81,8 +84,9 @@ export default function HeroSection() {
         });
 
         if (!result.success) {
-          setError(result.error || t('hero.errorUpdateHero'));
-          setIsUpdating(false);
+          const message = result.error || t('hero.errorUpdateHero');
+          setError(message);
+          useCmsStore.getState().setError(message);
           return;
         }
 
@@ -110,19 +114,21 @@ export default function HeroSection() {
 
       const transErrors = await saveTranslations();
       if (transErrors.length > 0) {
-        setError(transErrors.join('\n'));
-      } else if (revalidationMessage) {
-        setError(revalidationMessage);
+        const message = transErrors.join('\n');
+        setError(message);
+        useCmsStore.getState().setError(message);
       }
+      if (revalidationMessage)
+        useCmsStore.getState().setWarning(revalidationMessage);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('hero.errorUpdateHero'));
+      const message =
+        err instanceof Error ? err.message : t('hero.errorUpdateHero');
+      setError(message);
+      useCmsStore.getState().setError(message);
     } finally {
       setIsUpdating(false);
     }
-  }, [
-    imgUpload,
-    heroSection, saveTranslations, setHeroSection, t,
-  ]);
+  }, [imgUpload, heroSection, saveTranslations, setHeroSection, t]);
 
   const handleRevert = useCallback(() => {
     setShowConfirmRevert(false);
@@ -134,10 +140,12 @@ export default function HeroSection() {
     setError(null);
   }, [imgUpload, revertTranslations, heroSection]);
 
-  useSectionCallbacks(handlePublish, () => setShowConfirmRevert(true));
+  useSectionCallbacks('hero', handlePublish, handleRevert);
 
   const copyUrl = (url: string) => {
-    navigator.clipboard.writeText(url).catch(() => setError(t('hero.errorCopyUrl')));
+    navigator.clipboard
+      .writeText(url)
+      .catch(() => setError(t('hero.errorCopyUrl')));
   };
 
   const downloadImage = async (url: string) => {
@@ -160,23 +168,35 @@ export default function HeroSection() {
   if (!heroSection) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-main" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    <fieldset
+      disabled={isUpdating}
+      className="space-y-6 md:space-y-8 border-0 p-0 m-0 min-w-0"
+    >
       <SectionHeader
         title={t('hero.title')}
         description={t('hero.subtitle')}
+        actions={
+          <SectionActions
+            isDirty={isDirty}
+            busy={isUpdating}
+            onPublish={handlePublish}
+            onRevert={() => setShowConfirmRevert(true)}
+            onPreview={() => setIsPreviewOpen(true)}
+          />
+        }
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
       {/* Hero Image */}
-      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6">
-        <h2 className="text-lg md:text-xl font-bold text-main mb-4">
+      <div className="bg-surface-card rounded-xl p-4 md:p-6">
+        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4">
           {t('hero.heroImageTitle')}
         </h2>
         <div className="flex flex-col lg:flex-row items-start gap-6">
@@ -204,7 +224,7 @@ export default function HeroSection() {
               <button
                 type="button"
                 onClick={() => copyUrl(mainImageUrl)}
-                className="px-3 py-1.5 text-sm bg-white dark:bg-darkestgray text-darktext dark:text-lighttext rounded-lg hover:bg-gray-100 dark:hover:bg-darkgray transition-colors"
+                className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors"
               >
                 <Copy className="w-3 h-3 inline mr-1" />
                 {t('hero.copyUrl')}
@@ -223,21 +243,24 @@ export default function HeroSection() {
       </div>
 
       {/* Translations */}
-      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6">
+      <div className="bg-surface-card rounded-xl p-4 md:p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-main">
+          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
             {t('hero.translationsSection')}
           </h2>
-          <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
+          <LocaleToggle
+            activeLocale={activeLocale}
+            onChange={setActiveLocale}
+          />
         </div>
 
         {transLoading ? (
           <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-main" />
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
           </div>
         ) : (
           <div className="space-y-6">
-            <h3 className="text-base font-semibold text-darktext dark:text-lighttext">
+            <h3 className="text-base font-semibold text-text-main ">
               {t('hero.topSection')}
             </h3>
             <TranslationField
@@ -257,7 +280,7 @@ export default function HeroSection() {
               activeLocale={activeLocale}
             />
 
-            <h3 className="text-base font-semibold text-darktext dark:text-lighttext pt-2">
+            <h3 className="text-base font-semibold text-text-main pt-2">
               {t('hero.aboutMeSection')}
             </h3>
             <TranslationField
@@ -296,12 +319,17 @@ export default function HeroSection() {
         isOpen={isPreviewOpen}
         onClose={() => setIsPreviewOpen(false)}
         title={t('hero.previewTitle')}
+        copy={{
+          locale: activeLocale,
+          namespace: 'hero-section',
+          drafts: translations,
+        }}
       >
         <HeroPreview
           mainImage={mainImageUrl}
           blurhashURL={imgUpload.blurhash ?? heroSection.blurhashURL ?? ''}
         />
       </PreviewModal>
-    </div>
+    </fieldset>
   );
 }

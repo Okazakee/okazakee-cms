@@ -6,8 +6,23 @@ import {
   getCmsActionContext,
   requireAdmin,
 } from '@/app/actions/cms/utils/fileHelpers';
+import {
+  batchFailureSummary,
+  batchHadCommits,
+  batchSucceeded,
+  emptyBatchEvidence,
+  markCreated,
+  markDeleted,
+  markFailed,
+  markReordered,
+  markUpdated,
+  normalizeTempId,
+} from '@/libs/cms/batchEvidence';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type SkillOperation =
@@ -20,13 +35,20 @@ type SkillOperation =
   | { type: 'DELETE_CATEGORY'; id: number }
   | {
       type: 'BATCH_PUBLISH';
-      newCategories: Array<{ name: string; tempId: number }>;
-      newSkills: Array<{ categoryId: number; data: CreateSkillData }>;
+      newCategories: Array<{ name: string; tempId: string }>;
+      newSkills: Array<{
+        categoryId: number | string;
+        tempId?: string;
+        data: CreateSkillData;
+      }>;
       updateSkills: Array<{ id: number; data: UpdateSkillData }>;
       deleteSkills: number[];
-      updateCategories: Array<{ id: number; data: UpdateCategoryData }>;
+      updateCategories: Array<{
+        id: number | string;
+        data: UpdateCategoryData;
+      }>;
       deleteCategories: number[];
-      categoryOrder: Array<{ id: number; position: number }>;
+      categoryOrder: Array<{ id: number | string; position: number }>;
     };
 
 type CreateSkillData = {
@@ -140,15 +162,20 @@ export async function skillsActions(
 async function batchPublishSkills(
   operation: Extract<SkillOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<SkillsResult> {
+  const evidence = emptyBatchEvidence();
+  const tempIdToRealId: Record<string, number> = {};
   try {
     await getCmsActionContext('admin');
     const admin = getAdminClient();
-    const errors: string[] = [];
-    const tempIdToRealId: Record<number, number> = {};
 
-    for (const category of operation.newCategories) {
+    for (const [index, category] of operation.newCategories.entries()) {
+      const tempId = normalizeTempId(category.tempId, 'category', index);
       if (!category.name || category.name.trim().length === 0) {
-        errors.push('Category name is required');
+        markFailed(evidence, {
+          kind: 'category',
+          tempId,
+          error: 'Category name is required',
+        });
         continue;
       }
 
@@ -159,31 +186,108 @@ async function batchPublishSkills(
         .single();
 
       if (error) {
-        errors.push(`Category "${category.name}": ${error.message}`);
+        markFailed(evidence, {
+          kind: 'category',
+          tempId,
+          error: error.message,
+        });
       } else {
-        tempIdToRealId[category.tempId] = data.id as number;
+        tempIdToRealId[tempId] = data.id as number;
+        markCreated(evidence, tempId, data.id);
       }
     }
 
-    for (const item of operation.newSkills) {
-      const categoryId = tempIdToRealId[item.categoryId] ?? item.categoryId;
-      const skillData = { ...item.data, category_id: categoryId };
-      const validation = validateSkillData(skillData);
-      if (!validation.isValid) {
-        errors.push(`Skill "${skillData.title}": ${validation.error}`);
+    for (const [index, item] of operation.newSkills.entries()) {
+      const tempId = normalizeTempId(item.tempId, 'skill', index);
+      const resolvedCategoryId =
+        typeof item.categoryId === 'string'
+          ? tempIdToRealId[item.categoryId]
+          : item.categoryId;
+
+      if (resolvedCategoryId === undefined) {
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: 'Unknown skill category',
+        });
         continue;
       }
 
-      const { error } = await admin.from('skills').insert(skillData);
-      if (error) errors.push(`Skill "${skillData.title}": ${error.message}`);
+      const skillData = { ...item.data, category_id: resolvedCategoryId };
+      const validation = validateSkillData(skillData);
+      if (!validation.isValid) {
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: validation.error ?? 'Invalid data',
+        });
+        continue;
+      }
+
+      const { data, error } = await admin
+        .from('skills')
+        .insert(skillData)
+        .select()
+        .single();
+
+      if (error) {
+        markFailed(evidence, { kind: 'create', tempId, error: error.message });
+      } else {
+        markCreated(evidence, tempId, data.id);
+      }
     }
 
     if (operation.deleteSkills.length > 0) {
-      const { error } = await admin
+      const { data: existingRows, error: fetchError } = await admin
         .from('skills')
-        .delete()
+        .select('id')
         .in('id', operation.deleteSkills);
-      if (error) errors.push(`Delete skill: ${error.message}`);
+
+      if (fetchError) {
+        markFailed(evidence, { kind: 'delete', error: fetchError.message });
+      } else {
+        // Returned-row evidence: unknown ids keep their drafts.
+        const existingIds = new Set(
+          (existingRows || []).map((row) => row.id as number)
+        );
+        for (const id of operation.deleteSkills) {
+          if (!existingIds.has(id)) {
+            markFailed(evidence, {
+              kind: 'delete',
+              id,
+              error: 'Skill not found',
+            });
+          }
+        }
+        const deletable = operation.deleteSkills.filter((id) =>
+          existingIds.has(id)
+        );
+        if (deletable.length > 0) {
+          const { data: deletedRows, error } = await admin
+            .from('skills')
+            .delete()
+            .in('id', deletable)
+            .select('id');
+
+          if (error) {
+            markFailed(evidence, { kind: 'delete', error: error.message });
+          } else {
+            const deletedIds = new Set(
+              (deletedRows || []).map((row) => row.id as number)
+            );
+            for (const id of deletable) {
+              if (deletedIds.has(id)) markDeleted(evidence, id);
+              else {
+                markFailed(evidence, {
+                  kind: 'delete',
+                  id,
+                  error: 'Skill was not deleted',
+                });
+              }
+            }
+          }
+        }
+      }
     }
 
     for (const categoryId of operation.deleteCategories) {
@@ -193,72 +297,140 @@ async function batchPublishSkills(
         .eq('category_id', categoryId);
 
       if (skillsError) {
-        errors.push(`Delete category ${categoryId}: ${skillsError.message}`);
+        markFailed(evidence, {
+          kind: 'category',
+          id: categoryId,
+          error: skillsError.message,
+        });
         continue;
       }
 
       if (skills && skills.length > 0) {
-        errors.push(
-          `Cannot delete category with ${skills.length} skill(s). Remove all skills first.`
-        );
+        markFailed(evidence, {
+          kind: 'category',
+          id: categoryId,
+          error: `Cannot delete category with ${skills.length} skill(s). Remove all skills first.`,
+        });
+        continue;
+      }
+
+      const { data: deletedCategory, error } = await admin
+        .from('skills_categories')
+        .delete()
+        .eq('id', categoryId)
+        .select('id')
+        .single();
+
+      if (error || !deletedCategory) {
+        markFailed(evidence, {
+          kind: 'category',
+          id: categoryId,
+          error: error?.message ?? 'Category was not deleted',
+        });
+      } else {
+        markDeleted(evidence, `category:${categoryId}`);
+      }
+    }
+
+    for (const item of operation.updateCategories) {
+      const resolvedId =
+        typeof item.id === 'string' ? tempIdToRealId[item.id] : item.id;
+      if (resolvedId === undefined) {
+        markFailed(evidence, {
+          kind: 'category',
+          id: item.id,
+          error: 'Unknown category',
+        });
+        continue;
+      }
+
+      const updateFields: UpdateCategoryData = {};
+      if (item.data.name !== undefined) {
+        updateFields.name = item.data.name.trim();
+      }
+      if (item.data.position !== undefined) {
+        updateFields.position = item.data.position;
+      }
+
+      const { error } = await admin
+        .from('skills_categories')
+        .update(updateFields)
+        .eq('id', resolvedId)
+        .select('id')
+        .single();
+
+      if (error) {
+        markFailed(evidence, {
+          kind: 'category',
+          id: resolvedId,
+          error: error.message,
+        });
+      } else {
+        markUpdated(evidence, `category:${resolvedId}`);
+      }
+    }
+
+    for (const item of operation.categoryOrder) {
+      const resolvedId =
+        typeof item.id === 'string' ? tempIdToRealId[item.id] : item.id;
+      if (resolvedId === undefined) {
+        markFailed(evidence, {
+          kind: 'reorder',
+          id: item.id,
+          error: 'Unknown category',
+        });
         continue;
       }
 
       const { error } = await admin
         .from('skills_categories')
-        .delete()
-        .eq('id', categoryId);
-      if (error) errors.push(`Delete category ${categoryId}: ${error.message}`);
-    }
-
-    for (const item of operation.updateCategories) {
-      const id = tempIdToRealId[item.id] ?? item.id;
-      const updateFields: UpdateCategoryData = {};
-      if (item.data.name !== undefined)
-        updateFields.name = item.data.name.trim();
-      if (item.data.position !== undefined)
-        updateFields.position = item.data.position;
-
-      const { error } = await admin
-        .from('skills_categories')
-        .update(updateFields)
-        .eq('id', id);
-      if (error) errors.push(`Category ${id}: ${error.message}`);
-    }
-
-    for (const item of operation.categoryOrder) {
-      const id = tempIdToRealId[item.id] ?? item.id;
-      const { error } = await admin
-        .from('skills_categories')
         .update({ position: item.position })
-        .eq('id', id);
-      if (error) errors.push(`Reorder category ${id}: ${error.message}`);
+        .eq('id', resolvedId)
+        .select('id')
+        .single();
+
+      if (error) {
+        markFailed(evidence, {
+          kind: 'reorder',
+          id: resolvedId,
+          error: error.message,
+        });
+      } else {
+        markReordered(evidence, resolvedId);
+      }
     }
 
     for (const item of operation.updateSkills) {
       const validation = validateSkillData(item.data);
       if (!validation.isValid) {
-        errors.push(`Skill ${item.id}: ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
       const { error } = await admin
         .from('skills')
         .update(item.data)
-        .eq('id', item.id);
-      if (error) errors.push(`Skill ${item.id}: ${error.message}`);
+        .eq('id', item.id)
+        .select('id')
+        .single();
+
+      if (error) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: error.message,
+        });
+      } else {
+        markUpdated(evidence, item.id);
+      }
     }
 
     let revalidation: RevalidationStatus | undefined;
-    if (
-      operation.newCategories.length > 0 ||
-      operation.newSkills.length > 0 ||
-      operation.updateSkills.length > 0 ||
-      operation.deleteSkills.length > 0 ||
-      operation.updateCategories.length > 0 ||
-      operation.deleteCategories.length > 0 ||
-      operation.categoryOrder.length > 0
-    ) {
+    if (batchHadCommits(evidence)) {
       revalidation = await invalidatePublicContent({
         entity: 'skills',
         operation: 'publish',
@@ -266,21 +438,30 @@ async function batchPublishSkills(
     }
 
     return {
-      success: errors.length === 0,
-      data: { tempIdToRealId },
-      error: errors.length > 0 ? errors.join('\n') : undefined,
+      success: batchSucceeded(evidence),
+      data: { ...evidence, tempIdToRealId },
+      error: batchFailureSummary(evidence),
       revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing skills:', error);
+    const message =
+      error instanceof Error ? error.message : 'Failed to publish skills';
+    markFailed(evidence, { kind: 'update', error: message });
+    const revalidation = batchHadCommits(evidence)
+      ? await invalidatePublicContent({
+          entity: 'skills',
+          operation: 'publish',
+        })
+      : undefined;
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : 'Failed to publish skills',
+      data: { ...evidence, tempIdToRealId },
+      error: batchFailureSummary(evidence),
+      revalidation,
     };
   }
 }
-
 async function getSkills(supabase: SupabaseClient): Promise<SkillsResult> {
   try {
     const { data, error } = await supabase.from('skills_categories').select(`

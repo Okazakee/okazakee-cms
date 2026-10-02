@@ -28,7 +28,7 @@ export default function LanguageToggle({
       <button
         type="button"
         onClick={switchLanguage}
-        className="w-full flex items-center gap-3 p-3 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-darkergray dark:hover:bg-darkgray text-darktext dark:text-lighttext hover:text-darktext dark:hover:text-white transition-all duration-200"
+        className="w-full flex items-center gap-3 p-3 rounded-lg bg-surface-card hover:bg-surface-raised text-text-main hover:text-text-main transition-all duration-200"
         data-umami-event="Language toggle"
       >
         <Languages className="w-4 h-4 flex-shrink-0" />
@@ -41,8 +41,8 @@ export default function LanguageToggle({
 
   // Use compact styling when in desktop header
   const buttonClass = compact
-    ? 'flex items-center justify-center border-2 border-main rounded-2xl transition-all duration-300 ease-in-out w-fit px-3 h-10'
-    : 'space-x-2 relative flex justify-center items-center border-2 border-white dark:border-white rounded-2xl transition-all duration-300 ease-in-out h-16 w-48 lg:h-10 lg:w-32 lg:border-main';
+    ? 'flex items-center justify-center border-2 border-accent-violet rounded-2xl transition-all duration-300 ease-in-out w-fit px-3 h-10'
+    : 'space-x-2 relative flex justify-center items-center border-2 border-white rounded-2xl transition-all duration-300 ease-in-out h-16 w-48 lg:h-10 lg:w-32 lg:border-accent-violet';
 
   return (
     <button
@@ -52,11 +52,11 @@ export default function LanguageToggle({
       data-umami-event="Language toggle"
     >
       {compact ? (
-        <span className="text-sm font-medium text-darktext dark:text-lighttext transition-all duration-300 ease-in-out">
+        <span className="text-sm font-medium text-text-main transition-all duration-300 ease-in-out">
           {isItalian ? 'IT' : 'EN'}
         </span>
       ) : (
-        <div className="text-xl lg:text-lg text-darktext dark:text-lighttext dark:text-lighttext transition-all duration-300 ease-in-out flex items-center justify-center w-full">
+        <div className="text-xl lg:text-lg text-text-main transition-all duration-300 ease-in-out flex items-center justify-center w-full">
           {isItalian ? 'Italiano' : 'English'}
         </div>
       )}

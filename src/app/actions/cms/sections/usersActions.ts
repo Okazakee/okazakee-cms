@@ -1,24 +1,25 @@
 'use server';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import type {
-  MutationResult,
-  RevalidationStatus,
-} from '@/libs/cms/mutationResult';
 import { refresh } from 'next/cache';
-import {
-  prepareImageUpload,
-  removePublicFileIfDifferent,
-  requireAuth,
-  uploadPreparedImage,
-  validateImageFile,
-} from '@/app/actions/cms/utils/fileHelpers';
 import {
   findAllowedCmsUser,
   getUserGithubUsername,
 } from '@/app/actions/cms/utils/auth';
+import {
+  prepareImageUpload,
+  removePublicFileIfDifferent,
+  removeStorageObjectBestEffort,
+  requireAuth,
+  uploadImmutablePreparedImage,
+  validateImageFile,
+} from '@/app/actions/cms/utils/fileHelpers';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
+import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
 type UserOperation =
@@ -163,7 +164,8 @@ async function getAllowedUsers(
   const authGithubUsername = authUser?.user_metadata?.user_name || null;
 
   // Fetch all user profiles to match with allowed users (no cache to ensure fresh data)
-  const { data: profiles, error: profilesError } = await supabase
+  const adminClient = getCmsAdminClient();
+  const { data: profiles, error: profilesError } = await adminClient
     .from('user_profiles')
     .select('id, email, display_name, avatar_url, github_username');
 
@@ -181,7 +183,7 @@ async function getAllowedUsers(
       !profiles[currentUserProfileIndex].github_username
     ) {
       try {
-        await supabase
+        await adminClient
           .from('user_profiles')
           .update({ github_username: authGithubUsername })
           .eq('id', authUser.id);
@@ -253,7 +255,7 @@ async function getAllowedUsers(
 }
 
 async function addEmailUser(
-  supabase: ReturnType<typeof createClient> extends Promise<infer T>
+  _supabase: ReturnType<typeof createClient> extends Promise<infer T>
     ? T
     : never,
   email: string,
@@ -296,7 +298,7 @@ async function addEmailUser(
 }
 
 async function addGitHubUser(
-  supabase: ReturnType<typeof createClient> extends Promise<infer T>
+  _supabase: ReturnType<typeof createClient> extends Promise<infer T>
     ? T
     : never,
   github_username: string,
@@ -336,7 +338,7 @@ async function addGitHubUser(
 }
 
 async function addDummyUser(
-  supabase: ReturnType<typeof createClient> extends Promise<infer T>
+  _supabase: ReturnType<typeof createClient> extends Promise<infer T>
     ? T
     : never,
   displayName: string,
@@ -495,7 +497,7 @@ async function addDummyUser(
 }
 
 async function updateUserRole(
-  supabase: ReturnType<typeof createClient> extends Promise<infer T>
+  _supabase: ReturnType<typeof createClient> extends Promise<infer T>
     ? T
     : never,
   id: number,
@@ -529,7 +531,7 @@ async function updateUserRole(
 }
 
 async function removeUser(
-  supabase: ReturnType<typeof createClient> extends Promise<infer T>
+  _supabase: ReturnType<typeof createClient> extends Promise<infer T>
     ? T
     : never,
   id: number
@@ -640,6 +642,12 @@ async function updateUserProfile(
   const updates: { display_name?: string } = {};
 
   if (displayName && displayName.trim().length > 0) {
+    if (displayName.trim().length > 100) {
+      return {
+        success: false,
+        error: 'Display name must be 100 characters or less',
+      };
+    }
     updates.display_name = displayName.trim();
   }
 
@@ -647,10 +655,13 @@ async function updateUserProfile(
     return { success: false, error: 'No changes to save' };
   }
 
+  // Require returned-row evidence so a missing profile never reports success.
   const { error } = await getCmsAdminClient()
     .from('user_profiles')
     .update(updates)
-    .eq('id', profileId);
+    .eq('id', profileId)
+    .select('id')
+    .single();
 
   if (error) throw error;
 
@@ -712,24 +723,28 @@ export async function uploadUserAvatar(
     return { success: false, error: prepared.error };
   }
 
-  // Get current avatar URL to remove the old file AFTER the DB commit
-  const { data: currentProfile } = await adminClient
+  // Get current avatar URL to remove the old file AFTER the DB commit. A
+  // missing profile row fails fast: without returned-row evidence a success
+  // must never be reported and no orphan upload left behind.
+  const { data: currentProfile, error: profileError } = await adminClient
     .from('user_profiles')
     .select('avatar_url')
     .eq('id', profileId)
     .single();
+  if (profileError || !currentProfile) {
+    return { success: false, error: 'Profile not found' };
+  }
 
-  // Upload via the shared prepared-image pipeline. No pre-upload deletion:
-  // the new avatar is uploaded with `upsert` to the deterministic path
-  // (replacing any previous same-path file); an old file behind a different
-  // path is removed after the DB commit. Deleting first would leave the row
-  // pointing at a deleted avatar if the upload or DB update failed.
+  // Unique immutable path: the new avatar never overwrites the previous one,
+  // so a failed DB update can never leave the row pointing at a deleted
+  // object. The previous DB-referenced avatar is removed after the commit.
   let upload: { publicUrl: string; path: string };
   try {
-    upload = await uploadPreparedImage(
+    upload = await uploadImmutablePreparedImage(
       adminClient,
       'website',
-      `Website Assets/avatars/${profileId}-avatar`,
+      'Website Assets/avatars',
+      profileId,
       prepared.image
     );
   } catch (uploadError) {
@@ -739,12 +754,15 @@ export async function uploadUserAvatar(
 
   // Add cache-busting param
   const avatarUrl = `${upload.publicUrl}?t=${Date.now()}`;
-  const { error: updateError } = await adminClient
+  const { data: updatedProfile, error: updateError } = await adminClient
     .from('user_profiles')
     .update({ avatar_url: avatarUrl })
-    .eq('id', profileId);
+    .eq('id', profileId)
+    .select('id')
+    .single();
 
-  if (updateError) {
+  if (updateError || !updatedProfile) {
+    await removeStorageObjectBestEffort(adminClient, 'website', upload.path);
     console.error('Profile update error:', updateError);
     return { success: false, error: 'Failed to update profile' };
   }
@@ -796,15 +814,24 @@ export async function updateUserDisplayName(
   if (!displayName || displayName.trim().length === 0) {
     return { success: false, error: 'Display name is required' };
   }
+  if (displayName.trim().length > 100) {
+    return {
+      success: false,
+      error: 'Display name must be 100 characters or less',
+    };
+  }
 
   // Use admin client to bypass RLS when updating other users' profiles
   const adminClient = getCmsAdminClient();
 
-  // Update user_profiles table using admin client
+  // Update user_profiles table using admin client; require returned-row
+  // evidence so a missing profile never reports success.
   const { error: updateError } = await adminClient
     .from('user_profiles')
     .update({ display_name: displayName.trim() })
-    .eq('id', profileId);
+    .eq('id', profileId)
+    .select('id')
+    .single();
 
   if (updateError) {
     console.error('Profile update error:', updateError);
@@ -847,6 +874,7 @@ export async function updateMyProfile(
     return { success: false, error: 'User not found' };
   }
 
+  const admin = getCmsAdminClient();
   const displayName = formData.get('displayName') as string | null;
   const avatarFile = formData.get('avatar') as File | null;
 
@@ -859,8 +887,14 @@ export async function updateMyProfile(
     newPath: string;
   } | null = null;
 
-  // Update display name if provided
+  // Update display name if provided (same ≤100-char bound as dummy creation).
   if (displayName && displayName.trim().length > 0) {
+    if (displayName.trim().length > 100) {
+      return {
+        success: false,
+        error: 'Display name must be 100 characters or less',
+      };
+    }
     updates.display_name = displayName.trim();
   }
 
@@ -871,8 +905,6 @@ export async function updateMyProfile(
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
-
-    const adminClient = getCmsAdminClient();
 
     // Format-aware processing: extension and MIME follow the ACTUAL processed
     // format (WebP passthrough or Sharp fallback, which may produce PNG).
@@ -886,23 +918,22 @@ export async function updateMyProfile(
     }
 
     // Get current avatar URL to remove the old file AFTER the DB commit
-    const { data: currentProfile } = await supabase
+    const { data: currentProfile } = await admin
       .from('user_profiles')
       .select('avatar_url')
       .eq('id', user.id)
       .single();
 
-    // Upload via the shared prepared-image pipeline. No pre-upload deletion:
-    // the new avatar is uploaded with `upsert` to the deterministic path
-    // (replacing any previous same-path file); an old file behind a different
-    // path is removed after the DB commit. Deleting first would leave the row
-    // pointing at a deleted avatar if the upload or DB update failed.
+    // Unique immutable path: the new avatar never overwrites the previous one,
+    // so a failed DB update can never leave the row pointing at a deleted
+    // object. The previous DB-referenced avatar is removed after the commit.
     let upload: { publicUrl: string; path: string };
     try {
-      upload = await uploadPreparedImage(
-        adminClient,
+      upload = await uploadImmutablePreparedImage(
+        admin,
         'website',
-        `Website Assets/avatars/${user.id}-avatar`,
+        'Website Assets/avatars',
+        user.id,
         prepared.image
       );
     } catch (uploadError) {
@@ -913,7 +944,7 @@ export async function updateMyProfile(
     // Add cache-busting param to force refresh
     updates.avatar_url = `${upload.publicUrl}?t=${Date.now()}`;
     pendingAvatarCleanup = {
-      client: adminClient,
+      client: admin,
       oldUrl: currentProfile?.avatar_url ?? null,
       newPath: upload.path,
     };
@@ -924,13 +955,24 @@ export async function updateMyProfile(
     return { success: false, error: 'No changes to save' };
   }
 
-  // Update user_profiles table
-  const { error: updateError } = await supabase
+  // Update user_profiles table; require returned-row evidence so a missing
+  // profile never reports success with zero rows committed.
+  const { data: updatedRow, error: updateError } = await admin
     .from('user_profiles')
     .update(updates)
-    .eq('id', user.id);
+    .eq('id', user.id)
+    .select('id')
+    .single();
 
-  if (updateError) {
+  if (updateError || !updatedRow) {
+    // A failed commit must not orphan a staged avatar upload.
+    if (pendingAvatarCleanup) {
+      await removeStorageObjectBestEffort(
+        pendingAvatarCleanup.client,
+        'website',
+        pendingAvatarCleanup.newPath
+      );
+    }
     console.error('Profile update error:', updateError);
     return { success: false, error: 'Failed to update profile' };
   }

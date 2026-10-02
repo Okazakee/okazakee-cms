@@ -6,8 +6,11 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('@/utils/supabase/server', () => ({ createClient: vi.fn() }));
 vi.mock('@/libs/cms/supabase/admin', () => ({ getCmsAdminClient: vi.fn() }));
 
-import { prepareImageUpload, uploadPreparedImage } from './fileHelpers';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  prepareImageUpload,
+  uploadImmutablePreparedImage,
+} from './fileHelpers';
 
 /**
  * Real 3-frame animated WebP fixture (24x18, ~300 B). Exported by libwebp:
@@ -116,8 +119,8 @@ describe('prepareImageUpload — animated WebP', () => {
   });
 });
 
-describe('uploadPreparedImage — storage contract', () => {
-  it('stores an animation at the same path with the WebP content type', async () => {
+describe('uploadImmutablePreparedImage — storage contract', () => {
+  it('stores every animation frame at a fresh path without overwriting a live object', async () => {
     const source = animatedWebpBuffer();
     const upload = vi.fn(
       async (
@@ -141,28 +144,34 @@ describe('uploadPreparedImage — storage contract', () => {
     expect(prepared.success).toBe(true);
     if (!prepared.success) return;
 
-    const result = await uploadPreparedImage(
+    const result = await uploadImmutablePreparedImage(
       supabase,
       'website',
-      'avatar/avatar',
+      'avatar',
+      'avatar',
       prepared.image
     );
+    const next = await uploadImmutablePreparedImage(
+      supabase,
+      'website',
+      'avatar',
+      'avatar',
+      prepared.image
+    );
+    expect(next.path).not.toBe(result.path);
+    expect(result.path).toMatch(/^avatar\/\d+-[a-f0-9-]+-avatar\.webp$/);
 
     expect(supabase.storage.from).toHaveBeenCalledWith('website');
-    expect(upload).toHaveBeenCalledWith(
-      'avatar/avatar.webp',
-      prepared.image.buffer,
-      {
-        cacheControl: '3600',
-        contentType: 'image/webp',
-        upsert: true,
-      }
-    );
+    expect(upload).toHaveBeenCalledWith(result.path, prepared.image.buffer, {
+      cacheControl: '3600',
+      contentType: 'image/webp',
+      upsert: false,
+    });
     // Every frame survives the round-trip to storage.
     expect(upload.mock.calls[0][1]?.equals(source)).toBe(true);
     expect(result).toEqual({
-      publicUrl: 'https://cdn.test/avatar/avatar.webp',
-      path: 'avatar/avatar.webp',
+      publicUrl: `https://cdn.test/${result.path}`,
+      path: result.path,
     });
   });
 });

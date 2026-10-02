@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { formatLabels } from '@/utils/formatLabels';
+import { InnerHtml } from './canonical/InnerHtml';
 
 type Skill = {
   id: number;
@@ -22,48 +23,57 @@ interface SkillsPreviewProps {
   categories: SkillsCategory[];
 }
 
+/**
+ * Canonical skills grid (docs/DESIGN.md §6): centred square tiles per category,
+ * three per row on mobile and six from `md` up, with the real icon URLs from
+ * the draft and no hover zoom — the tile itself is the hover target.
+ */
 export function SkillsPreview({ categories }: SkillsPreviewProps) {
   const t = useTranslations('skills-section');
 
   return (
-    <section
-      id="skills"
-      className="flex items-center justify-center text-center mx-5 xl:mx-16 md:min-h-lvh mt-20 md:mt-20 lg:mt-32 xl:mt-40 mb-20 md:mb-32"
-    >
-      <div className="w-full h-full">
-        <h1 className="xl:text-6xl tablet:text-5xl text-xl xs:text-2xl mb-10 xl:mb-5">
-          {t('title')}
-        </h1>
-        <h2
-          className="xl:mb-20 text-base xs:text-lg tablet:text-2xl tablet:mx-16 md:text-2xl mb-10"
-          dangerouslySetInnerHTML={{ __html: formatLabels(t('subtitle')) }}
+    <section className="mx-auto max-w-5xl px-6 py-24" id="skills">
+      <div className="mb-16 text-center">
+        <InnerHtml
+          as="h2"
+          className="font-heading text-2xl font-semibold text-text-white sm:text-3xl"
+          html={formatLabels(t.has('title') ? t('title') : '')}
         />
-        {categories.map((skillCategory) => (
-          <div key={skillCategory.id} className="">
-            <h2 className="text-lg xs:text-xl tablet:text-3xl md:text-[2.33rem] xs:tracking-wider my-5">
-              {t(`skills.${skillCategory.name}`)}
-            </h2>
-            <div className="flex xl:flex-nowrap flex-wrap justify-center items-center">
-              {skillCategory.skills.map((skill) => (
+        <InnerHtml
+          as="p"
+          className="mt-2 font-mono text-xs text-accent-violet-light sm:text-sm"
+          html={formatLabels(t.has('subtitle') ? t('subtitle') : '')}
+        />
+        <div className="mx-auto mt-3 h-0.5 w-10 rounded-full bg-accent-violet" />
+      </div>
+
+      <div className="space-y-12">
+        {categories.map((category) => (
+          <div key={category.id}>
+            <h3 className="mb-4 text-center font-mono text-sm uppercase tracking-wider text-text-dim">
+              {category.name}
+            </h3>
+            <div className="flex flex-wrap justify-center gap-3">
+              {category.skills.map((skill) => (
                 <div
+                  className="group flex aspect-square w-24 flex-col items-center justify-center gap-2 rounded-xl border border-border-subtle bg-surface-card p-3 transition-colors hover:border-accent-violet/50 hover:bg-surface-card-hover sm:w-32 md:w-[150px]"
                   key={skill.id}
-                  className="md:drop-shadow-3xl drop-shadow-xl dark:drop-shadow-none hover:scale-110 transition-all mx-auto my-5 md:my-10 w-[calc(33.333%-1rem)]"
                 >
                   <Image
-                    placeholder="blur"
-                    blurDataURL={skill.blurhashURL}
+                    alt={skill.title}
+                    blurDataURL={skill.blurhashURL || undefined}
+                    className={`h-10 w-10 object-contain ${
+                      skill.invert ? 'dark:invert' : ''
+                    }`}
+                    height={80}
+                    placeholder={skill.blurhashURL ? 'blur' : 'empty'}
+                    sizes="40px"
                     src={skill.icon}
                     width={80}
-                    height={80}
-                    sizes="(min-width: 1280px) 80px, (min-width: 475px) 70px, 60px"
-                    className={`mx-auto rounded-xl w-[60px] xs:w-[70px] xl:w-[80px] ${
-                      skill.invert && 'dark:invert'
-                    }`}
-                    alt={skill.title}
                   />
-                  <h3 className="mt-5 text-base xs:text-lg tablet:text-xl xl:text-2xl">
+                  <span className="text-center font-mono text-[11px] text-text-main transition-colors group-hover:text-text-white">
                     {skill.title}
-                  </h3>
+                  </span>
                 </div>
               ))}
             </div>

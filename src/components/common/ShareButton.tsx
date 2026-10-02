@@ -30,7 +30,7 @@ export default function ShareButton({
     <button
       type="button"
       onClick={handleCopy}
-      className={`${className} relative text-darktext dark:text-lighttext flex items-center gap-2 px-2 py-1 rounded-md transition-all duration-400 ease-in-out w-5`}
+      className={`${className} relative text-text-main flex items-center gap-2 px-2 py-1 rounded-md transition-all duration-400 ease-in-out w-5`}
       title={buttonTitle}
       data-umami-event="Share button"
       data-umami-event-post={title}

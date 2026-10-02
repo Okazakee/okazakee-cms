@@ -1,23 +1,25 @@
-'use client';
-
+import logo from '@public/title-cms.png';
+import logoLight from '@public/title-cms-lightmode.png';
 import {
   Briefcase,
   Contact,
   FileText,
   Home,
+  Languages,
   LayoutGrid,
   LogOut,
+  MessageSquare,
   NotebookPen,
   Settings,
   User2,
   Users,
-  X,
   Zap,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
+import { useDialogFocus } from '@/hooks/cms/useDialogFocus';
 import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
 
@@ -25,6 +27,57 @@ import { createClient } from '@/utils/supabase/client';
 const publicSiteUrl =
   process.env.NEXT_PUBLIC_SITE_URL || 'https://okazakee.dev';
 
+// Non-interactive signed-in identity banner. The desktop sidebar owns the
+// brand: the CMS wordmark sits centered above the avatar/name/role card (the
+// desktop header is gone). Rendered above the section list on desktop and at
+// the top of the fullscreen mobile menu (logo omitted there — the mobile
+// header already shows it).
+function UserBanner({
+  compact = false,
+}: {
+  compact?: boolean;
+}) {
+  const user = useCmsStore((s) => s.user);
+  const t = useTranslations('cms');
+  const roleLabel =
+    user?.role === 'admin'
+      ? t('users.roleAdmin')
+      : user?.role === 'editor'
+        ? t('users.roleEditor')
+        : null;
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface-card ${
+        compact ? 'p-3' : 'p-4'
+      }`}
+    >
+      {user?.avatarUrl ? (
+        // biome-ignore lint/performance/noImgElement: user-uploaded avatar URL, not a static import
+        <img
+          src={user.avatarUrl}
+          alt=""
+          width={40}
+          height={40}
+          className="h-10 w-10 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-accent-violet/30 bg-accent-violet/10 font-heading text-lg text-accent-violet">
+          {(user?.displayName || 'U').charAt(0).toUpperCase()}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-text-main">
+          {user?.displayName}
+        </span>
+        {roleLabel && (
+          <span className="mt-0.5 block font-mono text-[11px] tracking-[0.2em] text-text-dim uppercase">
+            {roleLabel}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
 interface SidePanelProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -44,10 +97,12 @@ const CONTENT_ITEMS: MenuItem[] = [
   { id: 'portfolio', label: '', icon: Briefcase, adminOnly: false },
   { id: 'blog', label: '', icon: NotebookPen, adminOnly: false },
   { id: 'contacts', label: '', icon: Contact, adminOnly: true },
+  { id: 'request-form', label: '', icon: MessageSquare, adminOnly: true },
 ];
 
 const CONFIG_ITEMS: MenuItem[] = [
   { id: 'layout', label: '', icon: LayoutGrid, adminOnly: true },
+  { id: 'site-copy', label: '', icon: Languages, adminOnly: true },
   { id: 'privacy-policy', label: '', icon: FileText, adminOnly: true },
   { id: 'users', label: '', icon: Users, adminOnly: true },
 ];
@@ -55,6 +110,16 @@ const CONFIG_ITEMS: MenuItem[] = [
 const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   const t = useTranslations('cms');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  useDialogFocus(isMobile && isOpen, panelRef, () => onClose?.());
 
   const {
     activeSection,
@@ -63,6 +128,10 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     setUser,
     setHeroSection,
     publishQueue,
+    isPublishingAll,
+    publishAll,
+    sectionCallbacks,
+    error,
   } = useCmsStore();
 
   const isAdmin = user?.role === 'admin';
@@ -74,6 +143,8 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     portfolio: t('sidebar.nav.portfolio'),
     blog: t('sidebar.nav.blog'),
     contacts: t('sidebar.nav.contacts'),
+    'request-form': t('sidebar.nav.request-form'),
+    'site-copy': t('sidebar.nav.site-copy'),
     layout: t('sidebar.nav.layout'),
     'privacy-policy': t('sidebar.nav.privacy-policy'),
     users: t('sidebar.nav.users'),
@@ -89,6 +160,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   };
 
   const handleLogout = async () => {
+    if (pendingCount > 0 && !window.confirm(t('sidebar.discardDrafts'))) return;
     setIsLoggingOut(true);
     setUser(null);
     setHeroSection(null);
@@ -103,7 +175,10 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   );
 
   const hasDraft = (sectionId: string) =>
-    publishQueue[sectionId]?.isDirty ?? false;
+    Object.entries(publishQueue).some(
+      ([key, state]) =>
+        state.isDirty && (key === sectionId || key.startsWith(`${sectionId}:`))
+    );
 
   const getFilteredItems = (items: MenuItem[]) =>
     items.filter((item) => !item.adminOnly || isAdmin);
@@ -118,6 +193,8 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
         'career',
         'contacts',
         'layout',
+        'site-copy',
+        'request-form',
         'privacy-policy',
         'users',
       ];
@@ -135,10 +212,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       type="button"
       key={item.id}
       onClick={() => handleSelectSection(item.id)}
+      aria-current={activeSection === item.id ? 'page' : undefined}
       className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 text-left ${
         activeSection === item.id
-          ? 'bg-main text-white shadow-lg'
-          : 'bg-gray-100 hover:bg-gray-200 dark:bg-darkergray dark:hover:bg-darkgray text-darktext dark:text-lighttext hover:text-darktext dark:hover:text-white'
+          ? 'border border-accent-violet/30 bg-accent-violet/10 text-accent-violet '
+          : 'border border-transparent hover:bg-surface-raised text-text-muted hover:text-text-white '
       }`}
     >
       <div className="relative">
@@ -147,96 +225,284 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
           <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />
         )}
       </div>
-      <>
-        <span className="font-medium flex-1">
-          {sectionLabelMap[item.id] || item.label}
-        </span>
-        {hasDraft(item.id) && (
-          <span className="w-2 h-2 bg-amber-400 rounded-full flex-shrink-0" />
-        )}
-      </>
+      <span className="font-medium flex-1">
+        {sectionLabelMap[item.id] || item.label}
+      </span>
+      {hasDraft(item.id) && (
+        <span className="w-2 h-2 bg-amber-400 rounded-full flex-shrink-0" />
+      )}
     </button>
   );
 
+  // Mobile menu mirrors the public website canon (docs/DESIGN.md §4):
+  // heading-size rows with mono index prefixes and hairline dividers over one
+  // continuous 01..N sequence. Group captions preserve the CMS content /
+  // configuration split; the account row closes the list and theme/language,
+  // Home and logout live in the pinned footer block. Hidden rows stay
+  // unfocusable via tabIndex -1 (the aside itself is inert when closed).
+  const mobileNav: Array<{ id: string; caption: string | null }> = [];
+  for (const item of getFilteredItems(CONTENT_ITEMS)) {
+    mobileNav.push({
+      id: item.id,
+      caption: mobileNav.length === 0 ? t('common.content') : null,
+    });
+  }
+  for (const item of getFilteredItems(CONFIG_ITEMS)) {
+    mobileNav.push({
+      id: item.id,
+      caption:
+        mobileNav.length === getFilteredItems(CONTENT_ITEMS).length
+          ? t('common.configuration')
+          : null,
+    });
+  }
+  mobileNav.push({ id: 'account', caption: null });
+
+  const discardAllDirty = () => {
+    if (!window.confirm(t('sidebar.discardDrafts'))) return;
+    for (const [key, callbacks] of Object.entries(sectionCallbacks)) {
+      if (publishQueue[key]?.isDirty) callbacks.revert();
+    }
+  };
+
   return (
-    <>
-      {onClose && (
-        <div
-          className={`fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-300 ${
-            isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
-          }`}
-          onClick={onClose}
-          aria-hidden="true"
-        />
-      )}
+    <aside
+      ref={panelRef}
+      id="cms-navigation"
+      role={isMobile ? 'dialog' : 'complementary'}
+      {...(isMobile
+        ? {
+            'aria-modal': isOpen || undefined,
+            'aria-hidden': !isOpen || undefined,
+          }
+        : {})}
+      aria-label={t('sidebar.workspace')}
+      inert={isMobile && !isOpen ? true : undefined}
+      tabIndex={-1}
+      className={`text-text-main flex flex-col bg-surface-base transition-all duration-300 ${
+        onClose
+          ? `fixed inset-x-0 top-16 bottom-0 z-40 overflow-y-auto bg-surface-base/[0.98] backdrop-blur-xl transition-[opacity,translate,visibility] duration-200 ease-out lg:static lg:bottom-auto lg:z-auto lg:h-full lg:w-72 lg:max-w-none lg:overflow-visible lg:border-r lg:border-border-subtle lg:bg-surface-base lg:backdrop-blur-none lg:transition-all lg:duration-300 ${
+              isOpen
+                ? 'visible translate-y-0 opacity-100 lg:translate-x-0'
+                : 'invisible -translate-y-2 opacity-0 lg:visible lg:translate-x-0 lg:translate-y-0 lg:opacity-100'
+            }`
+          : 'relative h-full w-72 border-r border-border-subtle'
+      }`}
+    >
+      {/* Mobile fullscreen menu: the open/close toggle lives in the CMS
+        header (like the website header), so no inner header row here. */}
+      <div className="flex min-h-full flex-col px-6 pt-6 pb-[env(safe-area-inset-bottom)] lg:hidden">
+        <div className="pt-6">
+          <UserBanner compact />
+        </div>
 
-      <div
-        className={`text-darktext dark:text-lighttext flex flex-col h-full bg-bglight dark:bg-bgdark transition-all duration-300 w-72 ${
-          onClose
-            ? `fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 ease-in-out lg:static lg:transform-none lg:z-auto ${
-                isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-              }`
-            : 'relative'
-        }`}
-      >
-        {/* Mobile drawer close */}
-        {onClose && (
-          <div className="flex justify-end p-3 lg:hidden flex-shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 text-gray-500 dark:text-lighttext2 hover:text-darktext dark:hover:text-lighttext transition-colors"
-              aria-label="Close menu"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-        )}
-
-        {/* Publish Status */}
         {pendingCount > 0 && (
-          <div className="mx-4 mb-1 p-2 rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/10">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="w-2 h-2 bg-amber-400 rounded-full flex-shrink-0" />
-              <span className="text-xs text-amber-700 dark:text-amber-300 font-medium flex-1">
-                {pendingCount} {pendingCount === 1 ? 'change' : 'changes'}{' '}
-                across{' '}
-                {Object.values(publishQueue).filter((s) => s.isDirty).length}{' '}
-                section(s)
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/50 dark:bg-amber-900/10">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="h-2 w-2 flex-shrink-0 rounded-full bg-amber-400" />
+              <span className="flex-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                {t('sidebar.pendingSections', {
+                  count: Object.values(publishQueue).filter((s) => s.isDirty)
+                    .length,
+                })}
               </span>
             </div>
             <div className="flex gap-1.5">
               <button
                 type="button"
-                onClick={() => useCmsStore.getState().sectionRevertCallback?.()}
-                className="flex-1 px-2 py-1 text-xs bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors min-h-[28px]"
+                disabled={isPublishingAll}
+                tabIndex={isOpen ? 0 : -1}
+                onClick={discardAllDirty}
+                className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface-raised px-2 py-1 text-xs text-text-main transition-colors hover:border-border-hover disabled:opacity-50"
               >
                 {t('common.revert')}
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  useCmsStore.getState().sectionPublishCallback?.()
-                }
-                className="flex-1 px-2 py-1 text-xs bg-main hover:bg-secondary text-white rounded transition-colors min-h-[28px]"
+                disabled={isPublishingAll}
+                tabIndex={isOpen ? 0 : -1}
+                onClick={() => void publishAll()}
+                className="min-h-11 flex-1 rounded-lg bg-accent-violet-deep px-2 py-1 text-xs text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
               >
-                {t('common.publish')}
+                {isPublishingAll
+                  ? t('common.publishing')
+                  : t('sidebar.publishAll')}
               </button>
             </div>
           </div>
         )}
 
-        {/* Navigation */}
-        <div className="flex-1 overflow-y-auto flex flex-col">
+        {error && (
+          <p
+            role="alert"
+            className="my-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-300"
+          >
+            {error}
+          </p>
+        )}
+
+        <nav className="flex flex-col" aria-label={t('sidebar.workspace')}>
+          {mobileNav.map((row, index) => {
+            const active = activeSection === row.id;
+            return (
+              <Fragment key={row.id}>
+                {row.caption && (
+                  <p className="pt-4 pb-1 font-mono text-[11px] tracking-[0.2em] text-text-dim uppercase">
+                    {row.caption}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleSelectSection(row.id)}
+                  aria-current={active ? 'page' : undefined}
+                  tabIndex={isOpen ? 0 : -1}
+                  style={{
+                    transitionDelay: isOpen ? `${index * 40}ms` : '0ms',
+                  }}
+                  className={`flex w-full items-baseline gap-3.5 border-b border-border-subtle/50 px-1 py-3.5 text-left transition-[opacity,translate] duration-200 ease-out ${
+                    isOpen
+                      ? 'translate-y-0 opacity-100'
+                      : 'translate-y-2 opacity-0'
+                  } ${
+                    active
+                      ? 'font-semibold text-accent-violet-light'
+                      : 'text-text-white'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="min-w-6 font-mono text-[11px] tracking-[0.2em] text-text-dim"
+                  >
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                  <span className="font-heading flex-1 text-3xl tracking-tight">
+                    {sectionLabelMap[row.id]}
+                  </span>
+                  {hasDraft(row.id) && (
+                    <span
+                      role="img"
+                      aria-label="Unsaved changes"
+                      className="h-2 w-2 flex-shrink-0 rounded-full bg-amber-400"
+                    />
+                  )}
+                </button>
+              </Fragment>
+            );
+          })}
+        </nav>
+
+        {/* Spacer lets a short menu push the footer to the viewport bottom
+          while keeping it reachable with breathing room on long menus. */}
+        <div aria-hidden="true" className="min-h-6 flex-1 lg:hidden" />
+        <div
+          className={`flex flex-col gap-3 pt-6 pb-6 transition-[opacity,translate] duration-200 ease-out ${
+            isOpen ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
+          }`}
+          style={{ transitionDelay: isOpen ? `${mobileNav.length * 40}ms` : '0ms' }}
+        >
+          <div className="grid grid-cols-1 gap-2">
+            <LanguageToggle sidebar />
+          </div>
+          <a
+            href={publicSiteUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            tabIndex={isOpen ? 0 : -1}
+            className="flex min-h-[52px] items-center gap-1.5 rounded-lg border border-accent-violet/40 bg-accent-violet/10 px-3 py-3 font-mono text-sm text-accent-violet-light transition-colors hover:border-accent-violet hover:bg-accent-violet/20"
+          >
+            <Home className="h-4 w-4 shrink-0" />
+            {t('sidebar.home')}
+          </a>
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            tabIndex={isOpen ? 0 : -1}
+            className="flex items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-400 transition-all duration-200 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
+          >
+            <LogOut className="h-5 w-5 shrink-0" />
+            <span className="font-medium">
+              {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
+            </span>
+          </button>
+        </div>
+      </div>
+      {/* Desktop static sidebar */}
+      <div className="hidden h-full flex-col lg:flex">
+        <div className="flex flex-col gap-4 px-4 pt-6">
+          <span className="flex items-center justify-center px-2">
+            {/* biome-ignore lint/performance/noImgElement: static CMS brand asset */}
+            <img
+              src={logo.src}
+              alt="Okazakee CMS"
+              width={1937}
+              height={293}
+              className="hidden h-7 w-auto max-w-full shrink-0 object-contain dark:block"
+            />
+            {/* biome-ignore lint/performance/noImgElement: static CMS brand asset */}
+            <img
+              src={logoLight.src}
+              alt="Okazakee CMS"
+              width={1942}
+              height={294}
+              className="block h-7 w-auto max-w-full shrink-0 object-contain dark:hidden"
+            />
+          </span>
+          <UserBanner />
+        </div>
+        {pendingCount > 0 && (
+          <div className="mx-4 mt-4 mb-1 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/50 dark:bg-amber-900/10">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="h-2 w-2 flex-shrink-0 rounded-full bg-amber-400" />
+              <span className="flex-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                {t('sidebar.pendingSections', {
+                  count: Object.values(publishQueue).filter((s) => s.isDirty)
+                    .length,
+                })}
+              </span>
+            </div>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                disabled={isPublishingAll}
+                onClick={discardAllDirty}
+                className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface-raised px-2 py-1 text-xs text-text-main transition-colors hover:border-border-hover disabled:opacity-50"
+              >
+                {t('common.revert')}
+              </button>
+              <button
+                type="button"
+                disabled={isPublishingAll}
+                onClick={() => void publishAll()}
+                className="min-h-11 flex-1 rounded-lg bg-accent-violet-deep px-2 py-1 text-xs text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
+              >
+                {isPublishingAll
+                  ? t('common.publishing')
+                  : t('sidebar.publishAll')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <p
+            role="alert"
+            className="mx-4 my-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-300"
+          >
+            {error}
+          </p>
+        )}
+
+        <div className="flex flex-1 flex-col overflow-y-auto">
           <div className="p-4 pb-2">
-            <p className="text-xs font-semibold text-gray-400 dark:text-lighttext2 uppercase tracking-wider mb-2">
+            <p className="mb-2 text-xs font-semibold tracking-wider text-text-dim uppercase">
               {t('common.content')}
             </p>
             <nav className="space-y-1">
               {getFilteredItems(CONTENT_ITEMS).map(renderNavItem)}
             </nav>
 
-            <p className="text-xs font-semibold text-gray-400 dark:text-lighttext2 uppercase tracking-wider mt-4 mb-2">
+            <p className="mt-4 mb-2 text-xs font-semibold tracking-wider text-text-dim uppercase">
               {t('common.configuration')}
             </p>
             <nav className="space-y-1">
@@ -244,9 +510,8 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             </nav>
           </div>
 
-          {/* Account, Home & Logout */}
-          <div className="px-4 pt-4 pb-4 border-t border-gray-200 dark:border-darkgray space-y-1">
-            <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="space-y-1 border-t border-border-subtle px-4 pt-4 pb-4">
+            <div className="mb-2 grid grid-cols-2 gap-2">
               <ThemeToggle sidebar />
               <LanguageToggle sidebar />
             </div>
@@ -254,21 +519,24 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             <button
               type="button"
               onClick={() => handleSelectSection('account')}
-              className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 ${
+              aria-current={activeSection === 'account' ? 'page' : undefined}
+              className={`flex w-full items-center gap-3 rounded-lg p-3 transition-all duration-200 ${
                 activeSection === 'account'
-                  ? 'bg-main text-white shadow-lg'
-                  : 'bg-gray-100 hover:bg-gray-200 dark:bg-darkergray dark:hover:bg-darkgray text-darktext dark:text-lighttext hover:text-darktext dark:hover:text-white'
+                  ? 'border border-accent-violet/30 bg-accent-violet/10 text-accent-violet '
+                  : 'border border-border-subtle bg-surface-card text-text-main hover:border-border-hover hover:bg-surface-raised hover:text-text-main '
               }`}
             >
-              <Settings className="w-5 h-5" />
+              <Settings className="h-5 w-5" />
               <span className="font-medium">{t('sidebar.myAccount')}</span>
             </button>
 
             <a
               href={publicSiteUrl}
-              className="w-full flex items-center gap-3 p-3 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-darkergray dark:hover:bg-darkgray text-darktext dark:text-lighttext hover:text-darktext dark:hover:text-white transition-all duration-200"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center gap-3 rounded-lg bg-surface-card p-3 text-text-main transition-all duration-200 hover:bg-surface-raised hover:text-text-main"
             >
-              <Home className="w-5 h-5" />
+              <Home className="h-5 w-5" />
               <span className="font-medium">{t('sidebar.home')}</span>
             </a>
 
@@ -276,9 +544,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               type="button"
               onClick={handleLogout}
               disabled={isLoggingOut}
-              className="w-full flex items-center gap-3 p-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-all duration-200 disabled:opacity-50"
+              className="flex w-full items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-400 transition-all duration-200 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
             >
-              <LogOut className="w-5 h-5" />
+              <LogOut className="h-5 w-5" />
               <span className="font-medium">
                 {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
               </span>
@@ -286,7 +554,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
           </div>
         </div>
       </div>
-    </>
+    </aside>
   );
 };
 

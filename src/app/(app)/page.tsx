@@ -1,263 +1,215 @@
 'use client';
 
-import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getCmsBootData } from '@/app/actions/cms/getUser';
+import BlogSection from '@/components/cms/sections/Blog/BlogSection';
+import CareerSection from '@/components/cms/sections/Career/CareerSection';
+import ContactsSection from '@/components/cms/sections/Contacts/ContactsSection';
+import {
+  RequestCopySection,
+  SiteCopySection,
+} from '@/components/cms/sections/Copy/CopySections';
+import HeroSection from '@/components/cms/sections/Hero/HeroSection';
+import LayoutSection from '@/components/cms/sections/Layout/LayoutSection';
+import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
+import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
+import SkillsSection from '@/components/cms/sections/Skills/SkillsSection';
+import UsersSection from '@/components/cms/sections/Users/UsersSection';
 import AccountSection from '@/components/common/cms/AccountSection';
 import { CmsHeader } from '@/components/common/cms/CmsHeader';
 import SidePanel from '@/components/common/cms/SidePanel';
-import LoadingSpinner from '@/components/common/LoadingSpinner';
-
-const BlogSection = dynamic(
-  () => import('@/components/cms/sections/Blog/BlogSection'),
-  { ssr: false }
-);
-const CareerSection = dynamic(
-  () => import('@/components/cms/sections/Career/CareerSection'),
-  { ssr: false }
-);
-const ContactsSection = dynamic(
-  () => import('@/components/cms/sections/Contacts/ContactsSection'),
-  { ssr: false }
-);
-const HeroSection = dynamic(
-  () => import('@/components/cms/sections/Hero/HeroSection'),
-  { ssr: false }
-);
-const LayoutSection = dynamic(
-  () => import('@/components/cms/sections/Layout/LayoutSection'),
-  { ssr: false }
-);
-const PortfolioSection = dynamic(
-  () => import('@/components/cms/sections/Portfolio/PortfolioSection'),
-  { ssr: false }
-);
-const PrivacyPolicySection = dynamic(
-  () => import('@/components/cms/sections/Privacy/PrivacyPolicySection'),
-  { ssr: false }
-);
-const SkillsSection = dynamic(
-  () => import('@/components/cms/sections/Skills/SkillsSection'),
-  { ssr: false }
-);
-const UsersSection = dynamic(
-  () => import('@/components/cms/sections/Users/UsersSection'),
-  { ssr: false }
-);
-
 import { useCmsStore } from '@/store/cmsStore';
 
-export default function CMS() {
+const adminSections = [
+  'hero',
+  'skills',
+  'career',
+  'portfolio',
+  'blog',
+  'contacts',
+  'request-form',
+  'layout',
+  'site-copy',
+  'privacy-policy',
+  'users',
+  'account',
+];
+const editorSections = ['portfolio', 'blog', 'account'];
+
+function Editor({ section }: { section: string }) {
+  switch (section) {
+    case 'hero':
+      return <HeroSection />;
+    case 'skills':
+      return <SkillsSection />;
+    case 'career':
+      return <CareerSection />;
+    case 'portfolio':
+      return <PortfolioSection />;
+    case 'blog':
+      return <BlogSection />;
+    case 'contacts':
+      return <ContactsSection />;
+    case 'request-form':
+      return <RequestCopySection />;
+    case 'layout':
+      return <LayoutSection />;
+    case 'site-copy':
+      return <SiteCopySection />;
+    case 'privacy-policy':
+      return <PrivacyPolicySection />;
+    case 'users':
+      return <UsersSection />;
+    case 'account':
+      return <AccountSection />;
+    default:
+      return null;
+  }
+}
+
+export default function CMSPage() {
   const t = useTranslations('cms');
+  const router = useRouter();
   const {
-    setUser,
-    activeSection,
-    setActiveSection,
-    setHeroSection,
-    setLoading,
-    setError,
-    loading,
-    error,
     user,
+    activeSection,
+    sidePanelSections,
+    isPublishingAll,
+    warning,
+    error,
   } = useCmsStore();
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [canShowError, setCanShowError] = useState(false);
-  const [bootComplete, setBootComplete] = useState(false);
+  const [booting, setBooting] = useState(true);
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [visited, setVisited] = useState<string[]>([]);
+  const initialized = useRef(false);
+  const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const initializeCMS = async () => {
-      setLoading(true);
-      setError(null);
-      setCanShowError(false);
-      setBootComplete(false);
-
-      try {
-        // Load saved section FIRST, before fetching user (to avoid race conditions)
-        const savedSection =
-          typeof window !== 'undefined'
-            ? localStorage.getItem('cms_active_section')
-            : null;
-
-        const bootData = await getCmsBootData();
-        if (bootData.status === 'unauthenticated') {
-          window.location.href = '/login';
+    if (initialized.current) return;
+    initialized.current = true;
+    void getCmsBootData()
+      .then((boot) => {
+        if (boot.status === 'error') throw new Error(boot.error);
+        if (boot.status !== 'ok') {
+          router.replace('/login');
           return;
         }
+        const sections =
+          boot.user.role === 'admin' ? adminSections : editorSections;
+        const store = useCmsStore.getState();
+        store.setUser(boot.user);
+        store.setHeroSection(boot.heroSection);
+        store.setSidePanelSections(sections);
+        const initial = sections.includes(store.activeSection || '')
+          ? (store.activeSection as string)
+          : sections[0];
+        store.setActiveSection(initial);
+        setVisited([initial]);
+        setBooting(false);
+      })
+      .catch((err: unknown) => {
+        setBootError(err instanceof Error ? err.message : t('page.initError'));
+        setBooting(false);
+      });
+  }, [router, t]);
 
-        if (bootData.status === 'unauthorized') {
-          const errorMessage = encodeURIComponent(
-            'Access denied. Please contact the administrator.'
-          );
-          window.location.href = `/login?error=${errorMessage}`;
-          return;
-        }
+  useEffect(() => {
+    if (!user || !activeSection || !sidePanelSections.includes(activeSection))
+      return;
+    // Keep visited editors mounted: local drafts and registered callbacks must
+    // survive navigation so Publish All can commit every subscribed section.
+    setVisited((prev) =>
+      prev.includes(activeSection) ? prev : [...prev, activeSection]
+    );
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+  }, [activeSection, sidePanelSections, user]);
 
-        if (bootData.status === 'error') {
-          setError(bootData.error || t('page.initError'));
-          setCanShowError(true);
-          setLoading(false);
-          setBootComplete(true);
-          return;
-        }
-
-        const fetchedUser = bootData.user;
-        setUser(fetchedUser);
-
-        // Remember the identity for the login screen ("Welcome back" +
-        // avatar when the next visit arrives with a dead session).
-        try {
-          localStorage.setItem(
-            'cms_last_user',
-            JSON.stringify({
-              displayName: fetchedUser.displayName,
-              avatarUrl: fetchedUser.avatarUrl,
-            })
-          );
-        } catch {
-          // Private mode / storage full: purely cosmetic, ignore.
-        }
-
-        // Validate saved section based on user role
-        const defaultSection = fetchedUser.role === 'admin' ? 'hero' : 'blog';
-        const adminOnlySections = [
-          'hero',
-          'skills',
-          'career',
-          'contacts',
-          'layout',
-          'privacy-policy',
-          'users',
-        ];
-        const validSections = [
-          'hero',
-          'skills',
-          'career',
-          'portfolio',
-          'blog',
-          'contacts',
-          'layout',
-          'privacy-policy',
-          'users',
-          'account',
-          'settings',
-        ];
-
-        let sectionToUse = defaultSection;
-
-        if (savedSection && validSections.includes(savedSection)) {
-          // Check if saved section is valid for this user
-          if (
-            fetchedUser.role === 'admin' ||
-            !adminOnlySections.includes(savedSection)
-          ) {
-            sectionToUse = savedSection;
-          }
-        }
-
-        // Set active section immediately
-        setActiveSection(sectionToUse);
-
-        // Always save to localStorage to ensure it's persisted
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('cms_active_section', sectionToUse);
-        }
-
-        if (fetchedUser.role === 'admin') {
-          setHeroSection(bootData.heroSection);
-        } else {
-          setHeroSection(null);
-        }
-        if (cancelled) return;
-        setBootComplete(true);
-        setLoading(false);
-        setCanShowError(false);
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : t('page.initError'));
-
-        if (cancelled) return;
-        setCanShowError(true);
-        setBootComplete(true);
-        setLoading(false);
-      }
-    };
-
-    initializeCMS();
-    return () => {
-      cancelled = true;
-    };
-  }, [setUser, setActiveSection, setHeroSection, setLoading, setError]);
-
-  const needsAdminBootData = user?.role === 'admin' && !bootComplete;
-  const waitingForUser = !user && !(error && canShowError);
-
-  if (loading || needsAdminBootData || waitingForUser) {
-    if (error && canShowError) {
-      return (
-        <div className="min-h-screen flex items-center justify-center">
-          <div className="text-red-500 bg-red-50 dark:bg-red-900/20 p-6 rounded-lg border border-red-200 dark:border-red-800">
-            {error}
-          </div>
-        </div>
-      );
-    }
+  if (booting)
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner />
+      <div className="flex min-h-dvh items-center justify-center bg-surface-base text-sm text-text-muted">
+        <span role="status">{t('common.loading')}</span>
       </div>
     );
-  }
-
-  if (error && canShowError) {
+  if (bootError)
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-red-500 bg-red-50 dark:bg-red-900/20 p-6 rounded-lg border border-red-200 dark:border-red-800">
-          {error}
-        </div>
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-surface-base px-6 text-text-main">
+        <p role="alert">{bootError}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="min-h-11 rounded-lg bg-accent-violet-deep px-4 text-white"
+        >
+          {t('common.retry')}
+        </button>
       </div>
     );
-  }
 
   return (
-    <div className="h-screen flex flex-col">
-      <CmsHeader onMenuClick={() => setIsDrawerOpen(true)} />
-
-      {/* CMS Content Area */}
-      <div className="bg-bglight dark:bg-bgdark flex-1 min-h-0 overflow-hidden">
-        {/* Mobile: Natural flow, Desktop: Fixed sidebar layout */}
-        <div className="flex flex-col lg:flex-row max-w-(--breakpoint-2xl) mx-auto h-full">
-          <SidePanel
-            isOpen={isDrawerOpen}
-            onClose={() => setIsDrawerOpen(false)}
-          />
-          <main className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 lg:p-8 pt-8 md:pt-6 lg:pt-8">
-            <div className="max-w-4xl mx-auto md:mb-20">
-              {activeSection === 'hero' && <HeroSection />}
-              {activeSection === 'skills' && <SkillsSection />}
-              {activeSection === 'career' && <CareerSection />}
-              {activeSection === 'portfolio' && <PortfolioSection />}
-              {activeSection === 'blog' && <BlogSection />}
-              {activeSection === 'contacts' && <ContactsSection />}
-              {activeSection === 'layout' && <LayoutSection />}
-              {activeSection === 'privacy-policy' && <PrivacyPolicySection />}
-              {activeSection === 'users' && <UsersSection />}
-              {activeSection === 'account' && <AccountSection />}
-              {activeSection === 'settings' && (
-                <div className="text-center py-12">
-                  <h2 className="text-3xl font-bold text-main mb-4">
-                    {t('page.settingsTitle')}
-                  </h2>
-                  <p className="text-gray-500 dark:text-lighttext2">
-                    {t('page.settingsComingSoon')}
-                  </p>
-                </div>
-              )}
-            </div>
-          </main>
-        </div>
+    <div className="flex h-dvh flex-col overflow-hidden bg-surface-base text-text-main">
+      <CmsHeader
+        onMenuClick={() => setMobileMenuOpen((open) => !open)}
+        menuOpen={mobileMenuOpen}
+      />
+      <div className="flex min-h-0 flex-1">
+        <SidePanel
+          isOpen={mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+        />
+        <main
+          ref={mainRef}
+          id="cms-workspace"
+          className="min-w-0 flex-1 overflow-y-auto overscroll-contain"
+        >
+          <div className="mx-auto max-w-5xl px-6 py-10 sm:py-12 lg:py-12">
+            {error && (
+              <div
+                role="alert"
+                className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-600 dark:text-red-300"
+              >
+                <p className="whitespace-pre-line">{error}</p>
+                <button
+                  type="button"
+                  className="mt-2 underline"
+                  onClick={() => useCmsStore.getState().setError(null)}
+                >
+                  {t('common.close')}
+                </button>
+              </div>
+            )}
+            {warning && (
+              <div
+                role="status"
+                className="mb-6 flex items-start justify-between gap-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300"
+              >
+                <p>{warning}</p>
+                <button
+                  type="button"
+                  onClick={() => useCmsStore.getState().setWarning(null)}
+                  aria-label={t('common.close')}
+                  className="shrink-0 underline"
+                >
+                  {t('common.close')}
+                </button>
+              </div>
+            )}
+            <fieldset disabled={isPublishingAll} className="min-w-0">
+              {visited
+                .filter((section) => sidePanelSections.includes(section))
+                .map((section) => (
+                  <div
+                    key={section}
+                    hidden={section !== activeSection}
+                    data-section={section}
+                  >
+                    <Editor section={section} />
+                  </div>
+                ))}
+            </fieldset>
+          </div>
+        </main>
       </div>
     </div>
   );

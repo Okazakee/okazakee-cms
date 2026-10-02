@@ -31,7 +31,7 @@ export default function CopyLinkButton({
     <button
       type="button"
       onClick={handleCopy}
-      className={`${className}  relative text-xs xs:text-base sm:text-base my-4 md:my-0 flex items-center gap-2 hover:text-main transition-all duration-0 group`}
+      className={`${className}  relative text-xs sm:text-base sm:text-base my-4 md:my-0 flex items-center gap-2 hover:text-accent-violet transition-all duration-0 group`}
       title={buttonTitle}
       data-umami-event="P.IVA Copy"
     >

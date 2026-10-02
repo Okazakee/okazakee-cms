@@ -11,12 +11,25 @@ import {
   removeStorageObjectBestEffort,
   requireAllowedPostWriter,
   requireAuth,
-  sanitizeFilename,
-  uploadPreparedImage,
+  uploadImmutablePreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import {
+  batchFailureSummary,
+  batchHadCommits,
+  batchSucceeded,
+  emptyBatchEvidence,
+  markCreated,
+  markDeleted,
+  markFailed,
+  markUpdated,
+  normalizeTempId,
+} from '@/libs/cms/batchEvidence';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
@@ -45,6 +58,8 @@ type PortfolioOperation =
         data: CreatePortfolioData;
         file: File;
         blurhashURL?: string;
+        /** Client-generated temporary id; echoed back in `created`/`createdIds`. */
+        tempId?: string;
       }>;
       updates: Array<{
         id: number;
@@ -262,31 +277,38 @@ export async function portfolioActions(
 async function batchPublishPortfolio(
   operation: Extract<PortfolioOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<PortfolioResult> {
+  const evidence = emptyBatchEvidence();
   try {
     const context = await getCmsActionContext('post-writer');
     const admin = getAdminClient();
-    const errors: string[] = [];
-    const created: unknown[] = [];
-    const updated: unknown[] = [];
 
-    for (const item of operation.creates) {
+    for (const [index, item] of operation.creates.entries()) {
+      const tempId = normalizeTempId(item.tempId, 'portfolio', index);
       const validation = validatePortfolioData(item.data);
       if (!validation.isValid) {
-        errors.push(`"${item.data.title_en}": ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
       const prepared = await prepareImageUpload(item.file, item.blurhashURL);
       if (!prepared.success) {
-        errors.push(`"${item.data.title_en}": ${prepared.error}`);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: prepared.error ?? 'Image processing failed',
+        });
         continue;
       }
 
-      const sanitizedTitle = sanitizeFilename(item.data.title_en || 'untitled');
-      const upload = await uploadPreparedImage(
+      const upload = await uploadImmutablePreparedImage(
         admin,
         'website',
-        `Website Assets/portfolio/${Date.now()}-${sanitizedTitle}`,
+        'Website Assets/portfolio',
+        item.data.title_en || 'untitled',
         prepared.image
       );
 
@@ -304,37 +326,62 @@ async function batchPublishPortfolio(
         .single();
 
       if (error) {
-        await admin.storage.from('website').remove([upload.path]);
-        errors.push(`"${item.data.title_en}": ${error.message}`);
+        await removeStorageObjectBestEffort(admin, 'website', upload.path);
+        markFailed(evidence, { kind: 'create', tempId, error: error.message });
         continue;
       }
 
-      created.push(data);
+      markCreated(evidence, tempId, data.id);
     }
 
     for (const item of operation.updates) {
       const validation = validatePortfolioData(item.data);
       if (!validation.isValid) {
-        errors.push(`Update ${item.id}: ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
       let uploaded: { publicUrl: string; path: string } | null = null;
       const updateData: UpdatePortfolioData = { ...item.data };
+      // Trusted replacement source: previous object URL comes from the DB.
+      let previousImage: string | null = null;
 
       if (item.file) {
         const prepared = await prepareImageUpload(item.file, item.blurhashURL);
         if (!prepared.success) {
-          errors.push(`Update ${item.id}: ${prepared.error}`);
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error: prepared.error ?? 'Image processing failed',
+          });
           continue;
         }
-        const titleForPath = sanitizeFilename(
-          item.data.title_en || `portfolio-${item.id}`
-        );
-        uploaded = await uploadPreparedImage(
+
+        const { data: currentRow, error: fetchError } = await admin
+          .from('portfolio_posts')
+          .select('image')
+          .eq('id', item.id)
+          .single();
+
+        if (fetchError) {
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error: fetchError.message,
+          });
+          continue;
+        }
+        previousImage = (currentRow?.image as string | null) ?? null;
+
+        uploaded = await uploadImmutablePreparedImage(
           admin,
           'website',
-          `Website Assets/portfolio/${item.id}-${titleForPath}`,
+          'Website Assets/portfolio',
+          item.data.title_en || `portfolio-${item.id}`,
           prepared.image
         );
         updateData.image = uploaded.publicUrl;
@@ -349,22 +396,27 @@ async function batchPublishPortfolio(
         .single();
 
       if (error) {
-        if (uploaded)
-          await admin.storage.from('website').remove([uploaded.path]);
-        errors.push(`Update ${item.id}: ${error.message}`);
+        if (uploaded) {
+          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+        }
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: error.message,
+        });
         continue;
       }
 
-      if (uploaded && item.currentImageUrl) {
+      if (uploaded) {
         await removePublicFileIfDifferent(
           admin,
-          item.currentImageUrl,
+          previousImage,
           'website',
           uploaded.path
         );
       }
 
-      updated.push(data);
+      markUpdated(evidence, data.id);
     }
 
     if (operation.deletes.length > 0) {
@@ -374,61 +426,107 @@ async function batchPublishPortfolio(
         .in('id', operation.deletes);
 
       if (fetchError) {
-        errors.push(`Delete: ${fetchError.message}`);
+        markFailed(evidence, { kind: 'delete', error: fetchError.message });
       } else {
-        const { error } = await admin
-          .from('portfolio_posts')
-          .delete()
-          .in('id', operation.deletes);
+        // Returned-row evidence: only ids present at delete time may be
+        // reported as committed, so concurrent/unknown ids keep their drafts.
+        const existingIds = new Set(
+          (existingRows || []).map((row) => row.id as number)
+        );
+        for (const id of operation.deletes) {
+          if (!existingIds.has(id)) {
+            markFailed(evidence, {
+              kind: 'delete',
+              id,
+              error: 'Portfolio post not found',
+            });
+          }
+        }
+        const deletable = operation.deletes.filter((id) =>
+          existingIds.has(id)
+        );
+        if (deletable.length > 0) {
+          const { data: deletedRows, error } = await admin
+            .from('portfolio_posts')
+            .delete()
+            .in('id', deletable)
+            .select('id');
 
-        if (error) {
-          errors.push(`Delete: ${error.message}`);
-        } else {
-          for (const row of existingRows || []) {
-            await removePublicFileIfPresent(
-              admin,
-              row.image as string | null,
-              'website'
+          if (error) {
+            markFailed(evidence, { kind: 'delete', error: error.message });
+          } else {
+            const deletedIds = new Set(
+              (deletedRows || []).map((row) => row.id as number)
             );
+            for (const id of deletable) {
+              if (deletedIds.has(id)) markDeleted(evidence, id);
+              else {
+                markFailed(evidence, {
+                  kind: 'delete',
+                  id,
+                  error: 'Portfolio post was not deleted',
+                });
+              }
+            }
+            for (const row of existingRows || []) {
+              if (deletedIds.has(row.id as number)) {
+                await removePublicFileIfPresent(
+                  admin,
+                  row.image as string | null,
+                  'website'
+                );
+              }
+            }
           }
         }
       }
     }
 
     let revalidation: RevalidationStatus | undefined;
-    if (
-      operation.creates.length > 0 ||
-      operation.updates.length > 0 ||
-      operation.deletes.length > 0
-    ) {
+    if (batchHadCommits(evidence)) {
       revalidation = await invalidatePublicContent({
         entity: 'portfolio',
         operation: 'publish',
         ids: [
-          ...updated.map((r) => (r as { id: number }).id),
-          ...operation.deletes,
+          ...Object.values(evidence.createdIds),
+          ...evidence.updated,
+          ...evidence.deleted,
         ],
       });
     }
 
     return {
-      success: errors.length === 0,
-      data: { created, updated },
-      error: errors.length > 0 ? errors.join('\n') : undefined,
+      success: batchSucceeded(evidence),
+      data: evidence,
+      error: batchFailureSummary(evidence),
       revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing portfolio posts:', error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Failed to publish portfolio posts';
+    markFailed(evidence, { kind: 'update', error: message });
+    const revalidation = batchHadCommits(evidence)
+      ? await invalidatePublicContent({
+          entity: 'portfolio',
+          operation: 'publish',
+          ids: [
+            ...Object.values(evidence.createdIds),
+            ...evidence.updated,
+            ...evidence.deleted,
+          ],
+        })
+      : undefined;
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to publish portfolio posts',
+      data: evidence,
+      error: batchFailureSummary(evidence),
+      revalidation,
     };
   }
 }
-
 async function getPortfolioData(
   supabase: SupabaseClient
 ): Promise<PortfolioResult> {
@@ -595,10 +693,7 @@ async function deletePortfolio(
     // Commit the DB delete FIRST; only then remove the Storage object
     // (best-effort). Deleting the object before the row is gone would leave
     // the row pointing at a deleted image if the DB delete failed.
-    const { error } = await admin
-      .from('portfolio_posts')
-      .delete()
-      .eq('id', id);
+    const { error } = await admin.from('portfolio_posts').delete().eq('id', id);
 
     if (error) throw error;
 
@@ -656,11 +751,11 @@ async function uploadPortfolioImageForNewPost(
       };
     }
 
-    const sanitizedTitle = sanitizeFilename(titleEn || 'untitled');
-    const upload = await uploadPreparedImage(
+    const upload = await uploadImmutablePreparedImage(
       admin,
       'website',
-      `Website Assets/portfolio/${Date.now()}-${sanitizedTitle}`,
+      'Website Assets/portfolio',
+      titleEn || 'untitled',
       prepared.image
     );
 
@@ -716,7 +811,7 @@ async function uploadPortfolioImage(
   _supabase: SupabaseClient,
   portfolioId: number,
   file: File,
-  currentImageUrl?: string,
+  _currentImageUrl?: string,
   blurhashURL?: string
 ): Promise<PortfolioResult> {
   try {
@@ -738,7 +833,7 @@ async function uploadPortfolioImage(
 
     const { data: existingPortfolio, error: fetchError } = await admin
       .from('portfolio_posts')
-      .select('id, title_en')
+      .select('id, title_en, image')
       .eq('id', portfolioId)
       .single();
 
@@ -756,20 +851,14 @@ async function uploadPortfolioImage(
       };
     }
 
-    const sanitizedTitle = sanitizeFilename(
-      existingPortfolio.title_en || 'untitled'
-    );
-    const pathBase = `Website Assets/portfolio/${portfolioId}-${sanitizedTitle}`;
-
-    // No pre-upload deletion: the new image is uploaded with `upsert` to the
-    // same pathBase (replacing any same-format variant), and a previous
-    // other-format variant (webp/png) is removed AFTER the DB commit by
-    // removePublicFileIfDifferent. Deleting variants first would leave the
-    // row pointing at a deleted object if the upload or DB update failed.
-    const upload = await uploadPreparedImage(
+    // Unique immutable path: the new object never overwrites the previous one,
+    // so a failed DB update can never leave the row pointing at a deleted
+    // object. The previous DB-referenced object is removed AFTER the commit.
+    const upload = await uploadImmutablePreparedImage(
       admin,
       'website',
-      pathBase,
+      'Website Assets/portfolio',
+      existingPortfolio.title_en || `portfolio-${portfolioId}`,
       prepared.image
     );
 
@@ -781,16 +870,19 @@ async function uploadPortfolioImage(
     const { error: updateError } = await admin
       .from('portfolio_posts')
       .update(updateData)
-      .eq('id', portfolioId);
+      .eq('id', portfolioId)
+      .select('id')
+      .single();
 
     if (updateError) {
-      await admin.storage.from('website').remove([upload.path]);
+      // Best-effort staged cleanup must never mask the DB error.
+      await removeStorageObjectBestEffort(admin, 'website', upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
-      currentImageUrl,
+      existingPortfolio.image,
       'website',
       upload.path
     );

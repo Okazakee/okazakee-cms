@@ -56,9 +56,9 @@ export const Tags = ({ tags }: { tags: string }) => {
         {reworkedTags.map((tag) => (
           <span
             key={tag}
-            className="tag bg-secondary text-lighttext text-sm xs:text-base sm:text-base gap-1.5 xs:gap-2 sm:gap-2 px-2 py-1 rounded-lg flex items-center mr-2 xs:mb-1 sm:mb-1 sm:mt-2 xs:mt-2 mt-1"
+            className="tag bg-accent-violet-deep text-text-main text-sm sm:text-base sm:text-base gap-1.5 sm:gap-2 sm:gap-2 px-2 py-1 rounded-lg flex items-center mr-2 sm:mb-1 sm:mb-1 sm:mt-2 sm:mt-2 mt-1"
           >
-            <Tag size={15} className="w-[14px] xs:w-[15px] sm:w-[15px]" />
+            <Tag size={15} className="w-[14px] sm:w-[15px] sm:w-[15px]" />
             {tag}
           </span>
         ))}

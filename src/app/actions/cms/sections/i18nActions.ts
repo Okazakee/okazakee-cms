@@ -5,14 +5,18 @@ import {
   getAdminClient,
   getCmsActionContext,
 } from '@/app/actions/cms/utils/fileHelpers';
-import { getContentInvalidation, type ContentEntity } from '@/libs/cms/invalidation';
+import type { ContentEntity } from '@/libs/cms/invalidation';
 import { getLocalInvalidationTags } from '@/libs/cms/localInvalidation';
-import type { MutationResult } from '@/libs/cms/mutationResult';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
+import { mergeTranslationDelta } from '@/libs/cms/translationDelta';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 
 type I18nOperation =
   | { type: 'GET' }
-  | { type: 'UPDATE'; locale: string; data: UpdateI18nData }
+  | { type: 'GET_PUBLIC' }
   | {
       type: 'UPDATE_SECTION';
       locale: string;
@@ -26,91 +30,24 @@ type I18nOperation =
     }
   | { type: 'UPDATE_PRIVACY'; locale: string; markdown: string };
 
-type UpdateI18nData = {
-  translations: Record<string, unknown>;
-  privacy_policy?: string;
-};
-
 type I18nResult = MutationResult;
 
-// Validation functions
-function validateI18nData(
-  locale: string,
-  data: UpdateI18nData
-): { isValid: boolean; error?: string } {
-  // Locale validation
-  const validLocales = ['en', 'it'];
-  if (!validLocales.includes(locale)) {
-    return {
-      isValid: false,
-      error: `Invalid locale. Must be one of: ${validLocales.join(', ')}`,
-    };
-  }
+/** Per-locale outcome of a multi-locale section write. */
+type LocaleCommitEvidence = {
+  locale: string;
+  committed: boolean;
+  translations?: Record<string, unknown>;
+  error?: string;
+};
 
-  // Translations validation
-  if (!data.translations || typeof data.translations !== 'object') {
-    return { isValid: false, error: 'Translations must be a valid object' };
-  }
+type SectionCasOutcome =
+  | { ok: true; translations: Record<string, unknown> }
+  | { ok: false; error: string; conflict: boolean };
 
-  // Check that translations object is not empty
-  if (Object.keys(data.translations).length === 0) {
-    return { isValid: false, error: 'Translations object cannot be empty' };
-  }
-
-  // Privacy policy validation (if provided)
-  if (data.privacy_policy !== undefined && data.privacy_policy !== null) {
-    if (typeof data.privacy_policy !== 'string') {
-      return { isValid: false, error: 'Privacy policy must be a string' };
-    }
-    if (data.privacy_policy.length > 50000) {
-      return {
-        isValid: false,
-        error: 'Privacy policy content is too long (max 50,000 characters)',
-      };
-    }
-  }
-
-  return { isValid: true };
-}
-
-// Helper function to deep merge objects
-function deepMerge(
-  target: Record<string, unknown>,
-  source: Record<string, unknown>
-): Record<string, unknown> {
-  const output = { ...target };
-
-  for (const key in source) {
-    if (
-      source[key] &&
-      typeof source[key] === 'object' &&
-      !Array.isArray(source[key])
-    ) {
-      output[key] = deepMerge(
-        (target[key] as Record<string, unknown>) || {},
-        source[key] as Record<string, unknown>
-      );
-    } else {
-      output[key] = source[key];
-    }
-  }
-
-  return output;
-}
-
-// Helper function to merge section translations
-function mergeSectionTranslations(
-  currentTranslations: Record<string, unknown>,
-  sectionKey: string,
-  newSectionData: Record<string, unknown>
-): Record<string, unknown> {
-  const merged = { ...currentTranslations };
-  merged[sectionKey] = deepMerge(
-    (currentTranslations[sectionKey] as Record<string, unknown>) || {},
-    newSectionData
-  );
-  return merged;
-}
+const VALID_LOCALES = ['en', 'it'] as const;
+const CAS_MAX_ATTEMPTS = 2;
+const CONFLICT_ERROR =
+  'Conflict: translations changed concurrently. Please reload and try again.';
 
 /**
  * Invalidates the CMS's OWN cached reads after a committed mutation.
@@ -128,13 +65,83 @@ function invalidateLocalCache(entity: ContentEntity): void {
   refresh();
 }
 
+/**
+ * CAS + delta + prototype-safe section merge.
+ *
+ * The section payload is treated as a DELTA merged with `mergeTranslationDelta`
+ * (nested objects merge recursively, arrays merge by index, `__proto__` and
+ * friends are dropped). The write is guarded by a compare-and-swap on the
+ * previously read `translations` snapshot, so a concurrent edit to an unrelated
+ * key is preserved: the snapshot read-modify-write is retried once against the
+ * fresh value, then reports an explicit conflict rather than clobbering.
+ */
+async function casMergeSection(
+  admin: ReturnType<typeof getAdminClient>,
+  locale: string,
+  sectionKey: string,
+  sectionData: Record<string, unknown>
+): Promise<SectionCasOutcome> {
+  let lastError = CONFLICT_ERROR;
+
+  for (let attempt = 0; attempt < CAS_MAX_ATTEMPTS; attempt += 1) {
+    const { data: currentData, error: fetchError } = await admin
+      .from('i18n_translations')
+      .select('translations')
+      .eq('language', locale)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return {
+          ok: false,
+          error: `No translations row for locale "${locale}"`,
+          conflict: false,
+        };
+      }
+      return { ok: false, error: fetchError.message, conflict: false };
+    }
+
+    const currentTranslations =
+      (currentData?.translations as Record<string, unknown>) || {};
+
+    const mergedTranslations = mergeTranslationDelta(
+      currentTranslations,
+      sectionKey ? { [sectionKey]: sectionData } : sectionData
+    ) as Record<string, unknown>;
+
+    const { data, error } = await admin
+      .from('i18n_translations')
+      .update({ translations: mergedTranslations })
+      .eq('language', locale)
+      .filter('translations', 'eq', JSON.stringify(currentTranslations))
+      .select()
+      .single();
+
+    if (!error && data) {
+      return { ok: true, translations: mergedTranslations };
+    }
+
+    // PGRST116 / empty data means the snapshot no longer matches (another
+    // writer committed between the read and the write). Retry against fresh
+    // state; a real error aborts immediately.
+    if (error && error.code !== 'PGRST116') {
+      return { ok: false, error: error.message, conflict: false };
+    }
+    lastError = CONFLICT_ERROR;
+  }
+
+  return { ok: false, error: lastError, conflict: true };
+}
+
 export async function i18nActions(
   operation: I18nOperation
 ): Promise<I18nResult> {
-  // Admin check - only admins can manage i18n
+  // Allowlisted editors may read public copy; administration and writes require admin.
   let supabase: Awaited<ReturnType<typeof getCmsActionContext>>['supabase'];
   try {
-    const context = await getCmsActionContext('admin');
+    const context = await getCmsActionContext(
+      operation.type === 'GET_PUBLIC' ? 'allowlisted' : 'admin'
+    );
     supabase = context.supabase;
   } catch (error) {
     return {
@@ -147,13 +154,11 @@ export async function i18nActions(
     switch (operation.type) {
       case 'GET':
         return await getI18nData(supabase);
-
-      case 'UPDATE':
-        return await updateI18nData(supabase, operation.locale, operation.data);
+      case 'GET_PUBLIC':
+        return await getI18nData(supabase, true);
 
       case 'UPDATE_SECTION':
         return await updateSectionTranslations(
-          supabase,
           operation.locale,
           operation.sectionKey,
           operation.sectionData
@@ -185,76 +190,78 @@ async function updateSectionTranslationsForLocales(
   sectionKey: string,
   sections: Record<string, Record<string, unknown>>
 ): Promise<I18nResult> {
-  try {
-    const validLocales = ['en', 'it'];
-    const locales = Object.keys(sections);
-    const invalidLocale = locales.find(
-      (locale) => !validLocales.includes(locale)
+  const locales = Object.keys(sections);
+  const invalidLocale = locales.find(
+    (locale) =>
+      !VALID_LOCALES.includes(locale as (typeof VALID_LOCALES)[number])
+  );
+  if (invalidLocale) {
+    return {
+      success: false,
+      error: `Invalid locale. Must be one of: ${VALID_LOCALES.join(', ')}`,
+    };
+  }
+
+  const admin = getAdminClient();
+  const localeEvidence: LocaleCommitEvidence[] = [];
+  const failed: Array<{ locale: string; error: string }> = [];
+  let committedAny = false;
+
+  for (const locale of locales) {
+    const outcome = await casMergeSection(
+      admin,
+      locale,
+      sectionKey,
+      sections[locale]
     );
-    if (invalidLocale) {
-      return {
-        success: false,
-        error: `Invalid locale. Must be one of: ${validLocales.join(', ')}`,
-      };
+
+    if (outcome.ok) {
+      committedAny = true;
+      localeEvidence.push({
+        locale,
+        committed: true,
+        translations: outcome.translations,
+      });
+    } else {
+      localeEvidence.push({
+        locale,
+        committed: false,
+        error: outcome.error,
+      });
+      failed.push({ locale, error: outcome.error });
     }
+  }
 
-    const admin = getAdminClient();
-    const updated: unknown[] = [];
-
-    for (const locale of locales) {
-      const { data: currentData, error: fetchError } = await admin
-        .from('i18n_translations')
-        .select('translations, privacy_policy')
-        .eq('language', locale)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        throw fetchError;
-      }
-
-      const currentTranslations =
-        (currentData?.translations as Record<string, unknown>) || {};
-      const mergedTranslations = mergeSectionTranslations(
-        currentTranslations,
-        sectionKey,
-        sections[locale]
-      );
-
-      const { data, error } = await admin
-        .from('i18n_translations')
-        .upsert({
-          language: locale,
-          translations: mergedTranslations,
-          privacy_policy: currentData?.privacy_policy || null,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      updated.push(data);
-    }
-
-    const revalidation = await invalidatePublicContent({
+  // Partial commits are a valid database outcome: invalidate whenever at least
+  // one locale committed, and report `success:false` when any locale failed.
+  let revalidation: RevalidationStatus | undefined;
+  if (committedAny) {
+    revalidation = await invalidatePublicContent({
       entity: 'translations',
       operation: 'update',
     });
     invalidateLocalCache('translations');
-
-    return { success: true, data: updated, revalidation };
-  } catch (error) {
-    console.error('Error updating section translations for locales:', error);
-    return {
-      success: false,
-      error: 'Failed to update section translations',
-    };
   }
+
+  return {
+    success: failed.length === 0,
+    data: { locales: localeEvidence, failed },
+    error:
+      failed.length > 0
+        ? failed.map((entry) => `${entry.locale}: ${entry.error}`).join('\n')
+        : undefined,
+    revalidation,
+  };
 }
 
-async function getI18nData(supabase: SupabaseClient): Promise<I18nResult> {
+async function getI18nData(
+  supabase: SupabaseClient,
+  publicOnly = false
+): Promise<I18nResult> {
   try {
     const { data, error } = await supabase
       .from('i18n_translations')
-      .select('*')
+      .select(publicOnly ? 'language, translations' : '*')
       .order('language', { ascending: true });
 
     if (error) throw error;
@@ -269,112 +276,36 @@ async function getI18nData(supabase: SupabaseClient): Promise<I18nResult> {
   }
 }
 
-async function updateI18nData(
-  supabase: SupabaseClient,
-  locale: string,
-  updateData: UpdateI18nData
-): Promise<I18nResult> {
-  try {
-    // Validate input data
-    const validation = validateI18nData(locale, updateData);
-    if (!validation.isValid) {
-      return { success: false, error: validation.error };
-    }
-
-    const { data, error } = await supabase
-      .from('i18n_translations')
-      .upsert({
-        language: locale,
-        translations: updateData.translations,
-        privacy_policy: updateData.privacy_policy,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // Invalidate cache
-    const revalidation = await invalidatePublicContent({
-      entity: 'translations',
-      operation: 'update',
-      extraTags: getContentInvalidation({
-        entity: 'privacy',
-        operation: 'update',
-      }),
-    });
-    invalidateLocalCache('translations');
-
-    return { success: true, data, revalidation };
-  } catch (error) {
-    console.error('Error updating i18n data:', error);
-    return {
-      success: false,
-      error: 'Failed to update i18n data',
-    };
-  }
-}
-
 async function updateSectionTranslations(
-  _supabase: SupabaseClient,
   locale: string,
   sectionKey: string,
   sectionData: Record<string, unknown>
 ): Promise<I18nResult> {
-  try {
-    const validLocales = ['en', 'it'];
-    if (!validLocales.includes(locale)) {
-      return {
-        success: false,
-        error: `Invalid locale. Must be one of: ${validLocales.join(', ')}`,
-      };
-    }
-
-    const admin = getAdminClient();
-    const { data: currentData, error: fetchError } = await admin
-      .from('i18n_translations')
-      .select('translations, privacy_policy')
-      .eq('language', locale)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      throw fetchError;
-    }
-
-    const currentTranslations =
-      (currentData?.translations as Record<string, unknown>) || {};
-
-    const mergedTranslations = mergeSectionTranslations(
-      currentTranslations,
-      sectionKey,
-      sectionData
-    );
-
-    const { data, error } = await admin
-      .from('i18n_translations')
-      .upsert({
-        language: locale,
-        translations: mergedTranslations,
-        privacy_policy: currentData?.privacy_policy || null,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    const revalidation = await invalidatePublicContent({
-      entity: 'translations',
-      operation: 'update',
-    });
-    invalidateLocalCache('translations');
-
-    return { success: true, data, revalidation };
-  } catch (error) {
-    console.error('Error updating section translations:', error);
+  if (!VALID_LOCALES.includes(locale as (typeof VALID_LOCALES)[number])) {
     return {
       success: false,
-      error: 'Failed to update section translations',
+      error: `Invalid locale. Must be one of: ${VALID_LOCALES.join(', ')}`,
     };
   }
+
+  const admin = getAdminClient();
+  const outcome = await casMergeSection(admin, locale, sectionKey, sectionData);
+
+  if (!outcome.ok) {
+    return { success: false, error: outcome.error };
+  }
+
+  const revalidation = await invalidatePublicContent({
+    entity: 'translations',
+    operation: 'update',
+  });
+  invalidateLocalCache('translations');
+
+  return {
+    success: true,
+    data: { translations: outcome.translations },
+    revalidation,
+  };
 }
 
 async function updatePrivacyPolicy(
@@ -382,11 +313,10 @@ async function updatePrivacyPolicy(
   markdown: string
 ): Promise<I18nResult> {
   try {
-    const validLocales = ['en', 'it'];
-    if (!validLocales.includes(locale)) {
+    if (!VALID_LOCALES.includes(locale as (typeof VALID_LOCALES)[number])) {
       return {
         success: false,
-        error: `Invalid locale. Must be one of: ${validLocales.join(', ')}`,
+        error: `Invalid locale. Must be one of: ${VALID_LOCALES.join(', ')}`,
       };
     }
 
@@ -398,38 +328,30 @@ async function updatePrivacyPolicy(
     }
 
     const admin = getAdminClient();
-    const { data: currentData, error: fetchError } = await admin
-      .from('i18n_translations')
-      .select('translations, privacy_policy')
-      .eq('language', locale)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      throw fetchError;
-    }
-
-    // Write the TOP-LEVEL privacy_policy column (what the public site reads)
-    // while preserving the translations JSON untouched.
+    // Column-only write: the public site reads the top-level privacy_policy
+    // column. The translations JSON is deliberately NOT read or written here,
+    // so this action can never clobber a concurrent translations edit.
     const { data, error } = await admin
       .from('i18n_translations')
-      .upsert({
-        language: locale,
-        translations:
-          (currentData?.translations as Record<string, unknown>) || {},
-        privacy_policy: markdown,
-      })
+      .update({ privacy_policy: markdown })
+      .eq('language', locale)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return {
+          success: false,
+          error: `No translations row for locale "${locale}"`,
+        };
+      }
+      throw error;
+    }
 
     const revalidation = await invalidatePublicContent({
       entity: 'privacy',
       operation: 'update',
     });
-    // Privacy writes the top-level privacy_policy column only; the local
-    // translations cache is deliberately NOT touched. Revalidating the
-    // privacy tag is a no-op locally (nothing caches it yet).
     invalidateLocalCache('privacy');
 
     return { success: true, data, revalidation };

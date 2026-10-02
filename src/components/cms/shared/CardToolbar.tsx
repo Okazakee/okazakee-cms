@@ -1,11 +1,6 @@
 'use client';
 
-import {
-  ArrowDown,
-  ArrowUp,
-  Edit3,
-  Trash2,
-} from 'lucide-react';
+import { ArrowDown, ArrowUp, Edit3, Trash2 } from 'lucide-react';
 
 interface CardToolbarProps {
   onEdit?: () => void;
@@ -33,7 +28,7 @@ export function CardToolbar({
           type="button"
           onClick={onMoveUp}
           disabled={isFirst}
-          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-500 dark:text-lighttext2 hover:text-main transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-muted hover:text-accent-violet transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           title="Move up"
         >
           <ArrowUp className="w-4 h-4" />
@@ -44,7 +39,7 @@ export function CardToolbar({
           type="button"
           onClick={onMoveDown}
           disabled={isLast}
-          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-500 dark:text-lighttext2 hover:text-main transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-muted hover:text-accent-violet transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           title="Move down"
         >
           <ArrowDown className="w-4 h-4" />
@@ -54,7 +49,7 @@ export function CardToolbar({
         <button
           type="button"
           onClick={onEdit}
-          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-gray-500 dark:text-lighttext2 hover:text-main transition-colors"
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-muted hover:text-accent-violet transition-colors"
           title="Edit"
         >
           <Edit3 className="w-4 h-4" />

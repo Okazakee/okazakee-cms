@@ -46,11 +46,11 @@ export function ConfirmDialog({
         onClick={onCancel}
         aria-hidden="true"
       />
-      <div className="relative bg-bglight dark:bg-darkergray rounded-xl border border-gray-200 dark:border-darkgray shadow-xl max-w-md w-full mx-4 p-6">
+      <div className="relative bg-surface-base rounded-xl border border-border-subtle max-w-md w-full mx-4 p-6">
         <button
           type="button"
           onClick={onCancel}
-          className="absolute top-4 right-4 text-gray-500 dark:text-lighttext2 hover:text-darktext dark:hover:text-lighttext"
+          className="absolute top-4 right-4 text-text-muted hover:text-text-main "
           aria-label="Close"
         >
           <X className="w-4 h-4" />
@@ -63,12 +63,8 @@ export function ConfirmDialog({
             </div>
           )}
           <div>
-            <h3 className="text-lg font-semibold text-darktext dark:text-lighttext">
-              {title}
-            </h3>
-            <p className="text-sm text-gray-500 dark:text-lighttext2 mt-1">
-              {message}
-            </p>
+            <h3 className="text-lg font-semibold text-text-main ">{title}</h3>
+            <p className="text-sm text-text-muted mt-1">{message}</p>
           </div>
         </div>
 
@@ -76,7 +72,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 min-h-[44px] bg-gray-200 hover:bg-gray-300 dark:bg-darkgray dark:hover:bg-darkestgray text-darktext dark:text-lighttext rounded-lg font-medium transition-colors"
+            className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-text-main rounded-lg font-medium transition-colors"
           >
             {cancelLabel ?? t('common.cancel')}
           </button>
@@ -86,7 +82,7 @@ export function ConfirmDialog({
             className={`px-4 py-2 min-h-[44px] text-white rounded-lg font-medium transition-colors ${
               confirmVariant === 'danger'
                 ? 'bg-red-500 hover:bg-red-600'
-                : 'bg-main hover:bg-secondary'
+                : 'bg-accent-violet hover:bg-accent-violet-deep'
             }`}
           >
             {confirmLabel ?? t('common.delete')}

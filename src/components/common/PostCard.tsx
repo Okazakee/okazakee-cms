@@ -35,7 +35,7 @@ export default function Postcard({
   return (
     <Link
       href={href}
-      className="hover:bg-tertiary bg-[#c5c5c5] dark:bg-[#0e0e0e] drop-shadow-2xl dark:drop-shadow-none hover:text-lighttext border-2 p-3 border-secondary rounded-xl overflow-hidden cursor-pointer transition-all text-left flex flex-col md:w-lg w-full max-w-84 xs:min-w-[24rem] md:max-w-xl hover:scale-105"
+      className="hover:bg-accent-violet-deep bg-[#c5c5c5] dark:bg-[#0e0e0e] drop-dark:drop-shadow-none hover:text-text-main border-2 p-3 border-accent-violet-deep rounded-xl overflow-hidden cursor-pointer transition-all text-left flex flex-col md:w-lg w-full max-w-84 sm:min-w-[24rem] md:max-w-xl "
     >
       <div className="w-full h-44 md:h-60 relative mx-auto mb-3">
         <Image
@@ -59,7 +59,7 @@ export default function Postcard({
             <h1 className="font-bold text-[1.4rem] md:text-2xl shrink min-w-0">
               {initTitle}
             </h1>
-            <span className="inline-flex items-center gap-1.5 text-xs text-lighttext2 dark:text-lighttext2 whitespace-nowrap">
+            <span className="inline-flex items-center gap-1.5 text-xs text-text-muted whitespace-nowrap">
               <Eye size={14} />
               {post.views ?? 0}
             </span>

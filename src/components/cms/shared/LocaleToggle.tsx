@@ -11,7 +11,7 @@ export function LocaleToggle({ activeLocale, onChange }: LocaleToggleProps) {
   const t = useTranslations('cms');
 
   return (
-    <div className="flex gap-1 bg-gray-200 dark:bg-darkgray rounded-lg p-0.5">
+    <div className="flex gap-1 bg-surface-raised rounded-lg p-0.5">
       {(['en', 'it'] as const).map((loc) => (
         <button
           key={loc}
@@ -19,8 +19,8 @@ export function LocaleToggle({ activeLocale, onChange }: LocaleToggleProps) {
           onClick={() => onChange(loc)}
           className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
             activeLocale === loc
-              ? 'bg-white dark:bg-darkestgray text-main shadow-sm'
-              : 'text-gray-500 dark:text-lighttext2 hover:text-darktext dark:hover:text-lighttext'
+              ? 'bg-surface-base text-accent-violet shadow-sm'
+              : 'text-text-muted hover:text-text-main '
           }`}
         >
           {loc === 'en' ? t('common.english') : t('common.italian')}
