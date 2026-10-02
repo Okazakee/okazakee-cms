@@ -1,5 +1,7 @@
 'use server';
 
+import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import { createClient } from '@/utils/supabase/server';
 import {
   findAllowedCmsUser,
   getUserAuthProvider,
@@ -8,8 +10,6 @@ import {
   getUserGithubUsername,
 } from './utils/auth';
 import { syncCmsUserProfile } from './utils/profileSync';
-import { createClient } from '@/utils/supabase/server';
-import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 
 export type CMSUser = {
   id: string;
@@ -88,7 +88,8 @@ async function buildCmsUser(
 export async function getUser(): Promise<CMSUser | null> {
   const supabase = await createClient();
   try {
-    return await buildCmsUser(supabase);
+    const user = await buildCmsUser(supabase);
+    return user?.role ? user : null;
   } catch {
     return null;
   }

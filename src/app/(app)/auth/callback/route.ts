@@ -9,8 +9,8 @@ import {
   resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
 import { syncCmsUserProfile } from '@/app/actions/cms/utils/profileSync';
-import { createClient } from '@/utils/supabase/server';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import { createClient } from '@/utils/supabase/server';
 
 /**
  * GitHub OAuth callback.

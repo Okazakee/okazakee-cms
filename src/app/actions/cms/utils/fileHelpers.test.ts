@@ -30,12 +30,12 @@ vi.mock('@/libs/cms/supabase/admin', () => ({
   getCmsAdminClient: mocks.getCmsAdminClient,
 }));
 
+import type { CmsAllowlistMatch } from './auth';
 import {
   getCmsActionContext,
   requireAdmin,
   requireAllowedPostWriter,
 } from './fileHelpers';
-import type { CmsAllowlistMatch } from './auth';
 
 type AllowlistEntry = {
   email?: string;
@@ -49,31 +49,34 @@ function setupAllowlist(entries: AllowlistEntry[]) {
     return {
       select: () => ({
         eq: (_col: string, value: string) => ({
-          maybeSingle: vi.fn(async (): Promise<{ data: CmsAllowlistMatch | null }> => {
-            const hit = entries.find(
-              (e) => e.email === value || e.github_username === value
-            );
-            return {
-              data: hit
-                ? {
-                    role: hit.role as CmsAllowlistMatch['role'],
-                    matchSource:
-                      hit.email === value ? 'email' : 'github',
-                  }
-                : null,
-            };
-          }),
+          maybeSingle: vi.fn(
+            async (): Promise<{ data: CmsAllowlistMatch | null }> => {
+              const hit = entries.find(
+                (e) => e.email === value || e.github_username === value
+              );
+              return {
+                data: hit
+                  ? {
+                      role: hit.role as CmsAllowlistMatch['role'],
+                      matchSource: hit.email === value ? 'email' : 'github',
+                    }
+                  : null,
+              };
+            }
+          ),
         }),
       }),
     };
   });
 }
 
-function setupSessionUser(user: {
-  id: string;
-  email?: string | null;
-  user_name?: string | null;
-} | null) {
+function setupSessionUser(
+  user: {
+    id: string;
+    email?: string | null;
+    user_name?: string | null;
+  } | null
+) {
   mocks.session.auth.getUser.mockResolvedValue(
     user
       ? {
@@ -81,7 +84,9 @@ function setupSessionUser(user: {
             user: {
               id: user.id,
               email: user.email ?? null,
-              user_metadata: user.user_name ? { user_name: user.user_name } : {},
+              user_metadata: user.user_name
+                ? { user_name: user.user_name }
+                : {},
             },
           },
           error: null,

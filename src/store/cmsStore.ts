@@ -7,6 +7,16 @@ export interface PublishState {
   lastModified: number;
 }
 
+export interface SectionCallbacks {
+  publish: () => Promise<void>;
+  revert: () => void;
+}
+
+export interface PublishFailure {
+  key: string;
+  error: string;
+}
+
 interface CmsState {
   user: CMSUser | null;
   sidePanelSections: string[];
@@ -19,7 +29,10 @@ interface CmsState {
   } | null;
   loading: boolean;
   error: string | null;
+  warning: string | null;
   publishQueue: Record<string, PublishState>;
+  sectionCallbacks: Record<string, SectionCallbacks>;
+  isPublishingAll: boolean;
 
   setUser: (user: CMSUser | null) => void;
   setSidePanelSections: (sections: string[]) => void;
@@ -34,28 +47,30 @@ interface CmsState {
   ) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setWarning: (warning: string | null) => void;
   registerPublishState: (key: string, state: PublishState) => void;
   unregisterPublishState: (key: string) => void;
-  clearAllPublishState: () => void;
-  sectionPublishCallback: (() => Promise<void>) | null;
-  sectionRevertCallback: (() => void) | null;
-  setSectionCallbacks: (
-    publish: () => Promise<void>,
-    revert: () => void
-  ) => void;
-  clearSectionCallbacks: () => void;
+  registerSectionCallbacks: (key: string, callbacks: SectionCallbacks) => void;
+  unregisterSectionCallbacks: (key: string) => void;
+  /**
+   * Publishes every dirty section sequentially. Sections whose handler throws
+   * are recorded as failures and the sequence continues. The in-flight lock
+   * makes re-entrant calls a no-op. Returns the failures (empty on success).
+   */
+  publishAll: () => Promise<PublishFailure[]>;
 }
 
-export const useCmsStore = create<CmsState>((set) => ({
+export const useCmsStore = create<CmsState>((set, get) => ({
   user: null,
   sidePanelSections: [],
   activeSection: 'hero',
   heroSection: null,
   loading: false,
   error: null,
+  warning: null,
   publishQueue: {},
-  sectionPublishCallback: null,
-  sectionRevertCallback: null,
+  sectionCallbacks: {},
+  isPublishingAll: false,
 
   setUser: (user) => set({ user }),
   setSidePanelSections: (sections) => set({ sidePanelSections: sections }),
@@ -63,6 +78,7 @@ export const useCmsStore = create<CmsState>((set) => ({
   setHeroSection: (heroSection) => set({ heroSection }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
+  setWarning: (warning) => set({ warning }),
   registerPublishState: (key, state) =>
     set((prev) => ({
       publishQueue: { ...prev.publishQueue, [key]: state },
@@ -73,9 +89,71 @@ export const useCmsStore = create<CmsState>((set) => ({
       delete next[key];
       return { publishQueue: next };
     }),
-  clearAllPublishState: () => set({ publishQueue: {} }),
-  setSectionCallbacks: (publish, revert) =>
-    set({ sectionPublishCallback: publish, sectionRevertCallback: revert }),
-  clearSectionCallbacks: () =>
-    set({ sectionPublishCallback: null, sectionRevertCallback: null }),
+  registerSectionCallbacks: (key, callbacks) =>
+    set((prev) => ({
+      sectionCallbacks: { ...prev.sectionCallbacks, [key]: callbacks },
+    })),
+  unregisterSectionCallbacks: (key) =>
+    set((prev) => {
+      const next = { ...prev.sectionCallbacks };
+      delete next[key];
+      return { sectionCallbacks: next };
+    }),
+  publishAll: async () => {
+    if (get().isPublishingAll) return [];
+
+    set({ isPublishingAll: true, error: null });
+    const failures: PublishFailure[] = [];
+
+    try {
+      const { publishQueue, sidePanelSections } = get();
+
+      // Publish in navigation order first, then any dirty key not listed.
+      const ordered: string[] = [];
+      for (const key of sidePanelSections) {
+        if (publishQueue[key]?.isDirty && !ordered.includes(key)) {
+          ordered.push(key);
+        }
+      }
+      for (const key of Object.keys(publishQueue)) {
+        if (publishQueue[key]?.isDirty && !ordered.includes(key)) {
+          ordered.push(key);
+        }
+      }
+
+      for (const key of ordered) {
+        const callbacks = get().sectionCallbacks[key];
+        if (!callbacks) {
+          failures.push({
+            key,
+            error: `No publish handler registered for "${key}"`,
+          });
+          continue;
+        }
+        try {
+          set({ error: null });
+          await callbacks.publish();
+          // Section handlers may surface action errors without throwing.
+          if (get().error) failures.push({ key, error: get().error as string });
+        } catch (err) {
+          failures.push({
+            key,
+            error: err instanceof Error ? err.message : 'Publish failed',
+          });
+        }
+      }
+
+      if (failures.length > 0) {
+        set({
+          error: failures
+            .map((failure) => `${failure.key}: ${failure.error}`)
+            .join('\n'),
+        });
+      }
+    } finally {
+      set({ isPublishingAll: false });
+    }
+
+    return failures;
+  },
 }));

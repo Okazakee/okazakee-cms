@@ -6,9 +6,9 @@ import {
 
 describe('revalidationWarning', () => {
   it('warns when a successful mutation could not reach the public cache', () => {
-    expect(
-      revalidationWarning({ success: true, revalidation: 'failed' })
-    ).toBe(PUBLIC_CACHE_WARNING);
+    expect(revalidationWarning({ success: true, revalidation: 'failed' })).toBe(
+      PUBLIC_CACHE_WARNING
+    );
   });
 
   it('stays quiet when propagation was sent', () => {

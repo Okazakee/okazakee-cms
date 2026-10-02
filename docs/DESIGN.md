@@ -141,24 +141,36 @@ the terminal traffic-light dots (`#ff5f57` / `#febc2e` / `#28c840`) and `::selec
 
 - Grid `grid-cols-[1fr_auto_1fr]` with **explicit `col-start-1/2/3`**. Hiding the nav on
   mobile otherwise drops it from the flow and the controls slide into the middle column.
-- Logo: 1809×320 asset, `h-6 w-auto max-w-none shrink-0 object-contain` (136×24 at every
-  width), **no hover treatment**, links to the locale home.
-- Desktop nav: appears at **`lg`**, centred, mono `text-xs`; active item =
-  `text-accent-violet-light font-semibold` + 1px `border-accent-violet` underline.
-- Mobile header: logo, theme toggle, hamburger — all right-aligned, 44×44 targets, right
-  padding halved (`pr-3`, desktop `pr-6`).
-- Mobile drawer: panel under the header, `rounded-2xl`, `bg-surface-card/95`, backdrop
-  blur; rows 44px tall; active row `bg-surface-raised text-accent-violet-light`;
-  body scroll lock while open; closes on link tap and Escape; `aria-expanded` /
-  `aria-controls` wired. The **Language** row (label + EN/IT switch) and the **Resume**
-  row (violet-tinted) live inside this list, not in a separate footer block.
-- Scroll-spy: the home page highlights the section currently in view, in **both** the
-  desktop nav and the drawer.
-- No settings dropdown: it is dropped by design; language and theme stay as inline
-  controls.
+- Logo: title-cms assets (`title-cms.png` 1937×293 dark, `title-cms-lightmode.png`
+  1942×294 light), `h-6 w-auto max-w-none shrink-0 object-contain` (136×24 at every
+  width), **no hover treatment**, links to the workspace root. Favicon and app
+  icon derive from `cms.png`; the social card is `og-cms.png`.
+- Mobile header: logo left, theme toggle + hamburger right (`col-start-3
+  justify-self-end`, 44×44, `pr-3`) — the same placement as the website
+  header. The toggle is the header icon variant (Sun/Moon/Smartphone,
+  `Toggle theme`); the button toggles Menu/X in place (`aria-expanded`,
+  `aria-controls`); there is no inner menu header and no profile control:
+  identity lives only in the sidebar user banner.
+- Desktop is headerless: the sidebar user banner carries the CMS wordmark
+  above avatar/name/role, and the full workspace width goes to content.
+- User banner: non-interactive `rounded-2xl border bg-surface-card` card with
+  avatar (or initial fallback), display name and mono role label. Rendered
+  above the section list on desktop (with logo) and at the top of the
+  fullscreen mobile menu (logo omitted — the mobile header shows it); the
+  Account section stays the only interactive profile surface.
+- Mobile menu: fullscreen panel under the CMS header (`fixed inset-x-0 top-16
+  bottom-0`, `bg-surface-base/[0.98]`, backdrop blur, `overflow-y-auto`,
+  safe-area bottom padding); rows are `text-3xl` headings with mono `01`–`N`
+  index prefixes and hairline dividers, active row `font-semibold
+  text-accent-violet-light`, rows stagger in 40ms apart; language toggle plus
+  the Home link and logout live in a `mt-auto` footer block with matching
+  top/bottom breathing room; body scroll lock and focus trap while open;
+  closes on section select, link tap and Escape; `aria-expanded` /
+  `aria-controls` wired, hidden rows `tabIndex={-1}`. Draft dots,
+  `aria-current` and the single-confirm global discard are preserved on both
+  mobile and desktop.
 - The bespoke `xs:` / `tablet:` / `mdh:` utilities are retired: standard Tailwind tiers
   cover every case. `SkillsCarousel` and the old `ResumeButton` card went with them,
-  replaced by the canon chips and the header's resume action.
 
 ---
 

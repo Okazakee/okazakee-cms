@@ -1,5 +1,22 @@
 {
+  "copy": {
+    "requestTitle": "Request form",
+    "requestDescription": "Customize the public contact form labels, options and coming-soon message. The form is a preview; it does not send requests.",
+    "siteTitle": "Website copy",
+    "siteDescription": "Customize post links, empty states, error pages, privacy metadata and shared labels in both languages.",
+    "namespaces": {
+      "request-form": "Request form",
+      "posts-section": "Post links and empty states",
+      "errors": "Error pages",
+      "privacyPolicy": "Privacy page subtitle",
+      "common": "Shared labels"
+    }
+  },
   "sidebar": {
+    "workspace": "Content workspace",
+    "publishAll": "Publish all",
+    "pendingSections": "{count} sections with unsaved changes",
+    "discardDrafts": "Discard all unsaved changes? This cannot be undone.",
     "subtitle": "Manage your website content",
     "nav": {
       "hero": "Hero Section",
@@ -8,6 +25,8 @@
       "portfolio": "Portfolio",
       "blog": "Blog",
       "contacts": "Contacts",
+      "request-form": "Request form",
+      "site-copy": "Website copy",
       "layout": "Layout",
       "privacy-policy": "Privacy Policy",
       "users": "Manage Users",
@@ -141,6 +160,7 @@
     "manageCategoriesTitle": "Manage Categories",
     "addCategory": "Add Category",
     "categoryNamePlaceholder": "Category name",
+    "renameCategory": "Rename category",
     "skillTitlePlaceholder": "Skill title",
     "skillIconPlaceholder": "https://example.com/icon.svg",
     "invertLabel": "Invert in dark mode",
@@ -340,6 +360,15 @@
     "subtitle": "Edit header and footer translations for English and Italian",
     "footerTranslationsTitle": "Footer Translations",
     "headerTranslationsTitle": "Header Translations",
+    "fixedNavigation": "English labels customize the six fixed website destinations. Italian navigation is fixed on the website and is read-only here. Resume PDFs are managed in Contacts.",
+    "nav": {
+      "home": "Home",
+      "skills": "Skills",
+      "career": "Career",
+      "portfolio": "Portfolio",
+      "blog": "Blog",
+      "contacts": "Contacts"
+    },
     "footerLeftLabel": "Left",
     "footerRightLabel": "Right",
     "footerMiddleLabel": "Middle",

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  WEBP_HEADER_BYTES,
   isAnimatedWebpBytes,
   isAnimatedWebpFile,
+  WEBP_HEADER_BYTES,
 } from '@/utils/cms/webpAnimation';
 
 /**

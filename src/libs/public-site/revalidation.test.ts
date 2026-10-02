@@ -13,6 +13,8 @@ describe('signRevalidationEvent', () => {
       .digest('hex')}`;
 
     expect(signRevalidationEvent(secret, timestamp, body)).toBe(expected);
-    expect(signRevalidationEvent(secret, timestamp, body)).toMatch(/^v1=[0-9a-f]{64}$/);
+    expect(signRevalidationEvent(secret, timestamp, body)).toMatch(
+      /^v1=[0-9a-f]{64}$/
+    );
   });
 });

@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { updateSession } from '@/utils/supabase/middleware';
 import {
   isLegacyCmsPath,
   stripLegacyCmsSegment,
 } from '@/utils/cmsRouteMatching';
+import { updateSession } from '@/utils/supabase/middleware';
 
 const REDIRECT_HEADER = 'x-redirected';
 

@@ -192,7 +192,10 @@ export async function processImageToWebP(
 async function generateBlurhash(canvas: HTMLCanvasElement): Promise<string> {
   try {
     const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('toBlob failed'))),
+        'image/png'
+      );
     });
     const { hash } = await blurkitEncode(blob, { size: 32 });
     return hash;

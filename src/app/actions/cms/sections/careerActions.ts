@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  buildUniqueAssetPath,
   generateBlurhashFromBuffer,
   getAdminClient,
   getCmsActionContext,
@@ -11,13 +12,27 @@ import {
   processImage,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
+  removeStorageObjectBestEffort,
   requireAdmin,
-  sanitizeFilename,
-  uploadPreparedImage,
+  uploadImmutablePreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import {
+  batchFailureSummary,
+  batchHadCommits,
+  batchSucceeded,
+  emptyBatchEvidence,
+  markCreated,
+  markDeleted,
+  markFailed,
+  markUpdated,
+  normalizeTempId,
+} from '@/libs/cms/batchEvidence';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import type { CareerEntry } from '@/types/fetchedData.types';
 import { isValidBlurhash } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
@@ -41,6 +56,8 @@ type CareerOperation =
         data: CreateCareerData;
         file?: File | null;
         blurhashURL?: string;
+        /** Client-generated temporary id; echoed back in `created`/`createdIds`. */
+        tempId?: string;
       }>;
       updates: Array<{
         id: number;
@@ -73,11 +90,7 @@ type CreateCareerData = {
 type UpdateCareerData = Partial<CreateCareerData>;
 
 type CareerResult = MutationResult & {
-  data?:
-    | CareerEntry
-    | CareerEntry[]
-    | { logo: string; blurhashURL: string }
-    | null;
+  data?: unknown;
 };
 
 function toCareerDbData(
@@ -244,16 +257,20 @@ export async function careerActions(
 async function batchPublishCareer(
   operation: Extract<CareerOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<CareerResult> {
+  const evidence = emptyBatchEvidence();
   try {
     await getCmsActionContext('admin');
     const admin = getAdminClient();
-    const errors: string[] = [];
-    const changed: CareerEntry[] = [];
 
-    for (const item of operation.creates) {
+    for (const [index, item] of operation.creates.entries()) {
+      const tempId = normalizeTempId(item.tempId, 'career', index);
       const validation = validateCareerData(item.data);
       if (!validation.isValid) {
-        errors.push(`"${item.data.title}": ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
@@ -267,13 +284,18 @@ async function batchPublishCareer(
           quality: 80,
         });
         if (!prepared.success) {
-          errors.push(`"${item.data.title}": ${prepared.error}`);
+          markFailed(evidence, {
+            kind: 'create',
+            tempId,
+            error: prepared.error ?? 'Image processing failed',
+          });
           continue;
         }
-        uploaded = await uploadPreparedImage(
+        uploaded = await uploadImmutablePreparedImage(
           admin,
           'website',
-          `Website Assets/career/${Date.now()}-${sanitizeFilename(item.data.company || 'company')}`,
+          'Website Assets/career',
+          item.data.company || 'company',
           prepared.image
         );
         insertData.logo = uploaded.publicUrl;
@@ -287,24 +309,31 @@ async function batchPublishCareer(
         .single();
 
       if (error) {
-        if (uploaded)
-          await admin.storage.from('website').remove([uploaded.path]);
-        errors.push(`"${item.data.title}": ${error.message}`);
+        if (uploaded) {
+          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+        }
+        markFailed(evidence, { kind: 'create', tempId, error: error.message });
         continue;
       }
 
-      changed.push(normalizeCareerEntry(data));
+      markCreated(evidence, tempId, data.id);
     }
 
     for (const item of operation.updates) {
       const validation = validateCareerData(item.data);
       if (!validation.isValid) {
-        errors.push(`Update ${item.id}: ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
       const updateData: UpdateCareerData = { ...item.data };
       let uploaded: { publicUrl: string; path: string } | null = null;
+      // Trusted replacement source: previous logo URL comes from the DB.
+      let previousLogo: string | null = null;
 
       if (item.file) {
         const prepared = await prepareImageUpload(item.file, item.blurhashURL, {
@@ -313,13 +342,35 @@ async function batchPublishCareer(
           quality: 80,
         });
         if (!prepared.success) {
-          errors.push(`Update ${item.id}: ${prepared.error}`);
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error: prepared.error ?? 'Image processing failed',
+          });
           continue;
         }
-        uploaded = await uploadPreparedImage(
+
+        const { data: currentRow, error: fetchError } = await admin
+          .from('career_entries')
+          .select('logo')
+          .eq('id', item.id)
+          .single();
+
+        if (fetchError) {
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error: fetchError.message,
+          });
+          continue;
+        }
+        previousLogo = (currentRow?.logo as string | null) ?? null;
+
+        uploaded = await uploadImmutablePreparedImage(
           admin,
           'website',
-          `Website Assets/career/${item.id}-${sanitizeFilename(item.data.company || `company-${item.id}`)}`,
+          'Website Assets/career',
+          item.data.company || `company-${item.id}`,
           prepared.image
         );
         updateData.logo = uploaded.publicUrl;
@@ -334,22 +385,27 @@ async function batchPublishCareer(
         .single();
 
       if (error) {
-        if (uploaded)
-          await admin.storage.from('website').remove([uploaded.path]);
-        errors.push(`Update ${item.id}: ${error.message}`);
+        if (uploaded) {
+          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+        }
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: error.message,
+        });
         continue;
       }
 
-      if (uploaded && item.currentLogoUrl) {
+      if (uploaded) {
         await removePublicFileIfDifferent(
           admin,
-          item.currentLogoUrl,
+          previousLogo,
           'website',
           uploaded.path
         );
       }
 
-      changed.push(normalizeCareerEntry(data));
+      markUpdated(evidence, data.id);
     }
 
     if (operation.deletes.length > 0) {
@@ -359,32 +415,64 @@ async function batchPublishCareer(
         .in('id', operation.deletes);
 
       if (fetchError) {
-        errors.push(`Delete: ${fetchError.message}`);
+        markFailed(evidence, { kind: 'delete', error: fetchError.message });
       } else {
-        const { error } = await admin
-          .from('career_entries')
-          .delete()
-          .in('id', operation.deletes);
-        if (error) {
-          errors.push(`Delete: ${error.message}`);
-        } else {
-          for (const row of existingRows || []) {
-            await removePublicFileIfPresent(
-              admin,
-              row.logo as string | null,
-              'website'
+        // Returned-row evidence: only ids present at delete time may be
+        // reported as committed, so concurrent/unknown ids keep their drafts.
+        const existingIds = new Set(
+          (existingRows || []).map((row) => row.id as number)
+        );
+        for (const id of operation.deletes) {
+          if (!existingIds.has(id)) {
+            markFailed(evidence, {
+              kind: 'delete',
+              id,
+              error: 'Career entry not found',
+            });
+          }
+        }
+        const deletable = operation.deletes.filter((id) =>
+          existingIds.has(id)
+        );
+        if (deletable.length > 0) {
+          const { data: deletedRows, error } = await admin
+            .from('career_entries')
+            .delete()
+            .in('id', deletable)
+            .select('id');
+
+          if (error) {
+            markFailed(evidence, { kind: 'delete', error: error.message });
+          } else {
+            const deletedIds = new Set(
+              (deletedRows || []).map((row) => row.id as number)
             );
+            for (const id of deletable) {
+              if (deletedIds.has(id)) markDeleted(evidence, id);
+              else {
+                markFailed(evidence, {
+                  kind: 'delete',
+                  id,
+                  error: 'Career entry was not deleted',
+                });
+              }
+            }
+            for (const row of existingRows || []) {
+              if (deletedIds.has(row.id as number)) {
+                await removePublicFileIfPresent(
+                  admin,
+                  row.logo as string | null,
+                  'website'
+                );
+              }
+            }
           }
         }
       }
     }
 
     let revalidation: RevalidationStatus | undefined;
-    if (
-      operation.creates.length > 0 ||
-      operation.updates.length > 0 ||
-      operation.deletes.length > 0
-    ) {
+    if (batchHadCommits(evidence)) {
       revalidation = await invalidatePublicContent({
         entity: 'career',
         operation: 'publish',
@@ -392,23 +480,32 @@ async function batchPublishCareer(
     }
 
     return {
-      success: errors.length === 0,
-      data: changed,
-      error: errors.length > 0 ? errors.join('\n') : undefined,
+      success: batchSucceeded(evidence),
+      data: evidence,
+      error: batchFailureSummary(evidence),
       revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing career entries:', error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Failed to publish career entries';
+    markFailed(evidence, { kind: 'update', error: message });
+    const revalidation = batchHadCommits(evidence)
+      ? await invalidatePublicContent({
+          entity: 'career',
+          operation: 'publish',
+        })
+      : undefined;
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Failed to publish career entries',
+      data: evidence,
+      error: batchFailureSummary(evidence),
+      revalidation,
     };
   }
 }
-
 async function getCareerData(supabase: SupabaseClient): Promise<CareerResult> {
   // Uncached direct read: editors must see current DB state immediately.
   try {
@@ -455,7 +552,11 @@ async function createCareer(
       entity: 'career',
       operation: 'create',
     });
-    return { success: true, data: normalizeCareerEntry(newCareer), revalidation };
+    return {
+      success: true,
+      data: normalizeCareerEntry(newCareer),
+      revalidation,
+    };
   } catch (error) {
     console.error('Error creating career entry:', error);
     return {
@@ -533,10 +634,7 @@ async function deleteCareer(
     // Commit the DB delete FIRST; only then remove the Storage object
     // (best-effort). Deleting the object before the row is gone would leave
     // the row pointing at a deleted logo if the DB delete failed.
-    const { error } = await admin
-      .from('career_entries')
-      .delete()
-      .eq('id', id);
+    const { error } = await admin.from('career_entries').delete().eq('id', id);
 
     if (error) throw error;
 
@@ -605,10 +703,10 @@ async function rollbackCareerCreate(entryId: number): Promise<CareerResult> {
 }
 
 async function uploadCareerLogo(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   careerId: number,
   file: File,
-  currentLogoUrl?: string,
+  _currentLogoUrl?: string,
   blurhashURL?: string
 ): Promise<CareerResult> {
   try {
@@ -620,7 +718,7 @@ async function uploadCareerLogo(
     const admin = getAdminClient();
     const { data: existingCareer, error: fetchError } = await admin
       .from('career_entries')
-      .select('id, company')
+      .select('id, company, logo')
       .eq('id', careerId)
       .single();
 
@@ -654,22 +752,21 @@ async function uploadCareerLogo(
       format = processed.format ?? 'webp';
     }
 
-    const sanitizedCompany = sanitizeFilename(
+    // Unique immutable path: never overwrites the previous logo, so a failed
+    // DB update cannot leave the row pointing at a deleted object. The
+    // previous DB-referenced logo is removed AFTER the commit.
+    const fileBase = buildUniqueAssetPath(
+      'Website Assets/career',
       existingCareer.company || 'company'
     );
-    const fileName = `Website Assets/career/${careerId}-${sanitizedCompany}.webp`;
+    const fileName = `${fileBase}.${format === 'png' ? 'png' : 'webp'}`;
 
-    // No pre-upload deletion: the new logo is uploaded with `upsert` to the
-    // same path (replacing the previous one), and a previous file behind a
-    // different URL is removed AFTER the DB commit by
-    // removePublicFileIfDifferent. Deleting first would leave the row
-    // pointing at a deleted logo if the upload or DB update failed.
     const { error: uploadError } = await admin.storage
       .from('website')
       .upload(fileName, buffer, {
         cacheControl: '3600',
         contentType: format === 'png' ? 'image/png' : 'image/webp',
-        upsert: true,
+        upsert: false,
       });
 
     if (uploadError) throw uploadError;
@@ -688,11 +785,16 @@ async function uploadCareerLogo(
       .update(updateData)
       .eq('id', careerId);
 
-    if (updateError) throw updateError;
+    if (updateError) {
+      await removeStorageObjectBestEffort(admin, 'website', fileName);
+      throw updateError;
+    }
 
+    // DB-authoritative cleanup: never trust the client-supplied URL, even when
+    // the DB logo is null (a forged URL must not direct a storage delete).
     await removePublicFileIfDifferent(
-      supabase,
-      currentLogoUrl,
+      admin,
+      existingCareer.logo,
       'website',
       fileName
     );

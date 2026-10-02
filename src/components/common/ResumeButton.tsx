@@ -23,17 +23,16 @@ export default function ResumeButton({
           '--hover-color': '#4B5563',
         } as React.CSSProperties
       }
-      className="text-lighttext mb-5 lg:mb-0 last:mb-0 transition-all hover:scale-105 border-2
-            border-main rounded-2xl bg-(--hover-color) lg:bg-(--dyn-color) lg:hover:bg-(--hover-color)"
+      className="text-text-main mb-5 lg:mb-0 last:mb-0 transition-all border-2 border-accent-violet rounded-2xl bg-(--hover-color) lg:bg-(--dyn-color) lg:hover:bg-(--hover-color)"
     >
       <div className="transition-all ease-in-out lg:my-0 my-2 lg:w-40 lg:h-40">
         <div className="h-full flex lg:flex-col justify-center items-center">
           <FileUser
-            className="lg:mr-0 mr-5 dark:text-lighttext lg:w-[100px] w-16 lg:h-auto h-14 xs:h-16"
+            className="lg:mr-0 mr-5 lg:w-[100px] w-16 lg:h-auto h-14 sm:h-16"
             size={80}
             strokeWidth={1}
           />
-          <h3 className="text-xl xs:text-2xl text-left w-28 lg:text-center lg:w-auto">
+          <h3 className="text-xl sm:text-2xl text-left w-28 lg:text-center lg:w-auto">
             {locale === 'it' ? 'Curriculum' : 'Resume'}
           </h3>
         </div>

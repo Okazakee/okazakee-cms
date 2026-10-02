@@ -7,8 +7,23 @@ import {
   isValidContactUrl,
   requireAdmin,
 } from '@/app/actions/cms/utils/fileHelpers';
+import {
+  batchFailureSummary,
+  batchHadCommits,
+  batchSucceeded,
+  emptyBatchEvidence,
+  markCreated,
+  markDeleted,
+  markFailed,
+  markReordered,
+  markUpdated,
+  normalizeTempId,
+} from '@/libs/cms/batchEvidence';
+import type {
+  MutationResult,
+  RevalidationStatus,
+} from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import type { MutationResult, RevalidationStatus } from '@/libs/cms/mutationResult';
 import { createClient } from '@/utils/supabase/server';
 
 type ContactOperation =
@@ -19,7 +34,7 @@ type ContactOperation =
   | { type: 'REORDER'; contacts: { id: number; position: number }[] }
   | {
       type: 'BATCH_PUBLISH';
-      creates: CreateContactData[];
+      creates: Array<CreateContactData & { tempId?: string }>;
       updates: Array<{ id: number; data: UpdateContactData }>;
       deletes: number[];
       reorder: { id: number; position: number }[];
@@ -155,33 +170,45 @@ export async function contactsActions(
 async function batchPublishContacts(
   operation: Extract<ContactOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<ContactsResult> {
+  const evidence = emptyBatchEvidence();
   try {
     await getCmsActionContext('admin');
     const admin = getAdminClient();
-    const errors: string[] = [];
-    const changed: unknown[] = [];
 
-    for (const contact of operation.creates) {
+    for (const [index, contact] of operation.creates.entries()) {
+      const tempId = normalizeTempId(contact.tempId, 'contact', index);
       const validation = validateContactData(contact);
       if (!validation.isValid) {
-        errors.push(`"${contact.label}": ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
+      const { tempId: _tempId, ...insertData } = contact;
       const { data, error } = await admin
         .from('contacts')
-        .insert(contact)
+        .insert(insertData)
         .select()
         .single();
 
-      if (error) errors.push(`"${contact.label}": ${error.message}`);
-      else changed.push(data);
+      if (error) {
+        markFailed(evidence, { kind: 'create', tempId, error: error.message });
+      } else {
+        markCreated(evidence, tempId, data.id);
+      }
     }
 
     for (const contact of operation.updates) {
       const validation = validateContactData(contact.data);
       if (!validation.isValid) {
-        errors.push(`Update ${contact.id}: ${validation.error}`);
+        markFailed(evidence, {
+          kind: 'update',
+          id: contact.id,
+          error: validation.error ?? 'Invalid data',
+        });
         continue;
       }
 
@@ -192,33 +219,89 @@ async function batchPublishContacts(
         .select()
         .single();
 
-      if (error) errors.push(`Update ${contact.id}: ${error.message}`);
-      else changed.push(data);
+      if (error) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: contact.id,
+          error: error.message,
+        });
+      } else {
+        markUpdated(evidence, data.id);
+      }
     }
 
     if (operation.deletes.length > 0) {
-      const { error } = await admin
+      const { data: existingRows, error: fetchError } = await admin
         .from('contacts')
-        .delete()
+        .select('id')
         .in('id', operation.deletes);
-      if (error) errors.push(`Delete: ${error.message}`);
+
+      if (fetchError) {
+        markFailed(evidence, { kind: 'delete', error: fetchError.message });
+      } else {
+        // Returned-row evidence: unknown ids keep their drafts.
+        const existingIds = new Set(
+          (existingRows || []).map((row) => row.id as number)
+        );
+        for (const id of operation.deletes) {
+          if (!existingIds.has(id)) {
+            markFailed(evidence, {
+              kind: 'delete',
+              id,
+              error: 'Contact not found',
+            });
+          }
+        }
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
+        if (deletable.length > 0) {
+          const { data: deletedRows, error } = await admin
+            .from('contacts')
+            .delete()
+            .in('id', deletable)
+            .select('id');
+
+          if (error) {
+            markFailed(evidence, { kind: 'delete', error: error.message });
+          } else {
+            const deletedIds = new Set(
+              (deletedRows || []).map((row) => row.id as number)
+            );
+            for (const id of deletable) {
+              if (deletedIds.has(id)) markDeleted(evidence, id);
+              else {
+                markFailed(evidence, {
+                  kind: 'delete',
+                  id,
+                  error: 'Contact was not deleted',
+                });
+              }
+            }
+          }
+        }
+      }
     }
 
     for (const contact of operation.reorder) {
-      const { error } = await admin
+      const { data, error } = await admin
         .from('contacts')
         .update({ position: contact.position })
-        .eq('id', contact.id);
-      if (error) errors.push(`Reorder ${contact.id}: ${error.message}`);
+        .eq('id', contact.id)
+        .select()
+        .single();
+
+      if (error) {
+        markFailed(evidence, {
+          kind: 'reorder',
+          id: contact.id,
+          error: error.message,
+        });
+      } else {
+        markReordered(evidence, data?.id ?? contact.id);
+      }
     }
 
     let revalidation: RevalidationStatus | undefined;
-    if (
-      operation.creates.length > 0 ||
-      operation.updates.length > 0 ||
-      operation.deletes.length > 0 ||
-      operation.reorder.length > 0
-    ) {
+    if (batchHadCommits(evidence)) {
       revalidation = await invalidatePublicContent({
         entity: 'contacts',
         operation: 'publish',
@@ -226,21 +309,30 @@ async function batchPublishContacts(
     }
 
     return {
-      success: errors.length === 0,
-      data: changed,
-      error: errors.length > 0 ? errors.join('\n') : undefined,
+      success: batchSucceeded(evidence),
+      data: evidence,
+      error: batchFailureSummary(evidence),
       revalidation,
     };
   } catch (error) {
     console.error('Error batch publishing contacts:', error);
+    const message =
+      error instanceof Error ? error.message : 'Failed to publish contacts';
+    markFailed(evidence, { kind: 'update', error: message });
+    const revalidation = batchHadCommits(evidence)
+      ? await invalidatePublicContent({
+          entity: 'contacts',
+          operation: 'publish',
+        })
+      : undefined;
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : 'Failed to publish contacts',
+      data: evidence,
+      error: batchFailureSummary(evidence),
+      revalidation,
     };
   }
 }
-
 async function getContactsData(
   supabase: SupabaseClient
 ): Promise<ContactsResult> {

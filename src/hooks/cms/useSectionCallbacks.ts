@@ -3,20 +3,29 @@
 import { useEffect, useRef } from 'react';
 import { useCmsStore } from '@/store/cmsStore';
 
-export function useSectionCallbacks(publish: () => Promise<void>, revert: () => void) {
+/**
+ * Registers a section's publish/revert handlers in the global store keyed by
+ * section. `publishAll` then runs every dirty section sequentially. The
+ * handlers are kept in refs so changing callbacks never re-registers (and
+ * never churns the publish queue).
+ */
+export function useSectionCallbacks(
+  sectionKey: string,
+  publish: () => Promise<void>,
+  revert: () => void
+) {
   const publishRef = useRef(publish);
   const revertRef = useRef(revert);
   publishRef.current = publish;
   revertRef.current = revert;
 
   useEffect(() => {
-    const store = useCmsStore.getState();
-    store.setSectionCallbacks(
-      async () => publishRef.current(),
-      () => revertRef.current()
-    );
+    useCmsStore.getState().registerSectionCallbacks(sectionKey, {
+      publish: () => publishRef.current(),
+      revert: () => revertRef.current(),
+    });
     return () => {
-      useCmsStore.getState().clearSectionCallbacks();
+      useCmsStore.getState().unregisterSectionCallbacks(sectionKey);
     };
-  }, []);
+  }, [sectionKey]);
 }

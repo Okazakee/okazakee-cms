@@ -1,5 +1,5 @@
-import { cmsConfig } from '@/config/cms';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
+import { cmsConfig } from '@/config/cms';
 
 export const CMS_ALLOWED_ROLES = ['admin', 'editor'] as const;
 export type CmsRole = (typeof CMS_ALLOWED_ROLES)[number];

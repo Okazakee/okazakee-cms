@@ -1,11 +1,11 @@
 import { createServerClient } from '@supabase/ssr';
-import { supabasePublishableKey, supabaseUrl } from '@/config/shared';
 import { type NextRequest, NextResponse } from 'next/server';
 import {
   getUserGithubUsername,
   logCmsAuth,
   lookupAllowedCmsUserViaRpc,
 } from '@/app/actions/cms/utils/auth';
+import { supabasePublishableKey, supabaseUrl } from '@/config/shared';
 import { isAuthPagePath, isCmsPublicPath } from '@/utils/cmsRouteMatching';
 
 /* PLEASE REFER TO https://supabase.com/docs/guides/auth/server-side/nextjs?queryGroups=router&router=app */

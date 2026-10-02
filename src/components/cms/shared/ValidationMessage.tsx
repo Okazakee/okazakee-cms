@@ -5,7 +5,10 @@ interface ValidationMessageProps {
   show?: boolean;
 }
 
-export function ValidationMessage({ message, show = true }: ValidationMessageProps) {
+export function ValidationMessage({
+  message,
+  show = true,
+}: ValidationMessageProps) {
   if (!message || !show) return null;
 
   return (

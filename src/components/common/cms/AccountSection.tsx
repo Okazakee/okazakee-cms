@@ -255,7 +255,7 @@ export default function AccountSection() {
   if (!user) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-main" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
       </div>
     );
   }
@@ -263,12 +263,10 @@ export default function AccountSection() {
   return (
     <div className="space-y-8 mb-8 md:mb-0 lg:mt-0">
       <div className="text-center mb-8">
-        <h1 className="hidden lg:block text-4xl font-bold text-main mb-4">
+        <h1 className="hidden lg:block text-4xl font-bold text-accent-violet mb-4">
           {t('account.title')}
         </h1>
-        <p className="text-gray-500 dark:text-lighttext2 text-lg">
-          {t('account.subtitle')}
-        </p>
+        <p className="text-text-muted text-lg">{t('account.subtitle')}</p>
       </div>
 
       {/* Error display */}
@@ -279,8 +277,8 @@ export default function AccountSection() {
       )}
 
       {/* Profile Card */}
-      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-6">
-        <h2 className="text-xl font-bold text-main mb-6 flex items-center gap-2">
+      <div className="bg-surface-card rounded-xl p-6">
+        <h2 className="text-xl font-bold text-accent-violet mb-6 flex items-center gap-2">
           <User className="w-5 h-5" />
           {t('account.profileInfoTitle')}
         </h2>
@@ -293,7 +291,7 @@ export default function AccountSection() {
                 type="button"
                 onClick={handleAvatarClick}
                 disabled={isUploadingAvatar}
-                className="relative w-24 h-24 rounded-full overflow-hidden bg-gray-200 dark:bg-darkgray flex-shrink-0 group cursor-pointer"
+                className="relative w-24 h-24 rounded-full overflow-hidden bg-surface-raised flex-shrink-0 group cursor-pointer"
               >
                 {user.avatarUrl ? (
                   <Image
@@ -304,7 +302,7 @@ export default function AccountSection() {
                     className="object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-main text-white text-2xl font-bold">
+                  <div className="w-full h-full flex items-center justify-center bg-accent-violet text-white text-2xl font-bold">
                     {(user.displayName || 'U').charAt(0).toUpperCase()}
                   </div>
                 )}
@@ -334,10 +332,10 @@ export default function AccountSection() {
               />
             </div>
             <div>
-              <p className="text-sm text-gray-500 dark:text-lighttext2 mb-1">
+              <p className="text-sm text-text-muted mb-1">
                 {t('account.profilePictureLabel')}
               </p>
-              <p className="text-xs text-gray-500 dark:text-lighttext2">
+              <p className="text-xs text-text-muted ">
                 {t('account.clickToUpload')}
               </p>
             </div>
@@ -347,7 +345,7 @@ export default function AccountSection() {
           <div>
             <label
               htmlFor="display-name-input"
-              className="block text-sm font-medium text-darktext dark:text-lighttext mb-2"
+              className="block text-sm font-medium text-text-main mb-2"
             >
               {t('account.displayNameLabel')}
             </label>
@@ -358,7 +356,7 @@ export default function AccountSection() {
                   type="text"
                   value={editedName}
                   onChange={(e) => setEditedName(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-white dark:bg-darkestgray border border-main rounded-lg text-darktext dark:text-lighttext focus:outline-none"
+                  className="flex-1 px-3 py-2 bg-surface-base border border-accent-violet rounded-lg text-text-main focus:outline-none"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleSaveName();
                     if (e.key === 'Escape') handleCancelEditName();
@@ -382,13 +380,13 @@ export default function AccountSection() {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="px-3 py-2 bg-white dark:bg-darkestgray rounded-lg text-darktext dark:text-lighttext flex-1">
+                <span className="px-3 py-2 bg-surface-base rounded-lg text-text-main flex-1">
                   {user.displayName}
                 </span>
                 <button
                   type="button"
                   onClick={handleEditNameClick}
-                  className="p-2 text-gray-500 dark:text-lighttext2 hover:text-main hover:bg-gray-200 dark:hover:bg-darkgray rounded transition-colors"
+                  className="p-2 text-text-muted hover:text-accent-violet hover:bg-surface-raised rounded transition-colors"
                 >
                   <Pencil className="w-4 h-4" />
                 </button>
@@ -399,14 +397,14 @@ export default function AccountSection() {
           {/* Email Section (Read-only) */}
           {user.email && (
             <div>
-              <div className="block text-sm font-medium text-darktext dark:text-lighttext mb-2">
+              <div className="block text-sm font-medium text-text-main mb-2">
                 {t('account.emailLabel')}
               </div>
-              <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-darkestgray rounded-lg text-gray-500 dark:text-lighttext2">
+              <div className="flex items-center gap-2 px-3 py-2 bg-surface-base rounded-lg text-text-muted ">
                 <Mail className="w-4 h-4" />
                 <span>{user.email}</span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-lighttext2 mt-1">
+              <p className="text-xs text-text-muted mt-1">
                 {t('account.emailReadOnly')}
               </p>
             </div>
@@ -415,14 +413,14 @@ export default function AccountSection() {
           {/* GitHub Username Section (Read-only) */}
           {user.githubUsername && (
             <div>
-              <div className="block text-sm font-medium text-darktext dark:text-lighttext mb-2">
+              <div className="block text-sm font-medium text-text-main mb-2">
                 {t('account.githubUsernameLabel')}
               </div>
-              <div className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-darkestgray rounded-lg text-gray-500 dark:text-lighttext2">
+              <div className="flex items-center gap-2 px-3 py-2 bg-surface-base rounded-lg text-text-muted ">
                 <GithubIcon className="w-4 h-4" />
                 <span>@{user.githubUsername}</span>
               </div>
-              <p className="text-xs text-gray-500 dark:text-lighttext2 mt-1">
+              <p className="text-xs text-text-muted mt-1">
                 {t('account.githubReadOnly')}
               </p>
             </div>
@@ -430,10 +428,10 @@ export default function AccountSection() {
 
           {/* Role Section (Read-only) */}
           <div>
-            <div className="block text-sm font-medium text-darktext dark:text-lighttext mb-2">
+            <div className="block text-sm font-medium text-text-main mb-2">
               {t('account.roleLabel')}
             </div>
-            <div className="px-3 py-2 bg-white dark:bg-darkestgray rounded-lg">
+            <div className="px-3 py-2 bg-surface-base rounded-lg">
               <span
                 className={`px-2 py-1 rounded text-xs ${
                   user.role === 'admin'
@@ -444,7 +442,7 @@ export default function AccountSection() {
                 {user.role || 'user'}
               </span>
             </div>
-            <p className="text-xs text-gray-500 dark:text-lighttext2 mt-1">
+            <p className="text-xs text-text-muted mt-1">
               {t('account.roleReadOnly')}
             </p>
           </div>
@@ -452,14 +450,12 @@ export default function AccountSection() {
       </div>
 
       {/* Passkeys */}
-      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-6">
-        <h2 className="text-xl font-bold text-darktext dark:text-lighttext mb-4 flex items-center gap-2">
+      <div className="bg-surface-card rounded-xl p-6">
+        <h2 className="text-xl font-bold text-text-main mb-4 flex items-center gap-2">
           <Fingerprint className="w-5 h-5" />
           {t('account.passkeysTitle')}
         </h2>
-        <p className="text-gray-500 dark:text-lighttext2 mb-4">
-          {t('account.passkeysDesc')}
-        </p>
+        <p className="text-text-muted mb-4">{t('account.passkeysDesc')}</p>
 
         {passkeysError && (
           <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 mb-4">
@@ -469,10 +465,10 @@ export default function AccountSection() {
 
         {passkeysLoading ? (
           <div className="flex justify-center py-4">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-main" />
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
           </div>
         ) : passkeys.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-lighttext2 mb-4">
+          <p className="text-sm text-text-muted mb-4">
             {t('account.passkeysEmpty')}
           </p>
         ) : (
@@ -480,13 +476,13 @@ export default function AccountSection() {
             {passkeys.map((passkey) => (
               <li
                 key={passkey.id}
-                className="flex items-center justify-between gap-3 px-3 py-2 bg-white dark:bg-darkestgray rounded-lg"
+                className="flex items-center justify-between gap-3 px-3 py-2 bg-surface-base rounded-lg"
               >
                 <div className="min-w-0">
-                  <p className="text-sm text-darktext dark:text-lighttext truncate">
+                  <p className="text-sm text-text-main truncate">
                     {passkey.friendly_name || t('account.passkeyUnnamed')}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-lighttext2">
+                  <p className="text-xs text-text-muted ">
                     {passkey.last_used_at
                       ? t('account.passkeyLastUsed', {
                           lastUsed: new Date(
@@ -523,7 +519,7 @@ export default function AccountSection() {
                 type="button"
                 onClick={() => setPasskeyToDelete(null)}
                 disabled={isDeletingPasskey}
-                className="px-3 py-1.5 text-sm rounded-lg text-gray-500 dark:text-lighttext2 hover:bg-gray-200 dark:hover:bg-darkgray"
+                className="px-3 py-1.5 text-sm rounded-lg text-text-muted hover:bg-surface-raised "
               >
                 {t('common.cancel')}
               </button>
@@ -545,7 +541,7 @@ export default function AccountSection() {
             type="button"
             onClick={handleRegisterPasskey}
             disabled={isRegisteringPasskey}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-main text-white hover:opacity-90 disabled:opacity-50 text-sm"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-violet text-white hover:opacity-90 disabled:opacity-50 text-sm"
           >
             {isRegisteringPasskey ? (
               <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -565,17 +561,15 @@ export default function AccountSection() {
           <Trash2 className="w-5 h-5" />
           {t('account.dangerZoneTitle')}
         </h2>
-        <p className="text-gray-500 dark:text-lighttext2 mb-4">
-          {t('account.dangerZoneDesc')}
-        </p>
+        <p className="text-text-muted mb-4">{t('account.dangerZoneDesc')}</p>
 
         {showDeleteConfirm ? (
           <div className="space-y-4">
-            <div className="bg-gray-100 dark:bg-darkestgray rounded-lg p-4 border border-red-500/50">
+            <div className="bg-surface-card rounded-lg p-4 border border-red-500/50">
               <p className="text-red-400 font-semibold mb-2">
                 {t('account.confirmDeleteTitle')}
               </p>
-              <p className="text-gray-500 dark:text-lighttext2 text-sm">
+              <p className="text-text-muted text-sm">
                 {t('account.confirmDeleteDesc')}
               </p>
             </div>
@@ -605,7 +599,7 @@ export default function AccountSection() {
                   setError(null);
                 }}
                 disabled={isDeleting}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-darkgray dark:hover:bg-darkergray text-darktext dark:text-lighttext font-medium rounded-lg transition-colors disabled:opacity-50"
+                className="px-4 py-2 bg-surface-raised hover:bg-surface-raised text-text-main font-medium rounded-lg transition-colors disabled:opacity-50"
               >
                 {t('common.cancel')}
               </button>

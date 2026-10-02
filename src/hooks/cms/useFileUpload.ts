@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
 import { encode as encodeBlurhash } from 'blurkit/browser';
+import { useCallback, useRef, useState } from 'react';
 import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
 import { isAnimatedWebpFile } from '@/utils/cms/webpAnimation';
 import { processImageToWebP } from '@/utils/imageProcessor';
@@ -77,9 +77,7 @@ export function useFileUpload({
         return;
       }
 
-      const acceptedTypes = accept
-        .split(',')
-        .map((t) => t.trim());
+      const acceptedTypes = accept.split(',').map((t) => t.trim());
       const matchesType = acceptedTypes.some((t) => {
         const normalizedType = t.toLowerCase();
         const fileName = f.name.toLowerCase();
@@ -149,7 +147,13 @@ export function useFileUpload({
         setBlurhash(bh);
       }
     },
-    [accept, maxSizeMB, imageProcessing, generateBlurhash, generateBlurhashFromFile]
+    [
+      accept,
+      maxSizeMB,
+      imageProcessing,
+      generateBlurhash,
+      generateBlurhashFromFile,
+    ]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -157,15 +161,12 @@ export function useFileUpload({
     e.stopPropagation();
   }, []);
 
-  const handleDragEnter = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dragCounter.current += 1;
-      setIsDragging(true);
-    },
-    []
-  );
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    setIsDragging(true);
+  }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();

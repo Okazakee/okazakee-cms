@@ -1,6 +1,12 @@
 'use client';
 
-import { Download, FileText, Image as ImageIcon, Upload, X } from 'lucide-react';
+import {
+  Download,
+  FileText,
+  Image as ImageIcon,
+  Upload,
+  X,
+} from 'lucide-react';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import type React from 'react';
@@ -64,23 +70,23 @@ export function FileDropzone({
   return (
     <div>
       {label && (
-        <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-2">
+        <label className="block text-sm font-medium text-text-main mb-2">
           {label}
         </label>
       )}
       <div
         className={`relative border-2 border-dashed rounded-lg text-center transition-colors ${
           isDragging
-            ? 'border-main bg-main/10 dark:bg-main/20'
-            : 'border-gray-300 dark:border-lighttext2/30 hover:border-main'
+            ? 'border-accent-violet bg-accent-violet/10 '
+            : 'border-border-subtle hover:border-accent-violet'
         } ${compact ? 'p-4' : 'p-6 md:p-8'}`}
         {...dropzoneProps}
       >
         {isProcessing && (
-          <div className="absolute inset-0 bg-bglight/80 dark:bg-darkergray/80 flex items-center justify-center rounded-lg z-10">
+          <div className="absolute inset-0 bg-surface-base/80 flex items-center justify-center rounded-lg z-10">
             <div className="text-center">
-              <div className="w-8 h-8 border-2 border-main border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-              <p className="text-sm text-darktext dark:text-lighttext">
+              <div className="w-8 h-8 border-2 border-accent-violet border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-sm text-text-main ">
                 {t('common.processing')}
               </p>
             </div>
@@ -88,7 +94,7 @@ export function FileDropzone({
         )}
 
         {isDragging && (
-          <div className="absolute inset-0 bg-main/80 flex items-center justify-center rounded-lg z-10">
+          <div className="absolute inset-0 bg-accent-violet/80 flex items-center justify-center rounded-lg z-10">
             <div className="text-center text-white">
               <Upload className="w-10 h-10 mx-auto mb-2" />
               <p className="font-medium">{t('common.dropFilesHere')}</p>
@@ -113,21 +119,21 @@ export function FileDropzone({
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="relative overflow-hidden rounded-lg border border-gray-200 dark:border-lighttext2/20 bg-white dark:bg-darkestgray">
+                <div className="relative overflow-hidden rounded-lg border border-border-subtle bg-surface-base ">
                   <iframe
                     src={displayUrl}
                     title="PDF preview"
                     className={`w-full ${compact ? 'h-56' : 'h-80 md:h-96'}`}
                   />
                 </div>
-                <div className="flex items-center justify-center text-sm text-gray-500 dark:text-lighttext2">
+                <div className="flex items-center justify-center text-sm text-text-muted ">
                   <FileText className="w-4 h-4 mr-2" />
                   <span>PDF Document</span>
                 </div>
               </div>
             )}
             {showUrl && (
-              <p className="text-xs text-gray-500 dark:text-lighttext2 truncate max-w-full">
+              <p className="text-xs text-text-muted truncate max-w-full">
                 {showUrl}
               </p>
             )}
@@ -138,7 +144,7 @@ export function FileDropzone({
                   e.stopPropagation();
                   onBrowse();
                 }}
-                className="px-3 py-1.5 text-sm bg-secondary hover:bg-tertiary text-white rounded-lg transition-colors"
+                className="px-3 py-1.5 text-sm bg-accent-violet-deep hover:bg-accent-violet-deep text-white rounded-lg transition-colors"
               >
                 {t('common.changeFile')}
               </button>
@@ -149,7 +155,7 @@ export function FileDropzone({
                     e.stopPropagation();
                     onCopyUrl();
                   }}
-                  className="px-3 py-1.5 text-sm bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                  className="px-3 py-1.5 text-sm bg-surface-raised hover:bg-surface-raised text-white rounded-lg transition-colors"
                 >
                   {t('common.copyUrl')}
                 </button>
@@ -186,23 +192,17 @@ export function FileDropzone({
             className="space-y-2 cursor-pointer w-full"
             onClick={onBrowse}
           >
-            <ImageIcon className="h-8 w-8 mx-auto text-gray-400" />
-            <p className="text-sm text-darktext dark:text-lighttext2">
+            <ImageIcon className="h-8 w-8 mx-auto text-text-dim" />
+            <p className="text-sm text-text-main ">
               {t('common.dropFilesHere')}
             </p>
           </button>
         )}
 
-        <input
-          ref={fileInputRef}
-          {...fileInputProps}
-          className="hidden"
-        />
+        <input ref={fileInputRef} {...fileInputProps} className="hidden" />
       </div>
 
-      {error && (
-        <p className="mt-2 text-xs text-red-500">{error}</p>
-      )}
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   );
 }

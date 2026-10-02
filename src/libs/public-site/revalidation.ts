@@ -14,8 +14,8 @@
  */
 import { createHmac } from 'node:crypto';
 import {
-  getContentInvalidation,
   type ContentInvalidationArgs,
+  getContentInvalidation,
 } from '@/libs/cms/invalidation';
 import type { RevalidationStatus } from '@/libs/cms/mutationResult';
 

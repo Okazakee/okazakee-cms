@@ -1,102 +1,46 @@
 'use client';
 import Markdown from 'markdown-to-jsx';
+import { Children, isValidElement, type ReactNode } from 'react';
 import NextImage from '@/components/layout/NextImage';
-import PreCustom, { type PreChild } from './PreCustom';
+import { type PreChild, PreCustom } from './PreCustom';
 
-// TODO: Consolidate image parsing and `****highlight****` parsing into a unified
-// custom formatter shared with CMS previews and formatLabels.ts.
-// Markdown images: `![alt-blurhash](url)` where the first "-" splits alt from blurhash.
-const MarkdownRenderer = ({ markdown }: { markdown: string }) => {
-  /*
-    Alt prop in img is taken from markdown, an example image is like this:
-    "![alt-data:image/png;base64,BLURHASHVALUE](imageurl)"
+function MarkdownImage({ src, alt = '' }: { src?: string; alt?: string }) {
+  // Public content uses ![alt-blurDataURL](url) for inline image metadata.
+  const split = alt.indexOf('-');
+  const label = split < 0 ? alt : alt.slice(0, split);
+  const blurhash = split < 0 ? undefined : alt.slice(split + 1);
+  return <NextImage src={src || ''} alt={label} blurhash={blurhash} />;
+}
 
-    usually the [x] represents the alt prop, for efficiency porpuses it now will be handled as [alt-blurhashdataurl]
-  */
-
+export function MarkdownRenderer({ markdown }: { markdown: string }) {
   return (
     <Markdown
       options={{
         forceBlock: true,
         overrides: {
-          h1: {
-            component: ({ children }) => (
-              <h1 className="text-main font-bold">{children}</h1>
-            ),
-          },
-          h2: {
-            component: ({ children }) => (
-              <h2 className="text-main font-bold">{children}</h2>
-            ),
-          },
-          h3: {
-            component: ({ children }) => (
-              <h3 className="text-main font-bold">{children}</h3>
-            ),
-          },
-          h4: {
-            component: ({ children }) => (
-              <h4 className="text-main font-semibold">{children}</h4>
-            ),
-          },
-          h5: {
-            component: ({ children }) => (
-              <h5 className="text-main font-semibold">{children}</h5>
-            ),
-          },
-          h6: {
-            component: ({ children }) => (
-              <h6 className="text-main font-semibold">{children}</h6>
-            ),
-          },
           p: {
-            component: ({ children }) => {
-              // For markdown-to-jsx, we need to check if children contain only images differently
-              const childrenArray = Array.isArray(children)
-                ? children
-                : [children];
-              const isOnlyImages = childrenArray.every(
-                (child) =>
-                  typeof child === 'object' &&
-                  child !== null &&
-                  'type' in child &&
-                  child.type === 'img'
-              );
-
-              if (isOnlyImages) {
-                return <>{children}</>;
-              }
-
-              return <p>{children}</p>;
+            component: ({ children }: { children: ReactNode }) => {
+              const nodes = Children.toArray(children);
+              const onlyImages =
+                nodes.length > 0 &&
+                nodes.every(
+                  (child) =>
+                    isValidElement(child) &&
+                    (child.type === 'img' || child.type === MarkdownImage)
+                );
+              return onlyImages ? children : <p>{children}</p>;
             },
           },
           pre: {
-            component: ({ children }) => {
-              return <PreCustom>{children as PreChild}</PreCustom>;
-            },
+            component: ({ children }: { children: PreChild }) => (
+              <PreCustom>{children}</PreCustom>
+            ),
           },
-          img: {
-            component: ({ src, alt }) => {
-              if (!alt) throw new Error('alt should never be undefined');
-
-              const data = alt.split('-');
-              const altText = data[0];
-              const blurhash = data[1];
-
-              // Ensure src is a string before passing to NextImage
-              const imageSrc = typeof src === 'string' ? src : '';
-
-              return (
-                <NextImage src={imageSrc} alt={altText} blurhash={blurhash} />
-              );
-            },
-          },
+          img: { component: MarkdownImage },
         },
       }}
     >
       {markdown}
     </Markdown>
   );
-};
-
-export default MarkdownRenderer;
+}

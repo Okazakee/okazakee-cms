@@ -101,7 +101,7 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
   return (
     <>
       {lastUser?.avatarUrl ? (
-        <div className="relative w-28 h-28 mx-auto mb-6 rounded-full overflow-hidden ring-2 ring-main/40">
+        <div className="relative w-28 h-28 mx-auto mb-6 rounded-full overflow-hidden ring-2 ring-accent-violet/40">
           <Image
             src={lastUser.avatarUrl}
             alt={lastUser.displayName || 'User'}
@@ -111,14 +111,19 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
           />
         </div>
       ) : (
-        <CircleUserRound size={104} className="mx-auto mb-6 text-main" />
+        <CircleUserRound
+          size={104}
+          className="mx-auto mb-6 text-accent-violet"
+        />
       )}
 
-      <h1 className="text-3xl font-bold text-center mb-8 text-darktext dark:text-lighttext">
+      <h1 className="text-3xl font-bold text-center mb-8 text-text-main ">
         {lastUser?.displayName ? (
           <>
             Welcome back
-            <span className="block text-main">{lastUser.displayName}</span>
+            <span className="block text-accent-violet">
+              {lastUser.displayName}
+            </span>
           </>
         ) : (
           'CMS Login'
@@ -150,7 +155,7 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
           type="button"
           onClick={handlePasskeyLogin}
           disabled={isGitHubLoading || isPasskeyLoading}
-          className="w-full flex items-center justify-center gap-3 text-lg text-main border border-main/60 transition-all py-3 rounded-lg hover:bg-main/10 focus:outline-hidden disabled:opacity-50 mt-3"
+          className="w-full flex items-center justify-center gap-3 text-lg text-accent-violet border border-accent-violet/60 transition-all py-3 rounded-lg hover:bg-accent-violet/10 focus:outline-hidden disabled:opacity-50 mt-3"
         >
           {isPasskeyLoading ? (
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -169,12 +174,12 @@ function LoginFormContent({ initialError }: { initialError?: string | null }) {
 export default function LoginPage() {
   return (
     <section className="min-h-svh flex items-center justify-center px-4">
-      <div className="w-full max-w-lg p-10 rounded-2xl bg-darkgray/40 dark:bg-darkergray/60">
+      <div className="w-full max-w-lg p-10 rounded-2xl bg-surface-raised/40 ">
         <Suspense
           fallback={
             <div className="flex flex-col items-center justify-center py-32">
-              <Loader2 className="w-8 h-8 animate-spin text-main mb-4" />
-              <p className="text-lighttext2">Loading...</p>
+              <Loader2 className="w-8 h-8 animate-spin text-accent-violet mb-4" />
+              <p className="text-text-muted">Loading...</p>
             </div>
           }
         >

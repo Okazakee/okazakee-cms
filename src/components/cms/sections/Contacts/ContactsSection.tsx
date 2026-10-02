@@ -3,25 +3,32 @@
 import { ExternalLink, Plus, Trash2, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { heroActions } from '@/app/actions/cms/sections/heroActions';
 import { contactsActions } from '@/app/actions/cms/sections/contactsActions';
+import { heroActions } from '@/app/actions/cms/sections/heroActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
+import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { EmptyState } from '@/components/cms/shared/EmptyState';
+import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
+import { FileDropzone } from '@/components/cms/shared/FileDropzone';
+import { IconPicker } from '@/components/cms/shared/IconPicker';
+import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
-import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
-import { IconPicker } from '@/components/cms/shared/IconPicker';
-import { CardToolbar } from '@/components/cms/shared/CardToolbar';
-import { EmptyState } from '@/components/cms/shared/EmptyState';
-import { FileDropzone } from '@/components/cms/shared/FileDropzone';
-import { useFileUpload } from '@/hooks/cms/useFileUpload';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
-import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
-import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { useCmsStore } from '@/store/cmsStore';
 import { PreviewModal } from '@/components/common/cms/PreviewModal';
 import { ContactsPreview } from '@/components/common/cms/previews/ContactsPreview';
+import {
+  mergeServerWithDrafts,
+  readBatchEvidence,
+  reconcileDrafts,
+} from '@/hooks/cms/batchDrafts';
+import { useFileUpload } from '@/hooks/cms/useFileUpload';
+import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
+import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
+import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
+import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
+import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
 
 export default function ContactsSection() {
@@ -31,7 +38,7 @@ export default function ContactsSection() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [_isUpdating, setIsUpdating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
 
@@ -41,7 +48,12 @@ export default function ContactsSection() {
   const [orderChanged, setOrderChanged] = useState(false);
 
   const [isAdding, setIsAdding] = useState(false);
-  const [newForm, setNewForm] = useState({ label: '', icon: 'Link', link: '', bg_color: '#000000' });
+  const [newForm, setNewForm] = useState({
+    label: '',
+    icon: 'Link',
+    link: '',
+    bg_color: '#000000',
+  });
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
   const resumeEnUpload = useFileUpload({ accept: '.pdf', maxSizeMB: 10 });
@@ -49,51 +61,104 @@ export default function ContactsSection() {
   const resumeInitRef = useRef(false);
 
   const {
-    isDirty: transDirty, isLoading: transLoading,
-    getField, setField, saveTranslations, revertTranslations,
+    translations,
+    isDirty: transDirty,
+    isLoading: transLoading,
+    error: transError,
+    getField,
+    setField,
+    saveTranslations,
+    revertTranslations,
   } = useSectionTranslations('contacts-section');
 
-  const isDirty = modifiedIds.size > 0 || newContacts.length > 0 || deletedIds.size > 0 || orderChanged || transDirty || resumeEnUpload.file !== null || resumeItUpload.file !== null;
+  const isDirty =
+    modifiedIds.size > 0 ||
+    newContacts.length > 0 ||
+    deletedIds.size > 0 ||
+    orderChanged ||
+    transDirty ||
+    resumeEnUpload.file !== null ||
+    resumeItUpload.file !== null;
   useSectionDirty('contacts', isDirty);
 
-  const fetchData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const r = await contactsActions({ type: 'GET' });
-      if (!r.success) throw new Error(r.error || 'Failed');
-      setContacts(r.data as Contact[]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch');
-    } finally { setIsLoading(false); }
-  }, []);
+  const beginLoad = useLatestRequest();
+  const fetchData = useCallback(
+    async (drafts?: {
+      creates: Contact[];
+      modified: ReadonlyMap<number, Contact>;
+      deletedIds: ReadonlySet<number>;
+    }) => {
+      const current = beginLoad();
+      setIsLoading(true);
+      try {
+        const r = await contactsActions({ type: 'GET' });
+        if (!current()) return;
+        if (!r.success) throw new Error(r.error || 'Failed');
+        const server = r.data as Contact[];
+        setContacts(drafts ? mergeServerWithDrafts(server, drafts) : server);
+      } catch (err) {
+        if (current())
+          setError(err instanceof Error ? err.message : 'Failed to fetch');
+      } finally {
+        if (current()) setIsLoading(false);
+      }
+    },
+    [beginLoad]
+  );
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     if (!heroSection || resumeInitRef.current) return;
     resumeInitRef.current = true;
-    if (heroSection.resume_en) resumeEnUpload.setFileFromUrl(heroSection.resume_en);
-    if (heroSection.resume_it) resumeItUpload.setFileFromUrl(heroSection.resume_it);
+    if (heroSection.resume_en)
+      resumeEnUpload.setFileFromUrl(heroSection.resume_en);
+    if (heroSection.resume_it)
+      resumeItUpload.setFileFromUrl(heroSection.resume_it);
   }, [heroSection, resumeEnUpload, resumeItUpload]);
 
   const handleAdd = () => {
-    if (!newForm.label || !newForm.icon || !newForm.link) { setError('Label, icon, and link are required'); return; }
-    const temp: Contact = { id: -Date.now(), position: contacts.length, ...newForm };
+    if (!newForm.label || !newForm.icon || !newForm.link) {
+      setError('Label, icon, and link are required');
+      return;
+    }
+    const temp: Contact = {
+      id: -Date.now(),
+      position: contacts.length,
+      ...newForm,
+    };
     setContacts((prev) => [...prev, temp]);
     setNewContacts((prev) => [...prev, temp]);
     setNewForm({ label: '', icon: 'Link', link: '', bg_color: '#000000' });
     setIsAdding(false);
   };
 
-  const handleChange = (id: number, field: keyof Contact, value: string | number) => {
-    setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
+  const handleChange = (
+    id: number,
+    field: keyof Contact,
+    value: string | number
+  ) => {
+    setContacts((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, [field]: value } : c))
+    );
     setModifiedIds((prev) => new Set(prev).add(id));
   };
 
   const handleDelete = (id: number) => {
     const isNew = newContacts.some((n) => n.id === id);
-    if (isNew) setNewContacts((prev) => prev.filter((n) => n.id !== id));
-    else setDeletedIds((prev) => new Set(prev).add(id));
+    if (isNew) {
+      setNewContacts((prev) => prev.filter((n) => n.id !== id));
+    } else {
+      setDeletedIds((prev) => new Set(prev).add(id));
+    }
+    // A deleted row must not survive as a pending modification.
+    setModifiedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     setContacts((prev) => prev.filter((c) => c.id !== id));
   };
 
@@ -110,75 +175,193 @@ export default function ContactsSection() {
 
   const handlePublish = useCallback(async () => {
     const errors: string[] = [];
-    setIsUpdating(true); setError(null);
+    setIsUpdating(true);
+    setError(null);
 
-    // Resume uploads via hero actions
-    if (resumeEnUpload.file || resumeItUpload.file) {
-      const result = await heroActions({
-        type: 'UPDATE_WITH_FILES',
-        files: {
-          ...(resumeEnUpload.file ? { resume_en: resumeEnUpload.file } : {}),
-          ...(resumeItUpload.file ? { resume_it: resumeItUpload.file } : {}),
-        },
-        currentData: {
-          mainImage: heroSection?.mainImage || '',
-          resume_en: heroSection?.resume_en || '',
-          resume_it: heroSection?.resume_it || '',
-        },
-      });
-      if (!result.success) {
-        errors.push(result.error || t('hero.errorUpdateHero'));
-      } else {
-        const data = result.data as { resume_en?: string; resume_it?: string };
-        setHeroSection({
-          mainImage: heroSection?.mainImage || null,
-          blurhashURL: heroSection?.blurhashURL || null,
-          resume_en: data.resume_en || heroSection?.resume_en || null,
-          resume_it: data.resume_it || heroSection?.resume_it || null,
+    // Absolute positions from the current full-list order, so newly added
+    // contacts interleave correctly instead of being re-indexed from zero.
+    const positions = new Map(contacts.map((c, i) => [c.id, i]));
+
+    try {
+      // Resume uploads via hero actions
+      if (resumeEnUpload.file || resumeItUpload.file) {
+        const result = await heroActions({
+          type: 'UPDATE_WITH_FILES',
+          files: {
+            ...(resumeEnUpload.file ? { resume_en: resumeEnUpload.file } : {}),
+            ...(resumeItUpload.file ? { resume_it: resumeItUpload.file } : {}),
+          },
+          currentData: {
+            mainImage: heroSection?.mainImage || '',
+            resume_en: heroSection?.resume_en || '',
+            resume_it: heroSection?.resume_it || '',
+          },
         });
-        const heroWarning = revalidationWarning(result);
-        if (heroWarning) errors.push(heroWarning);
-        resumeEnUpload.clearFile();
-        resumeItUpload.clearFile();
+        if (!result.success) {
+          errors.push(result.error || t('hero.errorUpdateHero'));
+        } else {
+          const data = result.data as {
+            resume_en?: string;
+            resume_it?: string;
+          };
+          setHeroSection({
+            mainImage: heroSection?.mainImage || null,
+            blurhashURL: heroSection?.blurhashURL || null,
+            resume_en: data.resume_en || heroSection?.resume_en || null,
+            resume_it: data.resume_it || heroSection?.resume_it || null,
+          });
+          const heroWarning = revalidationWarning(result);
+          if (heroWarning) useCmsStore.getState().setWarning(heroWarning);
+          resumeEnUpload.clearFile();
+          resumeItUpload.clearFile();
+        }
       }
-    }
 
-    const batch = await contactsActions({
-      type: 'BATCH_PUBLISH',
-      creates: newContacts.map((c, i) => ({
-        label: c.label,
-        icon: c.icon,
-        link: c.link,
-        bg_color: c.bg_color,
-        position: c.position ?? i,
-      })),
-      updates: Array.from(modifiedIds).flatMap((id) => {
-        const c = contacts.find((cc) => cc.id === id);
-        if (!c || id < 0) return [];
-        return [{
-          id,
-          data: {
+      // Pending creates always use the latest edited contact, never the stale
+      // newContacts snapshot.
+      const createTempIds = newContacts.map((c) => String(c.id));
+      const creates = newContacts.flatMap((item) => {
+        const c = contacts.find((entry) => entry.id === item.id) ?? item;
+        return [
+          {
+            tempId: String(item.id),
             label: c.label,
             icon: c.icon,
             link: c.link,
             bg_color: c.bg_color,
-            position: c.position,
+            position: positions.get(item.id) ?? c.position ?? 0,
           },
-        }];
-      }),
-      deletes: Array.from(deletedIds),
-      reorder: orderChanged
-        ? contacts.filter((c) => c.id > 0).map((c, i) => ({ id: c.id, position: i }))
-        : [],
-    });
-    if (!batch.success && batch.error) errors.push(batch.error);
-    const batchWarning = revalidationWarning(batch);
-    if (batchWarning) errors.push(batchWarning);
-    if (transDirty) { const tErrs = await saveTranslations(); errors.push(...tErrs); }
-    await fetchData();
-    setModifiedIds(new Set()); setNewContacts([]); setDeletedIds(new Set()); setOrderChanged(false); setIsUpdating(false);
-    if (errors.length > 0) setError(errors.join('\n'));
-  }, [contacts, newContacts, deletedIds, modifiedIds, orderChanged, transDirty, saveTranslations, fetchData, resumeEnUpload, resumeItUpload, heroSection, setHeroSection, t]);
+        ];
+      });
+      const updateIds = Array.from(modifiedIds).filter((id) => id > 0);
+      const updates = updateIds.flatMap((id) => {
+        const c = contacts.find((entry) => entry.id === id);
+        if (!c) return [];
+        return [
+          {
+            id,
+            data: {
+              label: c.label,
+              icon: c.icon,
+              link: c.link,
+              bg_color: c.bg_color,
+              position: positions.get(id) ?? c.position,
+            },
+          },
+        ];
+      });
+      const deleteIds = Array.from(deletedIds);
+      const reorderIds = orderChanged
+        ? contacts
+            .filter((c) => c.id > 0)
+            .map((c) => ({ id: c.id, position: positions.get(c.id) ?? 0 }))
+        : [];
+
+      let retainedCreates = createTempIds;
+      let retainedUpdates = updateIds;
+      let retainedDeletes = deleteIds;
+      let retainedOrder = orderChanged;
+
+      const batch = await contactsActions({
+        type: 'BATCH_PUBLISH',
+        creates,
+        updates,
+        deletes: deleteIds,
+        reorder: reorderIds,
+      });
+
+      const evidence = readBatchEvidence(batch.data);
+      if (!batch.success) {
+        errors.push(batch.error || 'Failed to publish');
+      }
+      if (!evidence) {
+        errors.push('Publish response was incomplete; drafts were kept');
+      } else {
+        const reconcile = reconcileDrafts({
+          evidence,
+          createTempIds,
+          updateIds,
+          deleteIds,
+        });
+        retainedCreates = reconcile.retainedCreates;
+        retainedUpdates = reconcile.retainedUpdates as number[];
+        retainedDeletes = reconcile.retainedDeletes as number[];
+        errors.push(...reconcile.failureMessages);
+
+        // Keep the reorder flag until every sent position committed.
+        if (orderChanged) {
+          const reordered = new Set(evidence.reordered.map(String));
+          retainedOrder = reorderIds.some(
+            (item) => !reordered.has(String(item.id))
+          );
+        }
+
+        const retainedCreateSet = new Set(retainedCreates);
+        const retainedModifiedSet = new Set(retainedUpdates.map(String));
+        const draftCreates = contacts.filter((c) =>
+          retainedCreateSet.has(String(c.id))
+        );
+        const draftModified = new Map(
+          contacts
+            .filter((c) => retainedModifiedSet.has(String(c.id)))
+            .map((c) => [c.id, c])
+        );
+        await fetchData({
+          creates: draftCreates,
+          modified: draftModified,
+          deletedIds: new Set(retainedDeletes),
+        });
+
+        setNewContacts((prev) =>
+          prev.filter((c) => retainedCreateSet.has(String(c.id)))
+        );
+        setModifiedIds(new Set(retainedUpdates));
+        setDeletedIds(new Set(retainedDeletes));
+        setOrderChanged(retainedOrder);
+      }
+
+      if (transDirty) {
+        const tErrs = await saveTranslations();
+        errors.push(...tErrs);
+      }
+
+      const batchWarning = revalidationWarning(batch);
+      if (batchWarning) useCmsStore.getState().setWarning(batchWarning);
+
+      const remaining =
+        retainedCreates.length +
+        retainedUpdates.length +
+        retainedDeletes.length +
+        (retainedOrder ? 1 : 0);
+      if (!batch.success || remaining > 0 || errors.length > 0) {
+        const message = errors.join('\n') || 'Publish did not fully succeed';
+        setError(message);
+        useCmsStore.getState().setError(message);
+      } else {
+        useCmsStore.getState().setError(null);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to publish';
+      setError(message);
+      useCmsStore.getState().setError(message);
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [
+    contacts,
+    newContacts,
+    deletedIds,
+    modifiedIds,
+    orderChanged,
+    transDirty,
+    saveTranslations,
+    fetchData,
+    resumeEnUpload,
+    resumeItUpload,
+    heroSection,
+    setHeroSection,
+    t,
+  ]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
@@ -189,69 +372,190 @@ export default function ContactsSection() {
     setOrderChanged(false);
     resumeEnUpload.clearFile();
     resumeItUpload.clearFile();
-    if (heroSection?.resume_en) resumeEnUpload.setFileFromUrl(heroSection.resume_en);
-    if (heroSection?.resume_it) resumeItUpload.setFileFromUrl(heroSection.resume_it);
+    if (heroSection?.resume_en)
+      resumeEnUpload.setFileFromUrl(heroSection.resume_en);
+    if (heroSection?.resume_it)
+      resumeItUpload.setFileFromUrl(heroSection.resume_it);
     revertTranslations();
     setError(null);
   };
 
-  useSectionCallbacks(handlePublish, () => setShowConfirmRevert(true));
+  useSectionCallbacks('contacts', handlePublish, handleRevert);
 
-  const inputClass = 'w-full px-3 py-2 bg-white dark:bg-darkestgray border border-gray-300 dark:border-lighttext2/30 rounded-lg text-darktext dark:text-lighttext focus:border-main focus:outline-none text-sm';
+  const inputClass =
+    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none text-sm';
 
-  if (isLoading) return <div className="flex items-center justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-main" /></div>;
+  if (isLoading)
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
+      </div>
+    );
 
   return (
-    <div className="space-y-6 md:space-y-8">
-      <SectionHeader title={t('contacts.title')} description={t('contacts.subtitle')} />
+    <fieldset
+      disabled={isUpdating}
+      className="space-y-6 md:space-y-8 border-0 p-0 m-0 min-w-0"
+    >
+      <SectionHeader
+        title={t('contacts.title')}
+        description={t('contacts.subtitle')}
+        actions={
+          <SectionActions
+            isDirty={isDirty}
+            busy={isUpdating}
+            onPublish={handlePublish}
+            onRevert={() => setShowConfirmRevert(true)}
+            onPreview={() => setIsPreviewOpen(true)}
+          />
+        }
+      />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
+      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
+
       {/* Translations */}
-      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6">
+      <div className="bg-surface-card rounded-xl p-4 md:p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-main">{t('common.translations')}</h2>
-          <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
+          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
+            {t('common.translations')}
+          </h2>
+          <LocaleToggle
+            activeLocale={activeLocale}
+            onChange={setActiveLocale}
+          />
         </div>
-        {transLoading ? <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-main" /></div> : (
+        {transLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
+          </div>
+        ) : (
           <div className="space-y-4">
-            <TranslationField label={t('contacts.translationTitleLabel')} enValue={getField('en', 'title')} itValue={getField('it', 'title')} onChangeEn={(v) => setField('en', 'title', v)} onChangeIt={(v) => setField('it', 'title', v)} activeLocale={activeLocale} />
-            <TranslationField label={t('contacts.translationSubtitleLabel')} enValue={getField('en', 'subtitle')} itValue={getField('it', 'subtitle')} onChangeEn={(v) => setField('en', 'subtitle', v)} onChangeIt={(v) => setField('it', 'subtitle', v)} type="textarea" rows={3} activeLocale={activeLocale} />
+            <TranslationField
+              label={t('contacts.translationTitleLabel')}
+              enValue={getField('en', 'title')}
+              itValue={getField('it', 'title')}
+              onChangeEn={(v) => setField('en', 'title', v)}
+              onChangeIt={(v) => setField('it', 'title', v)}
+              activeLocale={activeLocale}
+            />
+            <TranslationField
+              label={t('contacts.translationSubtitleLabel')}
+              enValue={getField('en', 'subtitle')}
+              itValue={getField('it', 'subtitle')}
+              onChangeEn={(v) => setField('en', 'subtitle', v)}
+              onChangeIt={(v) => setField('it', 'subtitle', v)}
+              type="textarea"
+              rows={3}
+              activeLocale={activeLocale}
+            />
           </div>
         )}
       </div>
 
       {/* Contact Links */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-darktext dark:text-lighttext">{t('contacts.title')}</h2>
+        <h2 className="text-xl font-bold text-text-main ">
+          {t('contacts.title')}
+        </h2>
         {!isAdding && (
-          <button type="button" onClick={() => setIsAdding(true)} className="flex items-center gap-2 px-4 py-2 bg-main hover:bg-secondary text-white rounded-lg"><Plus className="w-4 h-4" />{t('contacts.addNewContact')}</button>
+          <button
+            type="button"
+            onClick={() => setIsAdding(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
+          >
+            <Plus className="w-4 h-4" />
+            {t('contacts.addNewContact')}
+          </button>
         )}
       </div>
 
       {isAdding && (
-        <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6 space-y-3">
+        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-3">
           <div>
-            <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-1">{t('contacts.iconNameLabel')}</label>
-            <IconPicker value={newForm.icon} onChange={(v) => setNewForm((p) => ({ ...p, icon: v }))} />
+            <label className="block text-sm font-medium text-text-main mb-1">
+              {t('contacts.iconNameLabel')}
+            </label>
+            <IconPicker
+              value={newForm.icon}
+              onChange={(v) => setNewForm((p) => ({ ...p, icon: v }))}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-1">{t('contacts.labelFieldLabel')}</label>
-            <input type="text" value={newForm.label} onChange={(e) => setNewForm((p) => ({ ...p, label: e.target.value }))} className={inputClass} placeholder={t('contacts.labelPlaceholder')} />
+            <label className="block text-sm font-medium text-text-main mb-1">
+              {t('contacts.labelFieldLabel')}
+            </label>
+            <input
+              type="text"
+              value={newForm.label}
+              onChange={(e) =>
+                setNewForm((p) => ({ ...p, label: e.target.value }))
+              }
+              className={inputClass}
+              placeholder={t('contacts.labelPlaceholder')}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-1">{t('contacts.linkLabel')}</label>
-            <input type="url" value={newForm.link} onChange={(e) => setNewForm((p) => ({ ...p, link: e.target.value }))} className={inputClass} placeholder={t('contacts.linkPlaceholder')} />
+            <label className="block text-sm font-medium text-text-main mb-1">
+              {t('contacts.linkLabel')}
+            </label>
+            <input
+              type="url"
+              value={newForm.link}
+              onChange={(e) =>
+                setNewForm((p) => ({ ...p, link: e.target.value }))
+              }
+              className={inputClass}
+              placeholder={t('contacts.linkPlaceholder')}
+            />
           </div>
           <div>
-            <label className="block text-sm font-medium text-darktext dark:text-lighttext mb-1">{t('common.color')}</label>
+            <label className="block text-sm font-medium text-text-main mb-1">
+              {t('common.color')}
+            </label>
             <div className="flex items-center gap-2">
-              <input type="color" value={newForm.bg_color} onChange={(e) => setNewForm((p) => ({ ...p, bg_color: e.target.value }))} className="w-10 h-10 rounded cursor-pointer border-0" />
-              <input type="text" value={newForm.bg_color} onChange={(e) => setNewForm((p) => ({ ...p, bg_color: e.target.value }))} className={`flex-1 ${inputClass}`} placeholder="#000000" />
+              <input
+                type="color"
+                value={newForm.bg_color}
+                onChange={(e) =>
+                  setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                }
+                className="w-10 h-10 rounded cursor-pointer border-0"
+              />
+              <input
+                type="text"
+                value={newForm.bg_color}
+                onChange={(e) =>
+                  setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                }
+                className={`flex-1 ${inputClass}`}
+                placeholder="#000000"
+              />
             </div>
           </div>
           <div className="flex gap-2">
-            <button type="button" onClick={handleAdd} className="px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg">{t('common.add')}</button>
-            <button type="button" onClick={() => { setIsAdding(false); setNewForm({ label: '', icon: 'Link', link: '', bg_color: '#000000' }); }} className="px-4 py-2 min-h-[44px] bg-gray-600 hover:bg-gray-700 text-white rounded-lg"><X className="w-4 h-4" /></button>
+            <button
+              type="button"
+              onClick={handleAdd}
+              className="px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg"
+            >
+              {t('common.add')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdding(false);
+                setNewForm({
+                  label: '',
+                  icon: 'Link',
+                  link: '',
+                  bg_color: '#000000',
+                });
+              }}
+              className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
@@ -261,7 +565,10 @@ export default function ContactsSection() {
       ) : (
         <div className="space-y-3">
           {contacts.map((c, idx) => (
-            <div key={c.id} className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 space-y-3">
+            <div
+              key={c.id}
+              className="bg-surface-card rounded-xl p-4 space-y-3"
+            >
               <div className="flex items-center gap-3">
                 <CardToolbar
                   showReorder
@@ -304,11 +611,16 @@ export default function ContactsSection() {
                   <input
                     type="color"
                     value={c.bg_color}
-                    onChange={(e) => handleChange(c.id, 'bg_color', e.target.value)}
+                    onChange={(e) =>
+                      handleChange(c.id, 'bg_color', e.target.value)
+                    }
                     className="w-10 h-10 rounded cursor-pointer border-0 flex-shrink-0"
                   />
                   <div className="w-full sm:w-44">
-                    <IconPicker value={c.icon} onChange={(v) => handleChange(c.id, 'icon', v)} />
+                    <IconPicker
+                      value={c.icon}
+                      onChange={(v) => handleChange(c.id, 'icon', v)}
+                    />
                   </div>
                 </div>
               </div>
@@ -318,11 +630,15 @@ export default function ContactsSection() {
       )}
 
       {/* Resume PDFs */}
-      <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6">
-        <h2 className="text-lg md:text-xl font-bold text-main mb-4">{t('hero.resumeLinksTitle')}</h2>
+      <div className="bg-surface-card rounded-xl p-4 md:p-6">
+        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4">
+          {t('hero.resumeLinksTitle')}
+        </h2>
         <div className="grid md:grid-cols-2 gap-6">
           <div>
-            <h3 className="text-sm font-medium text-darktext dark:text-lighttext mb-2">{t('hero.uploadResumeItalian')}</h3>
+            <h3 className="text-sm font-medium text-text-main mb-2">
+              {t('hero.uploadResumeItalian')}
+            </h3>
             <FileDropzone
               previewUrl={resumeItUpload.previewUrl}
               isDragging={resumeItUpload.isDragging}
@@ -349,7 +665,7 @@ export default function ContactsSection() {
                   href={heroSection.resume_it}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm bg-white dark:bg-darkestgray text-darktext dark:text-lighttext rounded-lg hover:bg-gray-100 dark:hover:bg-darkgray transition-colors inline-flex items-center gap-1"
+                  className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors inline-flex items-center gap-1"
                 >
                   <ExternalLink className="w-3 h-3" />
                   {t('contacts.openResume')}
@@ -358,7 +674,9 @@ export default function ContactsSection() {
             )}
           </div>
           <div>
-            <h3 className="text-sm font-medium text-darktext dark:text-lighttext mb-2">{t('hero.uploadResumeEnglish')}</h3>
+            <h3 className="text-sm font-medium text-text-main mb-2">
+              {t('hero.uploadResumeEnglish')}
+            </h3>
             <FileDropzone
               previewUrl={resumeEnUpload.previewUrl}
               isDragging={resumeEnUpload.isDragging}
@@ -385,7 +703,7 @@ export default function ContactsSection() {
                   href={heroSection.resume_en}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm bg-white dark:bg-darkestgray text-darktext dark:text-lighttext rounded-lg hover:bg-gray-100 dark:hover:bg-darkgray transition-colors inline-flex items-center gap-1"
+                  className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors inline-flex items-center gap-1"
                 >
                   <ExternalLink className="w-3 h-3" />
                   {t('contacts.openResume')}
@@ -396,8 +714,27 @@ export default function ContactsSection() {
         </div>
       </div>
 
-      <ConfirmDialog isOpen={showConfirmRevert} title={t('common.revertAll')} message={t('common.confirmRevertAll')} confirmLabel={t('common.revert')} confirmVariant="primary" onConfirm={handleRevert} onCancel={() => setShowConfirmRevert(false)} />
-      <PreviewModal isOpen={isPreviewOpen} onClose={() => setIsPreviewOpen(false)} title={t('contacts.previewTitle')}><ContactsPreview contacts={contacts} /></PreviewModal>
-    </div>
+      <ConfirmDialog
+        isOpen={showConfirmRevert}
+        title={t('common.revertAll')}
+        message={t('common.confirmRevertAll')}
+        confirmLabel={t('common.revert')}
+        confirmVariant="primary"
+        onConfirm={handleRevert}
+        onCancel={() => setShowConfirmRevert(false)}
+      />
+      <PreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        title={t('contacts.previewTitle')}
+        copy={{
+          locale: activeLocale,
+          namespace: 'contacts-section',
+          drafts: translations,
+        }}
+      >
+        <ContactsPreview contacts={contacts} />
+      </PreviewModal>
+    </fieldset>
   );
 }

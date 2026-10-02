@@ -5,17 +5,19 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import ResumeButton from '@/components/common/ResumeButton';
-import useUiLocaleStore from '@/store/uiLocaleStore';
 import type { Contact, ResumeData } from '@/types/fetchedData.types';
 import { formatLabels } from '@/utils/formatLabels';
+import { AppleIcon, GithubIcon, LinkedinIcon } from './canonical/BrandIcons';
+import { InnerHtml } from './canonical/InnerHtml';
+import { RequestFormPreview } from './canonical/RequestForm';
 
 interface ContactsPreviewProps {
   contacts: Contact[];
   resumeData?: ResumeData;
 }
 
-// Icon component with error handling
+// Preview icon loader for non-brand names: resolves from lucide-react at
+// runtime and degrades to a neutral placeholder instead of throwing.
 function IconComponent({
   iconName,
   size = 24,
@@ -34,18 +36,17 @@ function IconComponent({
     const loadIcon = async () => {
       try {
         const module = await import('lucide-react');
-        // Use bracket notation with proper typing
         const iconKey = (iconName.charAt(0).toUpperCase() +
           iconName.slice(1)) as keyof typeof module;
-        const IconComponent = module[iconKey] as
+        const LoadedIcon = module[iconKey] as
           | React.ComponentType<LucideProps>
           | undefined;
 
-        if (!IconComponent) {
+        if (!LoadedIcon) {
           throw new Error(`Icon "${iconName}" not found`);
         }
 
-        setIcon(() => IconComponent);
+        setIcon(() => LoadedIcon);
       } catch (err) {
         console.error(`Failed to load icon: ${iconName}`, err);
         setError(true);
@@ -59,7 +60,7 @@ function IconComponent({
 
   if (error) {
     return (
-      <div className="flex items-center justify-center w-6 h-6 bg-red-500/20 rounded-sm text-red-500 text-xs">
+      <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-red-500/20 text-xs text-red-500">
         ?
       </div>
     );
@@ -67,7 +68,7 @@ function IconComponent({
 
   if (!Icon) {
     return (
-      <div className="flex items-center justify-center w-6 h-6 bg-gray-500/20 rounded-sm text-gray-500 text-xs">
+      <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-surface-raised/20 text-xs text-text-muted">
         ...
       </div>
     );
@@ -76,91 +77,73 @@ function IconComponent({
   return <Icon size={size} className={className} />;
 }
 
-export function ContactsPreview({
-  contacts,
-  resumeData,
-}: ContactsPreviewProps) {
-  const locale = useUiLocaleStore((s) => s.locale);
-  const t = useTranslations('contacts-section');
+const brandIcons: Record<string, React.ComponentType<LucideProps>> = {
+  Github: GithubIcon,
+  Linkedin: LinkedinIcon,
+  Apple: AppleIcon,
+};
 
-  // Sort contacts by position
+/**
+ * Canonical contacts section (docs/DESIGN.md §5.4): centred header, contact
+ * tiles and the request form. Tiles always open in a new tab so a preview
+ * never navigates the CMS app away.
+ */
+export function ContactsPreview({ contacts }: ContactsPreviewProps) {
+  const t = useTranslations('contacts-section');
+  const tr = (key: string) => (t.has(key) ? t(key) : '');
+
   const sortedContacts = [...contacts].sort((a, b) => a.position - b.position);
 
-  // Get the correct resume link based on locale
-  const resumeLink = resumeData
-    ? resumeData[`resume_${locale}` as keyof ResumeData]
-    : null;
-
-  if (!contacts || contacts.length === 0) {
-    return (
-      <section
-        id="contacts"
-        className="flex items-center justify-center text-center mx-5 xl:mx-16 md:min-h-lvh my-20 md:my-0 mdh:mt-40"
-      >
-        <div>
-          <h1 className="xl:text-6xl tablet:text-5xl text-xl xs:text-2xl mb-5">
-            {t('title')}
-          </h1>
-          <h2
-            className="md:mb-20 mb-10 text-base xs:text-lg tablet:text-2xl tablet:mx-16 md:text-2xl"
-            dangerouslySetInnerHTML={{ __html: formatLabels(t('subtitle')) }}
-          />
-          <p className="text-lighttext2">No contacts to display</p>
-        </div>
-      </section>
-    );
-  }
-
   return (
-    <section
-      id="contacts"
-      className="flex items-center justify-center text-center mx-5 xl:mx-16 md:min-h-lvh my-20 md:my-0 mdh:mt-40"
-    >
-      <div>
-        <h1 className="xl:text-6xl tablet:text-5xl text-xl xs:text-2xl mb-5">
-          {t('title')}
-        </h1>
-        <h2
-          className="md:mb-20 mb-10 text-base xs:text-lg tablet:text-2xl tablet:mx-16 md:text-2xl"
-          dangerouslySetInnerHTML={{ __html: formatLabels(t('subtitle')) }}
+    <section className="mx-auto max-w-4xl px-6 py-24 text-center" id="contacts">
+      <div className="mb-14 text-center">
+        <InnerHtml
+          as="h2"
+          className="font-heading text-2xl font-semibold text-text-white sm:text-3xl"
+          html={formatLabels(tr('title'))}
         />
-        <div className="flex lg:flex-row flex-col lg:gap-8 mx-12 md:mx-0 tablet:w-full tablet:max-w-lg tablet:mx-auto tablet:text-center justify-center drop-shadow-xl md:drop-shadow-2xl dark:drop-shadow-none">
-          {sortedContacts.map(({ id, label, icon, link, bg_color }) => (
-            <Link
-              data-umami-event={`${label} button`}
-              key={id}
-              style={
-                {
-                  '--dyn-color': `${bg_color}99`,
-                  '--hover-color': bg_color,
-                } as React.CSSProperties
-              }
-              href={link}
-              target="_blank"
-              className={`text-lighttext mb-5 lg:mb-0 last:mb-0 transition-all hover:scale-105 border-2
-                    border-main rounded-2xl bg-(--hover-color) lg:bg-(--dyn-color) lg:hover:bg-(--hover-color)`}
-            >
-              <div className="transition-all ease-in-out lg:my-0 my-2 lg:w-40 lg:h-40">
-                <div className="h-full flex lg:flex-col justify-center items-center">
-                  <IconComponent
-                    iconName={icon}
-                    size={80}
-                    className="lg:mr-0 mr-5 dark:text-lighttext lg:w-[100px] w-16 lg:h-auto h-14 xs:h-16"
-                  />
-                  <h3 className="text-xl xs:text-2xl text-left w-28 lg:text-center lg:w-auto">
-                    {label}
-                  </h3>
-                </div>
-              </div>
-            </Link>
-          ))}
-
-          {/* Resume Link Button */}
-          {resumeLink && (
-            <ResumeButton resumeLink={resumeLink} locale={locale} />
-          )}
-        </div>
+        <InnerHtml
+          as="p"
+          className="mt-2 font-mono text-xs text-accent-violet-light sm:text-sm"
+          html={formatLabels(tr('subtitle'))}
+        />
+        <div className="mx-auto mt-3 h-0.5 w-10 rounded-full bg-accent-violet" />
       </div>
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {sortedContacts.map(({ id, label, icon, link, bg_color }) => {
+          const BrandIcon =
+            brandIcons[icon] ??
+            brandIcons[icon.charAt(0).toUpperCase() + icon.slice(1)];
+
+          return (
+            <Link
+              className="group flex flex-col items-center gap-3 rounded-2xl border border-border-subtle bg-surface-card p-5 text-center transition-colors hover:border-accent-violet hover:bg-surface-raised"
+              data-umami-event={`${label} button`}
+              href={link}
+              key={id}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <span
+                className="flex h-12 w-12 items-center justify-center rounded-xl"
+                style={{ backgroundColor: `${bg_color}1a`, color: bg_color }}
+              >
+                {BrandIcon ? (
+                  <BrandIcon className="h-6 w-6" strokeWidth={1.8} />
+                ) : (
+                  <IconComponent className="h-6 w-6" iconName={icon} />
+                )}
+              </span>
+              <span className="text-sm font-medium text-text-white">
+                {label}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+
+      <RequestFormPreview />
     </section>
   );
 }

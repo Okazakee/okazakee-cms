@@ -1,5 +1,22 @@
 {
+  "copy": {
+    "requestTitle": "Modulo richieste",
+    "requestDescription": "Personalizza etichette, opzioni e messaggio del modulo pubblico. L'anteprima non invia richieste.",
+    "siteTitle": "Testi del sito",
+    "siteDescription": "Personalizza link dei post, stati vuoti, errori, sottotitolo privacy ed etichette condivise nelle due lingue.",
+    "namespaces": {
+      "request-form": "Modulo richieste",
+      "posts-section": "Link dei post e stati vuoti",
+      "errors": "Pagine di errore",
+      "privacyPolicy": "Sottotitolo privacy",
+      "common": "Etichette condivise"
+    }
+  },
   "sidebar": {
+    "workspace": "Gestione contenuti",
+    "publishAll": "Pubblica tutto",
+    "pendingSections": "{count} sezioni con modifiche non salvate",
+    "discardDrafts": "Scartare tutte le modifiche non salvate? L'operazione non è reversibile.",
     "subtitle": "Gestisci il contenuto del tuo sito",
     "nav": {
       "hero": "Sezione Hero",
@@ -8,6 +25,8 @@
       "portfolio": "Portfolio",
       "blog": "Blog",
       "contacts": "Contatti",
+      "request-form": "Modulo richieste",
+      "site-copy": "Testi del sito",
       "layout": "Layout",
       "privacy-policy": "Privacy Policy",
       "users": "Gestisci Utenti",
@@ -141,6 +160,7 @@
     "manageCategoriesTitle": "Gestisci Categorie",
     "addCategory": "Aggiungi Categoria",
     "categoryNamePlaceholder": "Nome categoria",
+    "renameCategory": "Rinomina categoria",
     "skillTitlePlaceholder": "Titolo competenza",
     "skillIconPlaceholder": "https://esempio.com/icona.svg",
     "invertLabel": "Inverti in modalità scura",
@@ -340,6 +360,15 @@
     "subtitle": "Modifica le traduzioni di header e footer per Inglese e Italiano",
     "footerTranslationsTitle": "Traduzioni Footer",
     "headerTranslationsTitle": "Traduzioni Header",
+    "fixedNavigation": "Le etichette inglesi personalizzano le sei destinazioni fisse del sito. La navigazione italiana è fissa sul sito e qui è in sola lettura. I PDF del curriculum sono gestiti nei Contatti.",
+    "nav": {
+      "home": "Home",
+      "skills": "Competenze",
+      "career": "Carriera",
+      "portfolio": "Portfolio",
+      "blog": "Blog",
+      "contacts": "Contatti"
+    },
     "footerLeftLabel": "Sinistra",
     "footerRightLabel": "Destra",
     "footerMiddleLabel": "Centro",

@@ -64,13 +64,7 @@ describe('getContentInvalidation', () => {
         operation: 'publish',
         ids: [1, 2, 3],
       })
-    ).toEqual([
-      'blog',
-      'posts',
-      'post:blog:1',
-      'post:blog:2',
-      'post:blog:3',
-    ]);
+    ).toEqual(['blog', 'posts', 'post:blog:1', 'post:blog:2', 'post:blog:3']);
   });
 
   it('author profile changes invalidate the author entity tag', () => {

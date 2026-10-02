@@ -27,37 +27,34 @@ export function TranslationGroup({
 }: TranslationGroupProps) {
   const t = useTranslations('cms');
   const inputClass =
-    'w-full px-3 py-2 bg-white dark:bg-darkestgray border border-gray-300 dark:border-lighttext2/30 rounded-lg text-darktext dark:text-lighttext focus:border-main focus:outline-none text-sm';
+    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none text-sm';
 
   return (
-    <div className="bg-gray-100 dark:bg-darkergray rounded-xl p-4 md:p-6">
+    <div className="bg-surface-card rounded-xl p-4 md:p-6">
       {title && (
-        <h2 className="text-lg md:text-xl font-bold text-main mb-4 flex items-center gap-2">
+        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4 flex items-center gap-2">
           {title}
         </h2>
       )}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="border-b border-gray-200 dark:border-darkgray">
-              <th className="text-left py-2 pr-4 text-sm font-medium text-darktext dark:text-lighttext whitespace-nowrap">
+            <tr className="border-b border-border-subtle ">
+              <th className="text-left py-2 pr-4 text-sm font-medium text-text-main whitespace-nowrap">
                 Field
               </th>
-              <th className="text-left py-2 px-4 text-sm font-medium text-darktext dark:text-lighttext">
+              <th className="text-left py-2 px-4 text-sm font-medium text-text-main ">
                 {t('common.english')}
               </th>
-              <th className="text-left py-2 pl-4 text-sm font-medium text-darktext dark:text-lighttext">
+              <th className="text-left py-2 pl-4 text-sm font-medium text-text-main ">
                 {t('common.italian')}
               </th>
             </tr>
           </thead>
           <tbody>
             {fields.map((field) => (
-              <tr
-                key={field.path}
-                className="border-b border-gray-100 dark:border-darkgray/50"
-              >
-                <td className="py-3 pr-4 text-sm font-medium text-darktext dark:text-lighttext whitespace-nowrap">
+              <tr key={field.path} className="border-b border-border-subtle ">
+                <td className="py-3 pr-4 text-sm font-medium text-text-main whitespace-nowrap">
                   {field.label}
                 </td>
                 <td className="py-3 px-2">

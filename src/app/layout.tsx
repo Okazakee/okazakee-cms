@@ -1,9 +1,9 @@
 import './globals.css';
 import localFont from 'next/font/local';
 import { Suspense } from 'react';
+import { publicConfig } from '@/config/public';
 import cmsEn from '@/i18n/messages/cms.en.json';
 import cmsIt from '@/i18n/messages/cms.it.json';
-import { publicConfig } from '@/config/public';
 import { getTranslationsSupabase } from '@/utils/getData';
 import { CmsIntlProvider } from './CmsIntlProvider';
 import { Providers } from './providers';
@@ -45,11 +45,7 @@ export default async function RootLayout({
   const supabasePreconnect = publicConfig.supabaseHostname;
 
   return (
-    <html
-      lang="en"
-      data-scroll-behavior="smooth"
-      suppressHydrationWarning
-    >
+    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
         <meta
           name="viewport"
@@ -73,7 +69,7 @@ export default async function RootLayout({
       </head>
       <body
         id="about"
-        className={`${whiteRabbit.variable} transition-colors duration-400 ease-in-out font-whiterabt antialiased scroll-smooth relative`}
+        className={`${whiteRabbit.variable} transition-colors duration-300 ease-in-out font-body antialiased scroll-smooth relative`}
       >
         <Providers>
           <Suspense>

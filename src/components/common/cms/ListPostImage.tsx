@@ -30,8 +30,8 @@ export function ListPostImage({
   const src = objectUrl ?? imageUrl ?? null;
   if (!src) {
     return (
-      <div className="h-48 flex items-center justify-center bg-bglight dark:bg-darkergray">
-        <ImageIcon className="h-8 w-8 text-main" />
+      <div className="h-48 flex items-center justify-center bg-surface-base ">
+        <ImageIcon className="h-8 w-8 text-accent-violet" />
       </div>
     );
   }

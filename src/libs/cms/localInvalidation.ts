@@ -15,8 +15,9 @@
  * This module maps a content entity to the local cache tags affected, so
  * mutation actions never decide cache semantics ad hoc.
  */
-import { cacheTags } from '@/libs/content/cacheTags';
+
 import type { ContentEntity } from '@/libs/cms/invalidation';
+import { cacheTags } from '@/libs/content/cacheTags';
 
 export function getLocalInvalidationTags(entity: ContentEntity): string[] {
   switch (entity) {
