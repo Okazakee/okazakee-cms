@@ -7,6 +7,7 @@ import cmsEn from '@/i18n/messages/cms.en.json';
 
 const h = vi.hoisted(() => ({
   read: vi.fn(),
+  settings: vi.fn(),
   setField: vi.fn(),
   skills: vi.fn(),
 }));
@@ -21,6 +22,9 @@ vi.mock('@/app/actions/cms/sections/blogActions', () => ({
 }));
 vi.mock('@/app/actions/cms/sections/portfolioActions', () => ({
   portfolioActions: async () => ({ success: true, data: [] }),
+}));
+vi.mock('@/app/actions/cms/sections/siteSettingsActions', () => ({
+  siteSettingsActions: h.settings,
 }));
 vi.mock('@/hooks/cms/useSectionCallbacks', () => ({
   useSectionCallbacks: () => {},
@@ -74,7 +78,9 @@ vi.mock('next/link', async () => {
     }) => createElement('a', props, props.children),
   };
 });
-vi.mock('@/app/public/title-cms.png', () => ({ default: { src: '/logo.png' } }));
+vi.mock('@/app/public/title-cms.png', () => ({
+  default: { src: '/logo.png' },
+}));
 vi.mock('@/app/public/title-cms-lightmode.png', () => ({
   default: { src: '/logo-light.png' },
 }));
@@ -85,7 +91,8 @@ import {
   RequestCopySection,
   SiteCopySection,
 } from '@/components/cms/sections/Copy/CopySections';
-import LayoutSection from '@/components/cms/sections/Layout/LayoutSection';
+import FooterSection from '@/components/cms/sections/Footer/FooterSection';
+import HeaderSection from '@/components/cms/sections/Header/HeaderSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
 import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
 import SkillsSection from '@/components/cms/sections/Skills/SkillsSection';
@@ -191,6 +198,21 @@ beforeEach(() => {
   h.read
     .mockReset()
     .mockResolvedValue({ success: true, data: structuredClone(rows) });
+  h.settings.mockReset().mockResolvedValue({
+    success: true,
+    data: {
+      header_logo_dark: null,
+      header_logo_light: null,
+      nav_anchors: [
+        'home',
+        'skills',
+        'career',
+        'portfolio',
+        'blog',
+        'contacts',
+      ].map((id) => ({ id, anchor: id })),
+    },
+  });
   h.setField.mockClear();
   h.skills.mockReset().mockImplementation(async ({ type }: { type: string }) =>
     type === 'GET'
@@ -449,13 +471,33 @@ describe('honest website customization and offline controls', () => {
       })
     );
   });
-  it('renders only consumed Layout fields and makes Italian navigation fixed/read-only', async () => {
-    await mount(createElement(LayoutSection));
-    expect(container.querySelectorAll('input')).toHaveLength(11);
-    expect(container.textContent).not.toContain('Theme');
-    expect(container.textContent).not.toContain('Language');
+  it('renders every header field the website consumes and keeps Italian navigation fixed', async () => {
+    await mount(createElement(HeaderSection));
+    // 6 navigation labels + header.theme + header.language + header.resume.
+    // The website reads the last three straight from this namespace
+    // (NavMenu), so without a control here that copy is unreachable.
+    // 6 navigation labels + 6 anchors + header.theme/language/resume, plus
+    // the two hidden file inputs behind the logo dropzones.
+    const texts =
+      container.querySelectorAll<HTMLInputElement>('input[type="text"]');
+    expect(texts).toHaveLength(15);
+    expect(container.querySelectorAll('input[type="file"]')).toHaveLength(2);
+    // The anchors are CMS-editable per theme, so a draft shows up in preview.
+    expect([...texts].slice(6, 12).map((node) => node.value)).toEqual([
+      'home',
+      'skills',
+      'career',
+      'portfolio',
+      'blog',
+      'contacts',
+    ]);
+    expect(container.textContent).toContain('Theme');
+    expect(container.textContent).toContain('Language');
+    expect(container.textContent).toContain('Resume button');
     await click(button('Italian', container));
-    const inputs = [...container.querySelectorAll<HTMLInputElement>('input')];
+    const inputs = [
+      ...container.querySelectorAll<HTMLInputElement>('input[type="text"]'),
+    ];
     expect(inputs.slice(0, 6).map((node) => node.value)).toEqual([
       'Home',
       'Skills',
@@ -466,7 +508,24 @@ describe('honest website customization and offline controls', () => {
     ]);
     expect(inputs.slice(0, 6).every((node) => node.disabled)).toBe(true);
     expect(inputs.slice(6).every((node) => !node.disabled)).toBe(true);
+    // Every field the website reads from this namespace has a control.
+    expect(container.textContent).toContain('Header Logo');
+    expect(container.textContent).toContain('Navigation Anchors');
     expect(h.setField).not.toHaveBeenCalled();
+  });
+  it('exposes every footer field the website reads', async () => {
+    await mount(createElement(FooterSection));
+    expect(container.querySelectorAll('input')).toHaveLength(6);
+    for (const label of [
+      'Left',
+      'Middle',
+      'Right',
+      'Source',
+      'Button Title',
+      'Privacy Policy',
+    ]) {
+      expect(container.textContent).toContain(label);
+    }
   });
   it('edits sharing/rate-limit and post error labels in actual website namespaces', async () => {
     await mount(createElement(SiteCopySection));

@@ -1,6 +1,7 @@
 'use server';
 
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
+import type { HeroSettings } from '@/types/fetchedData.types';
 import { createClient } from '@/utils/supabase/server';
 import {
   findAllowedCmsUser,
@@ -95,12 +96,7 @@ export async function getUser(): Promise<CMSUser | null> {
   }
 }
 
-export type CMSHeroBootData = {
-  mainImage: string | null;
-  blurhashURL: string | null;
-  resume_en: string | null;
-  resume_it: string | null;
-};
+export type CMSHeroBootData = HeroSettings;
 
 export type CMSBootData =
   | {
@@ -126,7 +122,9 @@ export async function getCmsBootData(): Promise<CMSBootData> {
 
     const heroResult = await supabase
       .from('hero_section')
-      .select('propic, blurhashURL, resume_en, resume_it')
+      .select(
+        'propic, blurhashURL, resume_en, resume_it, shape, typewriter, typewriter_target'
+      )
       .maybeSingle();
 
     if (heroResult.error) throw heroResult.error;
@@ -139,6 +137,9 @@ export async function getCmsBootData(): Promise<CMSBootData> {
         blurhashURL: heroResult.data?.blurhashURL || null,
         resume_en: heroResult.data?.resume_en || null,
         resume_it: heroResult.data?.resume_it || null,
+        shape: heroResult.data?.shape || null,
+        typewriter: heroResult.data?.typewriter === true,
+        typewriter_target: heroResult.data?.typewriter_target || null,
       },
     };
   } catch (error) {

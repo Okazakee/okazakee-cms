@@ -47,8 +47,6 @@ interface CareerFormData {
   endDate: string;
   description_en: string;
   description_it: string;
-  company_description_en: string;
-  company_description_it: string;
   skills: string;
 }
 
@@ -63,8 +61,6 @@ const emptyForm: CareerFormData = {
   endDate: '',
   description_en: '',
   description_it: '',
-  company_description_en: '',
-  company_description_it: '',
   skills: '',
 };
 
@@ -169,8 +165,6 @@ export default function CareerSection() {
       endDate: entry.endDate ?? '',
       description_en: entry.description_en ?? '',
       description_it: entry.description_it ?? '',
-      company_description_en: entry.company_description_en ?? '',
-      company_description_it: entry.company_description_it ?? '',
       skills: entry.skills ?? '',
     });
     setIsCurrentPosition(!entry.endDate);
@@ -208,8 +202,6 @@ export default function CareerSection() {
       description_en: formData.description_en,
       description_it: formData.description_it,
       skills: formData.skills,
-      company_description_en: formData.company_description_en,
-      company_description_it: formData.company_description_it,
       created_at: new Date().toISOString(),
     };
     setEntries((prev) => [...prev, entry]);
@@ -238,8 +230,6 @@ export default function CareerSection() {
               description_en: formData.description_en,
               description_it: formData.description_it,
               skills: formData.skills,
-              company_description_en: formData.company_description_en,
-              company_description_it: formData.company_description_it,
               logo_file: logoUpload.file || e.logo_file || null,
               blurhashURL: logoUpload.blurhash || e.blurhashURL || '',
             }
@@ -295,8 +285,6 @@ export default function CareerSection() {
             description_en: entry.description_en || '',
             description_it: entry.description_it || '',
             skills: entry.skills || '',
-            company_description_en: entry.company_description_en || '',
-            company_description_it: entry.company_description_it || '',
           },
         },
       ];
@@ -326,8 +314,6 @@ export default function CareerSection() {
             description_en: entry.description_en || '',
             description_it: entry.description_it || '',
             skills: entry.skills || '',
-            company_description_en: entry.company_description_en || '',
-            company_description_it: entry.company_description_it || '',
           },
         },
       ];
@@ -638,20 +624,6 @@ export default function CareerSection() {
             }
             type="textarea"
             rows={4}
-            activeLocale={formLocale}
-          />
-          <TranslationField
-            label={t('career.companyDescEnLabel')}
-            enValue={formData.company_description_en}
-            itValue={formData.company_description_it}
-            onChangeEn={(v) =>
-              setFormData((p) => ({ ...p, company_description_en: v }))
-            }
-            onChangeIt={(v) =>
-              setFormData((p) => ({ ...p, company_description_it: v }))
-            }
-            type="textarea"
-            rows={3}
             activeLocale={formLocale}
           />
         </div>

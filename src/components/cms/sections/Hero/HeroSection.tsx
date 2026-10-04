@@ -1,6 +1,6 @@
 'use client';
 
-import { Copy, Download } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Download, Plus, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
@@ -18,7 +18,22 @@ import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { useCmsStore } from '@/store/cmsStore';
+import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
+import type { HeroShape, TypewriterTarget } from '@/types/fetchedData.types';
+import {
+  countHeroRoleEntries,
+  heroRolePath,
+  heroShapes,
+  normalizeHeroShape,
+  normalizeTypewriterTarget,
+  typewriterTargets,
+} from '@/utils/heroDisplay';
+
+const locales = ['en', 'it'] as const;
+const inputClass =
+  'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
+const iconButtonClass =
+  'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-text-muted hover:bg-surface-raised disabled:opacity-30';
 
 export default function HeroSection() {
   const t = useTranslations('cms');
@@ -29,6 +44,10 @@ export default function HeroSection() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const [shape, setShape] = useState<HeroShape>('pebble');
+  const [typewriter, setTypewriter] = useState(false);
+  const [typewriterTarget, setTypewriterTarget] =
+    useState<TypewriterTarget>('role1');
 
   const imgUpload = useFileUpload({
     accept: 'image/*',
@@ -43,6 +62,7 @@ export default function HeroSection() {
     isLoading: transLoading,
     getField,
     setField,
+    deleteField,
     saveTranslations,
     revertTranslations,
   } = useSectionTranslations('hero-section');
@@ -52,15 +72,61 @@ export default function HeroSection() {
   useEffect(() => {
     if (!heroSection || initRef.current) return;
     initRef.current = true;
+    setShape(normalizeHeroShape(heroSection.shape));
+    setTypewriter(heroSection.typewriter === true);
+    setTypewriterTarget(
+      normalizeTypewriterTarget(heroSection.typewriter_target)
+    );
     if (heroSection.mainImage) {
       imgUpload.setFileFromUrl(heroSection.mainImage);
     }
   }, [heroSection, imgUpload]);
 
   const mainImageUrl = imgUpload.previewUrl ?? heroSection?.mainImage ?? '';
-  const isDirty = imgUpload.file !== null || transDirty;
+  const roleCount = Math.max(
+    countHeroRoleEntries(translations.en),
+    countHeroRoleEntries(translations.it)
+  );
+  const displayDirty =
+    shape !== normalizeHeroShape(heroSection?.shape) ||
+    typewriter !== (heroSection?.typewriter === true) ||
+    typewriterTarget !==
+      normalizeTypewriterTarget(heroSection?.typewriter_target);
+  const isDirty = imgUpload.file !== null || transDirty || displayDirty;
 
   useSectionDirty('hero', isDirty);
+
+  const addRole = () => {
+    for (const locale of locales) setField(locale, heroRolePath(roleCount), '');
+  };
+
+  const removeRole = (index: number) => {
+    for (const locale of locales) {
+      for (let slot = index; slot < roleCount - 1; slot++) {
+        setField(
+          locale,
+          heroRolePath(slot),
+          getField(locale, heroRolePath(slot + 1))
+        );
+      }
+      deleteField(locale, heroRolePath(roleCount - 1));
+    }
+  };
+
+  const moveRole = (index: number, direction: -1 | 1) => {
+    const swap = index + direction;
+    if (swap < 0 || swap >= roleCount) return;
+
+    for (const locale of locales) {
+      const current = getField(locale, heroRolePath(index));
+      setField(
+        locale,
+        heroRolePath(index),
+        getField(locale, heroRolePath(swap))
+      );
+      setField(locale, heroRolePath(swap), current);
+    }
+  };
 
   const handlePublish = useCallback(async () => {
     setIsUpdating(true);
@@ -99,17 +165,46 @@ export default function HeroSection() {
           resume_it?: string;
         };
 
-        setHeroSection({
-          mainImage: data.propic || heroSection?.mainImage || null,
-          blurhashURL: data.blurhashURL || heroSection?.blurhashURL || null,
-          resume_en: data.resume_en || heroSection?.resume_en || null,
-          resume_it: data.resume_it || heroSection?.resume_it || null,
-        });
+        setHeroSection(
+          mergeHeroSettings(heroSection, {
+            mainImage: data.propic || heroSection?.mainImage || null,
+            blurhashURL: data.blurhashURL || heroSection?.blurhashURL || null,
+            resume_en: data.resume_en || heroSection?.resume_en || null,
+            resume_it: data.resume_it || heroSection?.resume_it || null,
+          })
+        );
 
         imgUpload.clearFile();
         if (data.propic) {
           imgUpload.setFileFromUrl(data.propic);
         }
+      }
+
+      // Written after the asset commit so the store always ends on the newest
+      // display draft instead of the snapshot this callback closed over.
+      if (displayDirty) {
+        const result = await heroActions({
+          type: 'UPDATE_DISPLAY',
+          data: { shape, typewriter, typewriter_target: typewriterTarget },
+        });
+
+        if (!result.success) {
+          const message = result.error || t('hero.errorUpdateHero');
+          setError(message);
+          useCmsStore.getState().setError(message);
+          return;
+        }
+
+        revalidationMessage =
+          revalidationWarning(result) ?? revalidationMessage;
+
+        setHeroSection(
+          mergeHeroSettings(heroSection, {
+            shape,
+            typewriter,
+            typewriter_target: typewriterTarget,
+          })
+        );
       }
 
       const transErrors = await saveTranslations();
@@ -128,17 +223,32 @@ export default function HeroSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [imgUpload, heroSection, saveTranslations, setHeroSection, t]);
+  }, [
+    displayDirty,
+    heroSection,
+    imgUpload,
+    saveTranslations,
+    setHeroSection,
+    shape,
+    t,
+    typewriter,
+    typewriterTarget,
+  ]);
 
   const handleRevert = useCallback(() => {
     setShowConfirmRevert(false);
     imgUpload.clearFile();
     revertTranslations();
+    setShape(normalizeHeroShape(heroSection?.shape));
+    setTypewriter(heroSection?.typewriter === true);
+    setTypewriterTarget(
+      normalizeTypewriterTarget(heroSection?.typewriter_target)
+    );
     if (heroSection?.mainImage) {
       imgUpload.setFileFromUrl(heroSection.mainImage);
     }
     setError(null);
-  }, [imgUpload, revertTranslations, heroSection]);
+  }, [heroSection, imgUpload, revertTranslations]);
 
   useSectionCallbacks('hero', handlePublish, handleRevert);
 
@@ -242,6 +352,68 @@ export default function HeroSection() {
         </div>
       </div>
 
+      {/* Portrait shape and animation */}
+      <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
+        <h2 className="text-lg md:text-xl font-bold text-accent-violet">
+          {t('hero.displaySection')}
+        </h2>
+
+        <div>
+          <label className="block text-sm font-medium text-text-main mb-1">
+            {t('hero.shapeLabel')}
+          </label>
+          <select
+            aria-label={t('hero.shapeLabel')}
+            className={inputClass}
+            onChange={(event) =>
+              setShape(normalizeHeroShape(event.target.value))
+            }
+            value={shape}
+          >
+            {heroShapes.map((preset) => (
+              <option key={preset} value={preset}>
+                {t(`hero.shapeOptions.${preset}`)}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-text-muted">{t('hero.shapeHint')}</p>
+        </div>
+
+        <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">
+          <input
+            checked={typewriter}
+            className="w-4 h-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
+            onChange={(event) => setTypewriter(event.target.checked)}
+            type="checkbox"
+          />
+          {t('hero.typewriterLabel')}
+        </label>
+
+        <div>
+          <label className="block text-sm font-medium text-text-main mb-1">
+            {t('hero.typewriterTargetLabel')}
+          </label>
+          <select
+            aria-label={t('hero.typewriterTargetLabel')}
+            className={inputClass}
+            disabled={!typewriter}
+            onChange={(event) =>
+              setTypewriterTarget(normalizeTypewriterTarget(event.target.value))
+            }
+            value={typewriterTarget}
+          >
+            {typewriterTargets.map((target) => (
+              <option key={target} value={target}>
+                {t(`hero.typewriterTargets.${target}`)}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-text-muted">
+            {t('hero.typewriterHint')}
+          </p>
+        </div>
+      </div>
+
       {/* Translations */}
       <div className="bg-surface-card rounded-xl p-4 md:p-6">
         <div className="flex items-center justify-between mb-4">
@@ -271,26 +443,86 @@ export default function HeroSection() {
               onChangeIt={(v) => setField('it', 'top.name', v)}
               activeLocale={activeLocale}
             />
-            <TranslationField
-              label={t('hero.roleLabel')}
-              enValue={getField('en', 'top.role')}
-              itValue={getField('it', 'top.role')}
-              onChangeEn={(v) => setField('en', 'top.role', v)}
-              onChangeIt={(v) => setField('it', 'top.role', v)}
-              activeLocale={activeLocale}
-            />
+
+            {roleCount === 0 ? (
+              <TranslationField
+                label={t('hero.roleLabel')}
+                enValue={getField('en', 'top.role')}
+                itValue={getField('it', 'top.role')}
+                onChangeEn={(v) => setField('en', 'top.role', v)}
+                onChangeIt={(v) => setField('it', 'top.role', v)}
+                activeLocale={activeLocale}
+              />
+            ) : (
+              <div className="space-y-3">
+                {Array.from({ length: roleCount }, (_, index) => (
+                  <div
+                    className="flex items-end gap-2"
+                    key={heroRolePath(index)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <TranslationField
+                        label={`${t('hero.roleLabel')} ${index + 1}`}
+                        enValue={getField('en', heroRolePath(index))}
+                        itValue={getField('it', heroRolePath(index))}
+                        onChangeEn={(v) =>
+                          setField('en', heroRolePath(index), v)
+                        }
+                        onChangeIt={(v) =>
+                          setField('it', heroRolePath(index), v)
+                        }
+                        activeLocale={activeLocale}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 pb-1">
+                      <button
+                        aria-label={`${t('common.moveUp')}: ${index + 1}`}
+                        className={`${iconButtonClass} hover:text-accent-violet`}
+                        disabled={index === 0}
+                        onClick={() => moveRole(index, -1)}
+                        title={t('common.moveUp')}
+                        type="button"
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        aria-label={`${t('common.moveDown')}: ${index + 1}`}
+                        className={`${iconButtonClass} hover:text-accent-violet`}
+                        disabled={index === roleCount - 1}
+                        onClick={() => moveRole(index, 1)}
+                        title={t('common.moveDown')}
+                        type="button"
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
+                      <button
+                        aria-label={`${t('hero.removeRole')}: ${index + 1}`}
+                        className={`${iconButtonClass} hover:text-red-400`}
+                        onClick={() => removeRole(index)}
+                        title={t('hero.removeRole')}
+                        type="button"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-xs text-text-muted">{t('hero.rolesHint')}</p>
+            <button
+              className="inline-flex items-center gap-2 min-h-11 px-4 text-sm bg-surface-raised text-text-main rounded-lg hover:bg-surface-card"
+              onClick={addRole}
+              type="button"
+            >
+              <Plus className="w-4 h-4" />
+              {t('hero.addRole')}
+            </button>
 
             <h3 className="text-base font-semibold text-text-main pt-2">
               {t('hero.aboutMeSection')}
             </h3>
-            <TranslationField
-              label={t('hero.aboutMeTitleLabel')}
-              enValue={getField('en', 'aboutme.title')}
-              itValue={getField('it', 'aboutme.title')}
-              onChangeEn={(v) => setField('en', 'aboutme.title', v)}
-              onChangeIt={(v) => setField('it', 'aboutme.title', v)}
-              activeLocale={activeLocale}
-            />
             <TranslationField
               label={t('hero.aboutMeParagraphLabel')}
               enValue={getField('en', 'aboutme.paragraph')}
@@ -326,8 +558,11 @@ export default function HeroSection() {
         }}
       >
         <HeroPreview
-          mainImage={mainImageUrl}
           blurhashURL={imgUpload.blurhash ?? heroSection.blurhashURL ?? ''}
+          mainImage={mainImageUrl}
+          shape={shape}
+          typewriter={typewriter}
+          typewriterTarget={typewriterTarget}
         />
       </PreviewModal>
     </fieldset>

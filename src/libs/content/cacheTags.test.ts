@@ -15,6 +15,7 @@ describe('cacheTags', () => {
       posts: 'posts',
       resume: 'resume',
       heroSection: 'hero_section',
+      siteSettings: 'site-settings',
     });
   });
 

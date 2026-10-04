@@ -16,6 +16,7 @@ import {
   type Author,
   portfolioActions,
 } from '@/app/actions/cms/sections/portfolioActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
@@ -41,6 +42,12 @@ import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { PortfolioPost } from '@/types/fetchedData.types';
+import {
+  deriveButtonsFromPost,
+  type PostButton,
+  type PostButtonKind,
+  postButtonKinds,
+} from '@/utils/cms/postButtons';
 
 type FormMode = 'list' | 'create' | 'edit';
 type EditablePost = PortfolioPost & { image_file?: File | null };
@@ -54,12 +61,7 @@ interface PortfolioFormData {
   description_it: string;
   body_en: string;
   body_it: string;
-  source_link: string;
-  demo_link: string;
-  store_link: string;
-  fdroid_link: string;
-  website: string;
-  ios_store_link: string;
+  buttons: PostButton[];
   post_tags: string;
   created_at: string;
   author_id: string;
@@ -75,12 +77,7 @@ const emptyForm: PortfolioFormData = {
   description_it: '',
   body_en: '',
   body_it: '',
-  source_link: '',
-  demo_link: '',
-  store_link: '',
-  fdroid_link: '',
-  website: '',
-  ios_store_link: '',
+  buttons: [],
   post_tags: '',
   created_at: new Date().toISOString().split('T')[0],
   author_id: '',
@@ -188,12 +185,9 @@ export default function PortfolioSection() {
       description_it: post.description_it ?? '',
       body_en: post.body_en ?? '',
       body_it: post.body_it ?? '',
-      source_link: post.source_link ?? '',
-      demo_link: post.demo_link ?? '',
-      store_link: post.store_link ?? '',
-      fdroid_link: post.fdroid_link ?? '',
-      website: post.website ?? '',
-      ios_store_link: post.ios_store_link ?? '',
+      // A row written before the buttons column existed opens on a populated
+      // builder, derived from the legacy link columns.
+      buttons: deriveButtonsFromPost(post),
       post_tags: post.post_tags ?? '',
       created_at: post.created_at?.split('T')[0] ?? '',
       author_id: post.author_id ?? user?.id ?? '',
@@ -209,6 +203,37 @@ export default function PortfolioSection() {
     imgUpload.clearFile();
     setEditingId(null);
   };
+
+  const addButton = () =>
+    setFormData((p) => ({
+      ...p,
+      buttons: [...p.buttons, { kind: 'source', url: '' }],
+    }));
+
+  const removeButton = (index: number) =>
+    setFormData((p) => ({
+      ...p,
+      buttons: p.buttons.filter((_, i) => i !== index),
+    }));
+
+  const updateButton = (index: number, patch: Partial<PostButton>) =>
+    setFormData((p) => ({
+      ...p,
+      buttons: p.buttons.map((button, i) =>
+        i === index ? { ...button, ...patch } : button
+      ),
+    }));
+
+  // Order is render order, so moving a button is a real edit the editor must
+  // be able to make — same up/down affordance as skills and contacts.
+  const moveButton = (index: number, direction: -1 | 1) =>
+    setFormData((p) => {
+      const target = index + direction;
+      if (target < 0 || target >= p.buttons.length) return p;
+      const next = [...p.buttons];
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...p, buttons: next };
+    });
 
   const handleCreate = () => {
     if (!formData.title_en || !imgUpload.file) {
@@ -283,18 +308,13 @@ export default function PortfolioSection() {
             title_en: post.title_en,
             title_it: post.title_it,
             image: '',
-            source_link: post.source_link,
-            demo_link: post.demo_link,
             description_en: post.description_en,
             description_it: post.description_it,
             body_en: post.body_en,
             body_it: post.body_it,
             blurhashURL: post.blurhashURL || '',
             post_tags: post.post_tags,
-            store_link: post.store_link,
-            fdroid_link: post.fdroid_link,
-            website: post.website,
-            ios_store_link: post.ios_store_link,
+            buttons: post.buttons ?? [],
             created_at: post.created_at,
             author_id: post.author_id || user?.id || '',
             hidden: post.hidden ?? false,
@@ -320,12 +340,7 @@ export default function PortfolioSection() {
             description_it: post.description_it,
             body_en: post.body_en,
             body_it: post.body_it,
-            source_link: post.source_link,
-            demo_link: post.demo_link,
-            store_link: post.store_link,
-            fdroid_link: post.fdroid_link,
-            website: post.website,
-            ios_store_link: post.ios_store_link,
+            buttons: post.buttons ?? [],
             post_tags: post.post_tags,
             created_at: post.created_at,
             author_id: post.author_id,
@@ -529,99 +544,88 @@ export default function PortfolioSection() {
           </div>
         </div>
 
-        {/* Links */}
+        {/* Buttons */}
         <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('portfolio.sourceLinkLabel')}
-          </h3>
-          <div className="grid md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                {t('portfolio.sourceLinkLabel')}
-              </label>
-              <input
-                type="url"
-                value={formData.source_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, source_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.sourceLinkPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                {t('portfolio.demoLinkLabel')}
-              </label>
-              <input
-                type="url"
-                value={formData.demo_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, demo_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.demoLinkPlaceholder')}
-              />
-            </div>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-accent-violet">
+              {t('portfolio.buttonsTitle')}
+            </h3>
+            <button
+              type="button"
+              onClick={addButton}
+              className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
+            >
+              <Plus className="w-4 h-4" />
+              {t('portfolio.addButton')}
+            </button>
           </div>
-          <div className="grid md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                {t('portfolio.storeLinkLabel')}
-              </label>
-              <input
-                type="url"
-                value={formData.store_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, store_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.storeLinkPlaceholder')}
-              />
+          <p className="text-xs text-text-muted">
+            {t('portfolio.buttonsHint')}
+          </p>
+          {formData.buttons.length === 0 ? (
+            <p className="text-sm text-text-muted">
+              {t('portfolio.buttonsEmpty')}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {formData.buttons.map((button, index) => (
+                <div
+                  key={index}
+                  className="bg-surface-base rounded-lg border border-border-subtle p-3 space-y-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <CardToolbar
+                      showReorder
+                      onMoveUp={() => moveButton(index, -1)}
+                      onMoveDown={() => moveButton(index, 1)}
+                      isFirst={index === 0}
+                      isLast={index === formData.buttons.length - 1}
+                      onDelete={() => removeButton(index)}
+                    />
+                    <select
+                      aria-label={t('portfolio.buttonKindLabel')}
+                      value={button.kind}
+                      onChange={(e) =>
+                        updateButton(index, {
+                          kind: e.target.value as PostButtonKind,
+                        })
+                      }
+                      className={`${inputClass} sm:w-48`}
+                    >
+                      {postButtonKinds.map((kind) => (
+                        <option key={kind} value={kind}>
+                          {t(`portfolio.buttonKind.${kind}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <input
+                    type="url"
+                    aria-label={t('portfolio.buttonUrlLabel')}
+                    value={button.url}
+                    onChange={(e) =>
+                      updateButton(index, { url: e.target.value })
+                    }
+                    className={inputClass}
+                    placeholder={t('portfolio.buttonUrlPlaceholder')}
+                  />
+                  {button.kind === 'custom' && (
+                    <input
+                      type="text"
+                      aria-label={t('portfolio.buttonLabelLabel')}
+                      value={button.label ?? ''}
+                      onChange={(e) =>
+                        updateButton(index, { label: e.target.value })
+                      }
+                      className={inputClass}
+                      placeholder={t('portfolio.buttonLabelPlaceholder')}
+                      required
+                    />
+                  )}
+                </div>
+              ))}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                F-Droid
-              </label>
-              <input
-                type="url"
-                value={formData.fdroid_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, fdroid_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder="https://f-droid.org/..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                iOS App Store
-              </label>
-              <input
-                type="url"
-                value={formData.ios_store_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, ios_store_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder="https://apps.apple.com/..."
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              Website
-            </label>
-            <input
-              type="url"
-              value={formData.website}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, website: e.target.value }))
-              }
-              className={inputClass}
-              placeholder="https://..."
-            />
-          </div>
+          )}
         </div>
 
         {/* Metadata */}

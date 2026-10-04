@@ -32,9 +32,14 @@ rendering and caching.
 - **Role-based access** — admin: all sections + user management; editor:
   blog/portfolio + account. Every mutation is authorized server-side; the UI
   never is the security boundary
-- **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Layout
-  (header/footer), Privacy Policy, Users, Account — each with EN/IT
-  translations, draft/publish state, and live previews
+- **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Request
+  Form copy, Requests, Layout (header/footer), Website Copy, Privacy Policy,
+  Users, Account — each with EN/IT translations, draft/publish state, and live
+  previews. *Requests* is read-only and has no intake path yet: the public
+  form does not submit, so the section renders an explicit "not connected"
+  notice until one does. *Request Form copy* is not published to the site
+  either — the public form owns those strings until it moves to CMS
+  translations.
 - **Uploads** — images (client-side WebP preprocessing, server fallback via
   Sharp, SVG rejected) and PDF resumes, stored in the shared `website`
   bucket with format-aware extensions/MIME. Animated WebP skips the

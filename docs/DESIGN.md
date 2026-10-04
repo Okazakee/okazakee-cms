@@ -58,36 +58,58 @@ Rules:
 
 | token | role | dark | light |
 |---|---|---|---|
-| `surface-base` | page canvas | `#0a0a0a` | `#f4f5f9` |
-| `surface-alt` | band / tinted section | `#0c0d0d` | `#eceef5` |
-| `surface-card` | cards, panels | `#111215` | `#ffffff` |
-| `surface-card-hover` | card hover | `#15171e` | `#f7f8fc` |
-| `surface-raised` | chips, pills, inset rows | `#181a23` | `#eceef4` |
+| `surface-base` | page canvas, header | `#0a0a0a` | `#e4e7ee` |
+| `surface-alt` | band / tinted section | `#0c0d0d` | `#dadee4` |
+| `surface-card` | cards, panels | `#111215` | `#f4f7fc` |
+| `surface-card-hover` | card hover, inline `code` | `#15171e` | `#e0e4eb` |
+| `surface-raised` | chips, pills, secondary buttons | `#181a23` | `#dee2e9` |
 | `border-subtle` | default 1px border | `#21242b` | `#d9dce6` |
 | `border-hover` | border on interaction | `#353c4b` | `#b6bdcd` |
-| `accent-violet` | primary accent | `#a078ff` | `#7c3aed` |
-| `accent-violet-light` | accent text / links | `#c4b5fd` | `#6d28d9` |
-| `accent-violet-deep` | fills, selection | `#7c3aed` | `#6d28d9` |
+| `accent-violet` | primary accent | `#9451ff` | `#7c3aed` |
+| `accent-violet-light` | accent text / links | `#cdaffd` | `#6d28d9` |
+| `accent-violet-deep` | fills, selection | `#6831c0` | `#6831c0` |
 | `accent-cyan` | data / tech highlight | `#38bdf8` | `#0369a1` |
 | `text-white` | headings | `#f8fafc` | `#0b0e14` |
 | `text-main` | body copy | `#e2e8f0` | `#141822` |
-| `text-muted` | secondary copy | `#a3aec0` | `#3a4254` |
-| `text-dim` | captions, footnotes, footer | `#808d9f` | `#55606f` |
+| `text-muted` | secondary copy | `#a3aec0` | `#343c4e` |
+| `text-dim` | captions, footnotes, footer | `#808d9f` | `#4b5664` |
+| `text-on-accent` | ink on an accent fill | `#0a0a0a` | `#f4f7fc` |
 | `status-active` | "current" pip only | `#10b981` | `#047857` |
-| `code-bg` / `code-fg` | code surfaces | `#08090d` / `#e2e8f0` | `#f3f4f9` / `#1b2030` |
+| `code-bg` / `code-fg` | code surfaces | `#08090d` / `#e2e8f0` | `#dde1e7` / `#1b2030` |
+
+The light surfaces are one hue stepped down in small luminance steps, so band /
+chip / hover / canvas / card are five distinct planes rather than five names
+for the same white. Card is the only near-white surface and nothing reaches
+`#ffffff`. Elevation in light mode is *lighter*, so a hover or a chip darkens
+from its card; the same classes on dark step lighter. `text-muted` and
+`text-dim` step down with the canvas — deepening a canvas without deepening
+the ink is what drops captions below their floor.
+
+`text-on-accent` is the one ink that does *not* move with the canvas: it stays
+at the card tone in light, because a fill's label must not dim every time the
+canvas is retuned.
 
 ### 1.3 Contrast floor (measured, must not regress)
 
 | content | dark | light |
 |---|---|---|
-| body text | 16.1 | 16.3 |
-| paragraphs | 5.9 – 10.7 | 5.7 – 9.2 |
-| headings | 17.9 – 18.9 | 16.7 – 19.3 |
-| tag chips | 7.7 | 8.7 |
-| footer / captions (`text-dim`) | 5.9 | 5.9 |
+| body text — `text-main` on canvas | 16.1 | 14.3 |
+| paragraphs — `text-main`, canvas → card | 15.2 – 16.1 | 14.3 – 16.5 |
+| headings — `text-white`, band → card | 17.9 – 18.6 | 14.3 – 18.0 |
+| tag chips — `text-muted` on `surface-raised` | 7.7 | 8.5 |
+| footer / captions — `text-dim` on canvas | 5.9 | 6.0 |
+| footer — `text-dim` on `surface-alt` | 5.8 | 5.5 |
+| captions on card — `text-dim` on `surface-card` | 5.6 | 6.9 |
+| accent link — `accent-violet-light` on canvas | 10.5 | 5.7 |
+| accent marker — `accent-violet` on card | 4.4 | 5.3 |
+| inline code — `accent-cyan` on `surface-card-hover` | 8.4 | 4.7 |
+| ink on accent fill — `text-on-accent` on `accent-violet` | 4.6 | 5.3 |
+| terminal bar — `text-dim` on `surface-alt/60` over card | 5.7 | 6.1 |
 
 `text-dim` used to sit at 4.2 in both themes — below AA. Treat ~5.5:1 as its floor and
 `text-muted` ~8:1. If a new surface makes one fail, fix the token, never the one-off.
+`surface-base` is the canvas and `surface-alt` the band; the footer rides the band, so
+that pair is floored at 5.5 and pins `text-dim` from both sides.
 
 ### 1.4 Off-limits colour
 
@@ -129,9 +151,6 @@ the terminal traffic-light dots (`#ff5f57` / `#febc2e` / `#28c840`) and `::selec
   buttons `rounded-lg` (8px), chips `rounded` (4px).
 - Borders: always 1px `border-subtle`; interaction raises the border to
   `accent-violet/40–/50`, optionally with a tinted shadow. **No image zoom on hover.**
-- Grain: `body::before`, repeating asset, `blur(0.7px)`, `z-index: -1`, dark asset at
-  **15%** under `html.dark`, light asset otherwise. It must never sit above content —
-  verified that tiles and opaque bands are untouched by it.
 - Motion: `transition-colors` ~300ms; nothing decorative. `prefers-reduced-motion`
   disables smooth scroll and transitions (mirrors the repo's existing rule).
 
@@ -277,13 +296,20 @@ Invented copy is a defect, not a placeholder.
 | UI | source |
 |---|---|
 | all copy | `i18n_translations.translations` (namespaces: `header`, `hero-section`, `skills-section`, `career-section`, `contacts-section`, `posts-section`, `footer`, `privacyPolicy`, `request-form`, `errors`) |
-| hero name/role/about | `hero-section.top.*`, `hero-section.aboutme.*` |
-| skills | `skills_categories` + nested `skills` (`icon` URL, `invert`) |
+| hero name/about | `hero-section.top.name`, `hero-section.aboutme.*` |
+| hero roles | `hero-section.top.roles.0…` as a numeric index map (`top.roles.1`, `top.roles.2`, …) when the list exists; the singular `hero-section.top.role` stays as the live fallback for content written before the list and is never migrated away |
+| hero portrait/animation | `hero_section.shape` (`pebble` \| `square` \| `rounded` \| `squircle`, null = pebble), `hero_section.typewriter`, `hero_section.typewriter_target` (`role1` \| `role2` \| `all`, null = role1) |
+| skills | `skills_categories` (ordered by `position`) + nested `skills` (`icon` URL, `invert`, optional `link` URL, `position` inside its category; `position` NULL sorts last with an id tiebreak) |
 | career | `career_entries` (`logo`, `website_url`, `location_*`, `remote`, `startDate`/`endDate`, `description_*`, `skills`) |
 | contacts | `contacts` rows (`label`, `link`, `icon`, `bg_color`) |
-| posts | `blog_posts` / `portfolio_posts` (`title_en` + `title_${locale}`, `description_*`, `body_*`, `image` + `blurhashURL`, `post_tags`, `views`, optional `source_link` / `demo_link` / `store_link` / `fdroid_link` / `website` / `ios_store_link`) |
+| posts | `blog_posts` / `portfolio_posts` (`title_en` + `title_${locale}`, `description_*`, `body_*`, `image` + `blurhashURL`, `post_tags`, `views`); project quick links come from `portfolio_posts.buttons` |
+| post buttons | `portfolio_posts.buttons` — an ordered jsonb array of `{ kind, url, label? }`, `kind` ∈ `website` \| `source` \| `demo` \| `store` \| `fdroid` \| `ios` \| `custom`. **Array order is render order.** The editor owns the order and the URL only: the label and icon of a preset belong to the public site, so `label` is read only for `custom` and is required there. `url` must be an absolute http(s) URL. Blog posts have no buttons — the column is portfolio-only |
+| legacy link columns | `website` / `source_link` / `demo_link` / `store_link` / `fdroid_link` / `ios_store_link` stay in the table but are no longer written. They are the fallback: a row with null/empty `buttons` renders from them (website, source, demo, store, fdroid, ios), which is what makes the migration a no-op for existing content. Migration `20261004111000_backfill_post_buttons.sql` populates `buttons` from them; dropping the columns is a separate, later decision |
 | author | `user_profiles` via `author_id` (`display_name`, `avatar_url`) |
+| header chrome | `site_settings` — one row: `header_logo_dark` / `header_logo_light` (absolute URL, NULL = the bundled `title-ws*.png` asset, resolved per theme) and `nav_anchors`. These are configuration, not copy, so they live in their own table rather than in the `i18n_translations` jsonb |
+| nav anchors | `site_settings.nav_anchors` — an ordered jsonb array of `{ id, anchor }` where `id` ∈ `home` \| `skills` \| `career` \| `portfolio` \| `blog` \| `contacts`. **Written index-aligned with `header.buttons.N`, read by `id`.** `anchor` is a fragment-safe element id with no leading `#`; blank/omitted falls back to the item id, which reproduces the href the site has always rendered. The destinations and the sections' `id=` attributes stay site-side — an editor cannot retarget a nav item at another page |
 | resume | `hero_section.resume_en` / `resume_it` |
+| project requests | `project_requests` (`locale`, `name`, `email`, `company`, `website`, `project_type`, `budget`, `timeline`, `request`, `consent`, `created_at`, `archived`, `archived_at`) — **personal data**: service_role only, no anon/authenticated grant, never in the public cache-tag vocabulary. Rows arrive from `okazakee-ws` `POST /api/requests`, which re-validates the payload server-side and writes through the service-role client; the CMS inbox is the only reader |
 
 **Custom formatting to honour**
 
@@ -300,8 +326,6 @@ Invented copy is a defect, not a placeholder.
 
 - Fixed: `GitHubStars` now ignores profile/organisation links (`source_link` for
   MinePanel is an org URL, which used to fetch a repo that 404s and render ★ 0).
-- Fixed: the grain rule matched `body.dark` while the theme class lives on `<html>`, so
-  dark mode had no grain at all.
 - Open: the 404 routes answer **HTTP 200** (soft 404). The dev server also logs
   `Could not validate 'instant' …` on that path. Both predate the redesign and come from
   how unknown single-segment paths land on `/[post_type]` and call `notFound()`.
@@ -312,9 +336,39 @@ Invented copy is a defect, not a placeholder.
 it back. Patching from an older snapshot silently reverts whatever was added in between —
 that already cost the `request-form` namespace and the `Top` label once.
 
-**New copy that will need i18n keys** when the request form and drawer land: the form
-labels and options, `Project request` / `Send me a request` / `Send request`, the consent
-sentence, and the drawer's `Language` label (`header.language` already exists).
+**Ordered lists in translations** (`hero-section.top.roles`, the
+`request-form` `typeOptions`): they are stored as a numeric index map, because
+the section DELTA merges arrays per index and can never shorten one. Removing
+the last entry therefore leaves a `null` at that index rather than truncating
+the array — every reader (the site, the preview, the roles editor) skips
+blank/`null` slots, so the hole is invisible. The singular `hero-section.top.role`
+is deliberately left in place as the fallback for content that predates the list.
+
+**Project-request inbox** (`RequestsSection`, admin-only, no Publish All callback):
+
+- **Archive is a boolean, not a status column.** `archived` plus `archived_at` is
+  the whole model: the inbox has exactly two slices (active / archived) and one
+  predicate. An enum-shaped status would add a vocabulary — and a CHECK
+  constraint — for a distinction the product never draws. Archiving moves a row
+  between slices; deleting removes it. Both mutations return
+  `BatchCommitEvidence`, and a zero-row outcome is reported as a failure: a
+  "success" that changed nothing is a defect, not a no-op.
+- **Editors cannot see requests.** Every row carries a name, an email address
+  and free text a visitor typed, so the inbox is personal data, not editorial
+  content. `requestEntriesActions` calls `requireAdmin()` before touching the
+  service-role client, so hiding the nav entry is presentation, not the
+  control.
+- **No revalidation.** Requests are private operational data and are kept out
+  of the cache-tag vocabulary entirely — a saved request never fires an
+  `invalidatePublicContent` event.
+- The form's own copy is a site invariant (see `okazakee-ws`
+  `src/i18n/messages/requestForm.{en,it}.json`), like the post-button labels:
+  an editor must not be able to retitle a validation message. The option
+  VALUES are storage (`project_type` / `budget` / `timeline`) and stay English
+  in both locales; only their display labels are translated.
+
+**New copy that will need i18n keys** for the drawer: its `Language` label
+(`header.language` already exists).
 
 ---
 
@@ -336,5 +390,4 @@ DB reads. Nothing from the mocks' plumbing ships — only their structure, token
 behaviour.
 
 Still undesigned: search result states, the blog list page mock, detail-page
-interactions (lightbox, share, view increment), blur-up placeholder states, and the
-light-mode grain calibration.
+  interactions (lightbox, share, view increment) and blur-up placeholder states.

@@ -19,7 +19,7 @@ interface UseFileUploadOptions {
   generateBlurhash?: boolean;
 }
 
-interface UseFileUploadReturn {
+export interface UseFileUploadReturn {
   file: File | null;
   previewUrl: string | null;
   blurhash: string | null;

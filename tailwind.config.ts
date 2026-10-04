@@ -34,6 +34,7 @@ const config: Config = {
         'text-main': 'var(--c-text-main)',
         'text-muted': 'var(--c-text-muted)',
         'text-dim': 'var(--c-text-dim)',
+        'text-on-accent': 'var(--c-text-on-accent)',
         'status-active': 'var(--c-status-active)',
         'code-bg': 'var(--c-code-bg)',
         'code-fg': 'var(--c-code-fg)',

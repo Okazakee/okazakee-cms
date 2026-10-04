@@ -2,9 +2,27 @@ import {
   createClient as createSupabaseClient,
   type SupabaseClient,
 } from '@supabase/supabase-js';
-import { supabaseServerSecret, supabaseUrl } from '@/config/shared';
+import {
+  supabaseSchema,
+  supabaseServerSecret,
+  supabaseUrl,
+} from '@/config/shared';
 
-let cachedClient: SupabaseClient | null = null;
+function createAdminClient() {
+  return createSupabaseClient(supabaseUrl, supabaseServerSecret, {
+    db: { schema: supabaseSchema },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+// The client is configured with a runtime schema, so the value returned by the
+// factory is generically wider than `SupabaseClient`, whose schema parameter
+// defaults to the literal "public". The public signature stays
+// `SupabaseClient`; the single widening cast is applied where the value is
+// created so callers are unaffected.
+type CmsAdminClient = SupabaseClient;
+
+let cachedClient: CmsAdminClient | null = null;
 
 /**
  * Canonical server-only elevated Supabase client (bypasses RLS).
@@ -23,9 +41,7 @@ export function getCmsAdminClient(): SupabaseClient {
     throw new Error('Missing Supabase admin credentials');
   }
   if (!cachedClient) {
-    cachedClient = createSupabaseClient(supabaseUrl, supabaseServerSecret, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    cachedClient = createAdminClient() as CmsAdminClient;
   }
   return cachedClient;
 }

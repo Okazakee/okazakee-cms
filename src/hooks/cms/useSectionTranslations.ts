@@ -148,6 +148,7 @@ interface UseSectionTranslationsReturn {
   canEditTranslations: boolean;
   getField: (locale: CmsLocale, path: string) => string;
   setField: (locale: CmsLocale, path: string, value: string) => void;
+  deleteField: (locale: CmsLocale, path: string) => void;
   saveTranslations: () => Promise<string[]>;
   revertTranslations: () => void;
   clearError: () => void;
@@ -253,6 +254,16 @@ export function useSectionTranslations(
     []
   );
 
+  const deleteField = useCallback((locale: CmsLocale, path: string) => {
+    setTranslations((prev) => {
+      const localeFields = prev[locale];
+      if (!(path in localeFields)) return prev;
+      const next = { ...localeFields };
+      delete next[path];
+      return { ...prev, [locale]: next };
+    });
+  }, []);
+
   const saveTranslations = useCallback(async (): Promise<string[]> => {
     const sections = buildTranslationSections(original, translations);
     if (Object.keys(sections).length === 0) return [];
@@ -340,6 +351,7 @@ export function useSectionTranslations(
     canEditTranslations,
     getField,
     setField,
+    deleteField,
     saveTranslations,
     revertTranslations,
     clearError,

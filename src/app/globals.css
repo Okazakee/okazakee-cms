@@ -5,23 +5,24 @@
 /* Design tokens — docs/DESIGN.md §1. Light on :root, dark under the
    .dark class that themeStore toggles on <html>. */
 :root {
-  --c-surface-base: #f4f5f9;
-  --c-surface-alt: #eceef5;
-  --c-surface-card: #ffffff;
-  --c-surface-card-hover: #f7f8fc;
-  --c-surface-raised: #eceef4;
+  --c-surface-base: #e4e7ee;
+  --c-surface-alt: #dadee4;
+  --c-surface-card: #f4f7fc;
+  --c-surface-card-hover: #e0e4eb;
+  --c-surface-raised: #dee2e9;
   --c-border-subtle: #d9dce6;
   --c-border-hover: #b6bdcd;
   --c-accent-violet: #7c3aed;
   --c-accent-violet-light: #6d28d9;
-  --c-accent-violet-deep: #6d28d9;
+  --c-accent-violet-deep: #6831c0;
   --c-accent-cyan: #0369a1;
   --c-text-white: #0b0e14;
   --c-text-main: #141822;
-  --c-text-muted: #3a4254;
-  --c-text-dim: #55606f;
+  --c-text-muted: #343c4e;
+  --c-text-dim: #4b5664;
+  --c-text-on-accent: #f4f7fc;
   --c-status-active: #047857;
-  --c-code-bg: #f3f4f9;
+  --c-code-bg: #dde1e7;
   --c-code-fg: #1b2030;
 }
 
@@ -33,14 +34,15 @@
   --c-surface-raised: #181a23;
   --c-border-subtle: #21242b;
   --c-border-hover: #353c4b;
-  --c-accent-violet: #a078ff;
-  --c-accent-violet-light: #c4b5fd;
-  --c-accent-violet-deep: #7c3aed;
+  --c-accent-violet: #9451ff;
+  --c-accent-violet-light: #cdaffd;
+  --c-accent-violet-deep: #6831c0;
   --c-accent-cyan: #38bdf8;
   --c-text-white: #f8fafc;
   --c-text-main: #e2e8f0;
   --c-text-muted: #a3aec0;
   --c-text-dim: #808d9f;
+  --c-text-on-accent: #0a0a0a;
   --c-status-active: #10b981;
   --c-code-bg: #08090d;
   --c-code-fg: #e2e8f0;
@@ -49,6 +51,13 @@
 @utility clip-pebble {
   clip-path: url(#pebble-clip);
   -webkit-clip-path: url(#pebble-clip);
+  position: relative;
+  overflow: visible;
+}
+
+@utility clip-squircle {
+  clip-path: url(#squircle-clip);
+  -webkit-clip-path: url(#squircle-clip);
   position: relative;
   overflow: visible;
 }
@@ -65,22 +74,6 @@
     margin: 0;
     padding: 0;
   }
-
-  body::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background-image: url("./public/grain.png");
-    background-repeat: repeat;
-    filter: blur(0.7px);
-    z-index: -1;
-  }
-
-  html.dark body::before {
-    background-image: url("./public/grain_dark.png");
-    opacity: 15%;
-  }
-
   label {
     @apply cursor-text text-accent-violet-light;
   }
@@ -327,7 +320,7 @@
 }
 .request-consent:checked {
   border-color: transparent;
-  background-color: #2563eb;
+  background-color: var(--c-accent-violet);
   background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
   background-position: center;
   background-repeat: no-repeat;

@@ -64,6 +64,13 @@ const nextConfig: NextConfig = {
   // it broke sharp's __dirname-relative native requires under Turbopack's
   // external module loader at runtime (ERR_DLOPEN_FAILED on libvips). Letting
   // Turbopack handle the native addon (copy + resolve) works on Vercel.
+  // Next's dev overlay re-requests the current RSC payload on a fixed 1s
+  // timer, which kept the floating badge flashing "rendering…" forever and
+  // burned a wasted round-trip per second on every open dev page. Measured:
+  // ~10 `?_rsc=` requests per 10s idle with it on, 0 with it off. Dev-only —
+  // production builds never load the overlay. Delete this line to get the
+  // compile-error badge back at the cost of that poll.
+  devIndicators: false,
   cacheComponents: true,
   async headers() {
     return [

@@ -1,6 +1,12 @@
 'use client';
 
 import { Moon, Smartphone, Sun } from 'lucide-react';
+import {
+  SIDEBAR_ROW,
+  SIDEBAR_ROW_ICON,
+  SIDEBAR_ROW_LABEL,
+  SIDEBAR_ROW_NEUTRAL,
+} from '@/components/layout/sidebarRowStyle';
 import { useEffect, useState } from 'react';
 import useThemeStore, { type ThemeMode } from '@/store/themeStore';
 
@@ -88,11 +94,11 @@ export default function ThemeToggle({
       <button
         type="button"
         onClick={cycleThemeMode}
-        className="w-full flex items-center gap-3 p-3 rounded-lg bg-surface-card hover:bg-surface-raised text-text-main hover:text-text-main transition-all duration-200"
+        className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_NEUTRAL}`}
         data-umami-event="Theme toggle"
       >
-        <SidebarIcon className="w-4 h-4 flex-shrink-0" />
-        <span className="font-medium text-sm truncate">
+        <SidebarIcon className={SIDEBAR_ROW_ICON} />
+        <span className={SIDEBAR_ROW_LABEL}>
           {mode === 'auto' && 'Auto'}
           {mode === 'light' && 'Light'}
           {mode === 'dark' && 'Dark'}

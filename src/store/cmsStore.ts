@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { CMSUser } from '@/app/actions/cms/getUser';
+import type { HeroSettings } from '@/types/fetchedData.types';
 
 export interface PublishState {
   isDirty: boolean;
@@ -17,16 +18,31 @@ export interface PublishFailure {
   error: string;
 }
 
+/**
+ * Hero store updates always carry every column, so a section that only owns
+ * one of them (resumes in Contacts, display in Hero) never drops the rest.
+ */
+export function mergeHeroSettings(
+  current: HeroSettings | null,
+  patch: Partial<HeroSettings>
+): HeroSettings {
+  return {
+    mainImage: current?.mainImage ?? null,
+    blurhashURL: current?.blurhashURL ?? null,
+    resume_en: current?.resume_en ?? null,
+    resume_it: current?.resume_it ?? null,
+    shape: current?.shape ?? null,
+    typewriter: current?.typewriter === true,
+    typewriter_target: current?.typewriter_target ?? null,
+    ...patch,
+  };
+}
+
 interface CmsState {
   user: CMSUser | null;
   sidePanelSections: string[];
   activeSection: string | null;
-  heroSection: {
-    mainImage: string | null;
-    blurhashURL: string | null;
-    resume_en: string | null;
-    resume_it: string | null;
-  } | null;
+  heroSection: HeroSettings | null;
   loading: boolean;
   error: string | null;
   warning: string | null;
@@ -37,14 +53,7 @@ interface CmsState {
   setUser: (user: CMSUser | null) => void;
   setSidePanelSections: (sections: string[]) => void;
   setActiveSection: (section: string) => void;
-  setHeroSection: (
-    heroSection: {
-      mainImage: string | null;
-      blurhashURL: string | null;
-      resume_en: string | null;
-      resume_it: string | null;
-    } | null
-  ) => void;
+  setHeroSection: (heroSection: HeroSettings | null) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setWarning: (warning: string | null) => void;

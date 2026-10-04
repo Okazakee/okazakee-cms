@@ -4,7 +4,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   getAdminClient,
   getCmsActionContext,
-  isValidHttpUrl,
   prepareImageUpload,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
@@ -30,6 +29,7 @@ import type {
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import { type PostButton, validatePostButtons } from '@/utils/cms/postButtons';
 import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
@@ -81,18 +81,13 @@ type CreatePortfolioData = {
   title_en: string;
   title_it: string;
   image: string;
-  source_link: string;
-  demo_link: string;
   description_en: string;
   description_it: string;
   body_en: string;
   body_it: string;
   blurhashURL: string;
   post_tags: string;
-  store_link: string;
-  fdroid_link?: string | null;
-  website?: string | null;
-  ios_store_link?: string | null;
+  buttons?: PostButton[];
   created_at?: string;
   author_id: string;
   hidden?: boolean;
@@ -103,9 +98,13 @@ type UpdatePortfolioData = Partial<CreatePortfolioData>;
 type PortfolioResult = MutationResult;
 
 // Validation functions
+type PortfolioDataValidation =
+  | { isValid: true; data: CreatePortfolioData | UpdatePortfolioData }
+  | { isValid: false; error: string };
+
 function validatePortfolioData(
   data: CreatePortfolioData | UpdatePortfolioData
-): { isValid: boolean; error?: string } {
+): PortfolioDataValidation {
   // Required fields validation
   if (
     data.title_en !== undefined &&
@@ -178,32 +177,14 @@ function validatePortfolioData(
     };
   }
 
-  // URL validation
-  if (data.source_link?.trim() && !isValidHttpUrl(data.source_link)) {
-    return { isValid: false, error: 'Source link must be a valid URL' };
+  // Buttons validation; returns the normalised list so the write carries
+  // exactly what was checked (preset labels dropped, urls trimmed).
+  const buttons = validatePostButtons(data.buttons);
+  if (!buttons.isValid) {
+    return { isValid: false, error: buttons.error };
   }
 
-  if (data.demo_link?.trim() && !isValidHttpUrl(data.demo_link)) {
-    return { isValid: false, error: 'Demo link must be a valid URL' };
-  }
-
-  if (data.store_link?.trim() && !isValidHttpUrl(data.store_link)) {
-    return { isValid: false, error: 'Store link must be a valid URL' };
-  }
-
-  if (data.fdroid_link?.trim() && !isValidHttpUrl(data.fdroid_link)) {
-    return { isValid: false, error: 'F-Droid link must be a valid URL' };
-  }
-
-  if (data.website?.trim() && !isValidHttpUrl(data.website)) {
-    return { isValid: false, error: 'Website link must be a valid URL' };
-  }
-
-  if (data.ios_store_link?.trim() && !isValidHttpUrl(data.ios_store_link)) {
-    return { isValid: false, error: 'iOS Store link must be a valid URL' };
-  }
-
-  return { isValid: true };
+  return { isValid: true, data: { ...data, buttons: buttons.buttons } };
 }
 
 export async function portfolioActions(
@@ -308,12 +289,12 @@ async function batchPublishPortfolio(
         admin,
         'website',
         'Website Assets/portfolio',
-        item.data.title_en || 'untitled',
+        validation.data.title_en || 'untitled',
         prepared.image
       );
 
       const insertData = {
-        ...item.data,
+        ...validation.data,
         author_id: item.data.author_id || context.user.id,
         image: upload.publicUrl,
         blurhashURL: prepared.image.blurhash,
@@ -346,7 +327,7 @@ async function batchPublishPortfolio(
       }
 
       let uploaded: { publicUrl: string; path: string } | null = null;
-      const updateData: UpdatePortfolioData = { ...item.data };
+      const updateData: UpdatePortfolioData = { ...validation.data };
       // Trusted replacement source: previous object URL comes from the DB.
       let previousImage: string | null = null;
 
@@ -442,9 +423,7 @@ async function batchPublishPortfolio(
             });
           }
         }
-        const deletable = operation.deletes.filter((id) =>
-          existingIds.has(id)
-        );
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
         if (deletable.length > 0) {
           const { data: deletedRows, error } = await admin
             .from('portfolio_posts')
@@ -587,8 +566,8 @@ async function createPortfolio(
 
     const { id: userId } = await requireAllowedPostWriter();
     const insertData = {
-      ...data,
-      blurhashURL: data.blurhashURL ?? '',
+      ...validation.data,
+      blurhashURL: validation.data.blurhashURL ?? '',
       author_id: data.author_id || userId,
     };
 
@@ -647,7 +626,7 @@ async function updatePortfolio(
 
     const { data: updatedPortfolio, error } = await admin
       .from('portfolio_posts')
-      .update(data)
+      .update(validation.data)
       .eq('id', id)
       .select()
       .single();

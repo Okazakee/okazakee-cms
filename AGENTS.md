@@ -35,15 +35,16 @@ src/
           auth.ts                 # Allowlist matching, GitHub helpers
           fileHelpers.ts          # Auth contexts, image processing, uploads
           profileSync.ts          # user_profiles sync after login/OAuth
-        sections/                 # Section actions: blog, portfolio, hero,
-                                  # skills, career, contacts, i18n, users
+                                  # skills, career, contacts, i18n, users,
+                                  # requests (project-request inbox)
   components/
     cms/sections/                 # Editor components per section
     cms/shared/                   # Shared CMS UI (ErrorBanner, FileDropzone, ...)
     common/cms/                   # PreviewModal, SidePanel, AccountSection, previews
     common/                       # Public-section components reused for previews
     layout/                       # ThemeToggle, MarkdownRenderer, ...
-  hooks/cms/                      # useFileUpload, useSectionTranslations, ...
+  hooks/cms/                      # useFileUpload, useSectionTranslations,
+                                  # useRequestEntries (inbox loader + mutations)
   i18n/                           # next-intl config + static CMS messages
   libs/
     content/cacheTags.ts          # Public cache-tag vocabulary (mirrors public repo)

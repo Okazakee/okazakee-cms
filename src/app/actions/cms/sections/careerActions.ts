@@ -83,8 +83,6 @@ type CreateCareerData = {
   description_en: string;
   description_it: string;
   skills: string;
-  company_description_en: string;
-  company_description_it: string;
 };
 
 type UpdateCareerData = Partial<CreateCareerData>;
@@ -431,9 +429,7 @@ async function batchPublishCareer(
             });
           }
         }
-        const deletable = operation.deletes.filter((id) =>
-          existingIds.has(id)
-        );
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
         if (deletable.length > 0) {
           const { data: deletedRows, error } = await admin
             .from('career_entries')

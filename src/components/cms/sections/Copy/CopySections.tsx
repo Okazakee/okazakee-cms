@@ -5,8 +5,6 @@ import { useCallback, useState } from 'react';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { RequestFormPreview } from '@/components/common/cms/previews/canonical/RequestForm';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
@@ -39,17 +37,7 @@ const requestFields = [
 const siteGroups = [
   {
     namespace: 'posts-section',
-    fields: [
-      'button',
-      'no-posts',
-      'source',
-      'demo',
-      'store',
-      'fdroid',
-      'ios',
-      'preCopy',
-      'ratelimit',
-    ],
+    fields: ['button', 'no-posts', 'preCopy', 'ratelimit', 'searchbar'],
   },
   {
     namespace: 'errors',
@@ -77,20 +65,17 @@ function CopyEditor({
   sectionKey,
   fields,
   showAll = false,
-  preview = false,
 }: {
   namespace: string;
   sectionKey: string;
   fields: string[];
   showAll?: boolean;
-  preview?: boolean;
 }) {
   const t = useTranslations('cms');
   const tr = useSectionTranslations(namespace);
   const [locale, setLocale] = useState<'en' | 'it'>('en');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
   useSectionDirty(sectionKey, tr.isDirty);
 
   const publish = useCallback(async () => {
@@ -162,15 +147,6 @@ function CopyEditor({
         ))}
       </div>
       <div className="mt-6 flex flex-wrap justify-end gap-3">
-        {preview && (
-          <button
-            type="button"
-            onClick={() => setPreviewOpen(true)}
-            className="min-h-11 rounded-lg border border-border-subtle px-4 text-sm text-text-muted"
-          >
-            {t('common.preview')}
-          </button>
-        )}
         <button
           type="button"
           onClick={revert}
@@ -187,18 +163,6 @@ function CopyEditor({
           {busy ? t('common.publishing') : t('common.publish')}
         </button>
       </div>
-      {preview && (
-        <PreviewModal
-          isOpen={previewOpen}
-          onClose={() => setPreviewOpen(false)}
-          title={t('copy.requestTitle')}
-          copy={{ locale, namespace, drafts: tr.translations }}
-        >
-          <div className="mx-auto max-w-5xl">
-            <RequestFormPreview />
-          </div>
-        </PreviewModal>
-      )}
     </fieldset>
   );
 }
@@ -216,7 +180,6 @@ export function RequestCopySection() {
         sectionKey="request-form"
         fields={requestFields}
         showAll
-        preview
       />
     </div>
   );

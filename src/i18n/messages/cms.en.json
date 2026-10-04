@@ -1,7 +1,7 @@
 {
   "copy": {
     "requestTitle": "Request form",
-    "requestDescription": "Customize the public contact form labels, options and coming-soon message. The form is a preview; it does not send requests.",
+    "requestDescription": "Not published to the website yet. These labels are owned by the public request form component until it moves to CMS translations. Editing here has no effect on the live site.",
     "siteTitle": "Website copy",
     "siteDescription": "Customize post links, empty states, error pages, privacy metadata and shared labels in both languages.",
     "namespaces": {
@@ -11,6 +11,24 @@
       "privacyPolicy": "Privacy page subtitle",
       "common": "Shared labels"
     }
+  },
+  "requests": {
+    "title": "Project requests",
+    "subtitle": "Requests people send through the public form. Personal data: admin only, never cached publicly.",
+    "loading": "Loading requests…",
+    "emptyActive": "No open requests.",
+    "emptyArchived": "No archived requests.",
+    "filterActive": "Active",
+    "filterArchived": "Archived",
+    "archive": "Archive",
+    "restore": "Restore",
+    "archivedBadge": "Archived",
+    "delete": "Delete",
+    "deleteTitle": "Delete this request?",
+    "confirmDelete": "Delete",
+    "confirmDeleteMessage": "The request and the personal data it carries are removed for good. Archive it instead if you only want it out of the inbox.",
+    "consentGiven": "Privacy policy accepted",
+    "consentMissing": "Privacy policy not accepted"
   },
   "sidebar": {
     "workspace": "Content workspace",
@@ -26,12 +44,19 @@
       "blog": "Blog",
       "contacts": "Contacts",
       "request-form": "Request form",
+      "requests": "Requests",
       "site-copy": "Website copy",
-      "layout": "Layout",
+      "header": "Header",
+      "footer": "Footer",
       "privacy-policy": "Privacy Policy",
       "users": "Manage Users",
       "account": "My Account",
       "settings": "Settings"
+    },
+    "navGroup": {
+      "page": "Page",
+      "inbox": "Inbox",
+      "system": "System"
     },
     "home": "Home",
     "logout": "Logout",
@@ -44,6 +69,7 @@
     "apply": "Apply",
     "applyChanges": "Apply Changes",
     "preview": "Preview",
+    "planned": "Planned",
     "delete": "Delete",
     "edit": "Edit",
     "close": "Close",
@@ -125,8 +151,6 @@
     "namePlaceholder": "e.g., Cristian ****Di Carlo****",
     "roleLabel": "Role",
     "rolePlaceholder": "e.g., Fullstack ****Developer****",
-    "aboutMeTitleLabel": "Title",
-    "aboutMeTitlePlaceholder": "e.g., About me",
     "aboutMeParagraphLabel": "Paragraph",
     "aboutMeParagraphPlaceholder": "Enter about me paragraph...",
     "heroImageTitle": "Hero Image",
@@ -146,7 +170,28 @@
     "errorDownloadImage": "Failed to download image",
     "errorUpdateHero": "Failed to update hero section",
     "successUpdate": "Hero section updated successfully!",
-    "previewTitle": "Hero Section Preview"
+    "previewTitle": "Hero Section Preview",
+    "displaySection": "Portrait and animation",
+    "shapeLabel": "Portrait shape",
+    "shapeHint": "Pebble is the original outline; the other presets clip with the site's own radii and clip-path utilities.",
+    "shapeOptions": {
+      "pebble": "Pebble (default)",
+      "square": "Square",
+      "rounded": "Rounded",
+      "squircle": "Squircle"
+    },
+    "typewriterLabel": "Typewriter animation",
+    "typewriterTargetLabel": "Animated role",
+    "typewriterTargets": {
+      "role1": "First role",
+      "role2": "Second role",
+      "all": "All roles"
+    },
+    "typewriterHint": "The chosen role is typed out on the website. Visitors who ask for reduced motion always see the full text.",
+    "typewriterPreviewNote": "Typewriter (static in preview)",
+    "addRole": "Add role",
+    "removeRole": "Remove role",
+    "rolesHint": "Roles are an ordered list. While the list is empty the website falls back to the single Role field."
   },
   "skills": {
     "title": "Skills Section Editor",
@@ -163,6 +208,8 @@
     "renameCategory": "Rename category",
     "skillTitlePlaceholder": "Skill title",
     "skillIconPlaceholder": "https://example.com/icon.svg",
+    "skillLinkLabel": "Link URL",
+    "skillLinkPlaceholder": "https://example.com (optional)",
     "invertLabel": "Invert in dark mode",
     "addSkill": "Add Skill",
     "newSkill": "New Skill",
@@ -170,6 +217,7 @@
     "confirmDeleteCategory": "Are you sure you want to delete this category? All skills in this category must be removed first.",
     "errorRequiredFields": "Please fill in all required fields",
     "errorIconUrl": "Please enter an icon URL",
+    "errorInvalidLink": "Please enter a valid http(s) link",
     "errorCategoryName": "Category name is required",
     "previewTitle": "Skills Section Preview"
   },
@@ -216,9 +264,6 @@
     "descriptionEnLabel": "English Description",
     "descriptionItLabel": "Italian Description",
     "descriptionPlaceholder": "Enter job description",
-    "companyDescEnLabel": "English Company Description",
-    "companyDescItLabel": "Italian Company Description",
-    "companyDescPlaceholder": "Enter company description",
     "skillsPlaceholder": "[\"ReactJS\", \"Express.js\", \"Angular\", \"CMS\"]",
     "startDateLabel": "Start Date",
     "endDateLabel": "End Date",
@@ -239,12 +284,24 @@
     "titleItLabel": "Italian Title",
     "titleEnPlaceholder": "Enter English title",
     "titleItPlaceholder": "Enter Italian title",
-    "sourceLinkLabel": "Source Code Link",
-    "sourceLinkPlaceholder": "https://github.com/...",
-    "demoLinkLabel": "Demo Link",
-    "demoLinkPlaceholder": "https://demo.example.com",
-    "storeLinkLabel": "Store Link",
-    "storeLinkPlaceholder": "https://play.google.com/...",
+    "buttonsTitle": "Buttons",
+    "buttonsHint": "Order is the order they appear on the website. The website owns the icon and label of a known type; only Custom uses your label.",
+    "buttonsEmpty": "No buttons yet. This project shows no quick links.",
+    "addButton": "Add Button",
+    "buttonKindLabel": "Button type",
+    "buttonKind": {
+      "website": "Website",
+      "source": "Source Code",
+      "demo": "Live Demo",
+      "store": "Google Play",
+      "fdroid": "F-Droid",
+      "ios": "App Store",
+      "custom": "Custom"
+    },
+    "buttonUrlLabel": "Button URL",
+    "buttonUrlPlaceholder": "https://...",
+    "buttonLabelLabel": "Button Label",
+    "buttonLabelPlaceholder": "e.g., Changelog",
     "descriptionEnLabel": "English Description",
     "descriptionItLabel": "Italian Description",
     "descriptionEnPlaceholder": "Enter English description",
@@ -379,10 +436,29 @@
     "footerLightModeLabel": "Light Mode",
     "headerThemeLabel": "Theme",
     "headerLanguageLabel": "Language",
+    "headerResumeLabel": "Resume button",
     "headerSettingsLabel": "Settings",
     "headerNavButtonsLabel": "Navigation Buttons",
+    "headerLogosTitle": "Header Logo",
+    "headerLogoDarkLabel": "Dark theme logo",
+    "headerLogoLightLabel": "Light theme logo",
+    "headerLogoStoredNote": "A custom logo is published for this theme. Removing it restores the built-in logo.",
+    "headerLogoFallbackNote": "No custom logo: the website shows its built-in logo for this theme.",
+    "headerAnchorsLabel": "Navigation Anchors",
+    "headerAnchorsNote": "Each navigation link points at an anchor on the home page. Leave a field on its default to keep the link the website already builds; clear a custom anchor to restore it.",
+    "headerAnchorDefaultLabel": "Default",
+    "errorFetch": "Failed to load the header settings",
+    "errorAnchors": "Failed to save the navigation anchors",
     "headerButtonPlaceholder": "Button {index}",
     "previewTitle": "Layout Preview"
+  },
+  "headerSection": {
+    "title": "Header",
+    "subtitle": "Navigation labels and header chrome copy, for English and Italian"
+  },
+  "footerSection": {
+    "title": "Footer",
+    "subtitle": "Footer credit, source, back-to-top and privacy labels, for English and Italian"
   },
   "privacy": {
     "title": "Privacy Policy Editor",

@@ -60,6 +60,7 @@ const portfolioPost: PortfolioPost = {
   fdroid_link: null,
   website: null,
   ios_store_link: null,
+  buttons: null,
   views: 5,
   hidden: false,
 };

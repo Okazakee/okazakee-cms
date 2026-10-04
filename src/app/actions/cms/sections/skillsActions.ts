@@ -23,6 +23,7 @@ import type {
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import { isValidHttpUrl } from '@/utils/cms/validation';
 import { createClient } from '@/utils/supabase/server';
 
 type SkillOperation =
@@ -49,6 +50,7 @@ type SkillOperation =
       }>;
       deleteCategories: number[];
       categoryOrder: Array<{ id: number | string; position: number }>;
+      skillOrder: Array<{ id: number | string; position: number }>;
     };
 
 type CreateSkillData = {
@@ -57,6 +59,8 @@ type CreateSkillData = {
   invert: boolean;
   category_id?: number;
   blurhashURL?: string;
+  link?: string | null;
+  position?: number | null;
 };
 
 type UpdateSkillData = {
@@ -65,6 +69,8 @@ type UpdateSkillData = {
   icon?: string;
   blurhashURL?: string;
   invert?: boolean;
+  link?: string | null;
+  position?: number | null;
 };
 
 type CreateCategoryData = {
@@ -104,7 +110,31 @@ function validateSkillData(data: CreateSkillData | UpdateSkillData): {
     return { isValid: false, error: 'Invalid category ID' };
   }
 
+  // Link validation: optional, but must be an http(s) URL when present.
+  if (
+    data.link !== undefined &&
+    data.link !== null &&
+    !isValidHttpUrl(data.link)
+  ) {
+    return { isValid: false, error: 'Skill link must be a valid http(s) URL' };
+  }
+
   return { isValid: true };
+}
+
+/** Empty/blank links are stored as NULL so "no link" has one representation. */
+function normalizeSkillLink(link: string | null | undefined): string | null {
+  const trimmed = link?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/** Normalizes link/position while leaving absent fields untouched. */
+function withNormalizedSkillFields<T extends UpdateSkillData>(data: T): T {
+  const next: UpdateSkillData = { ...data };
+  if (data.link !== undefined) next.link = normalizeSkillLink(data.link);
+  if (data.position !== undefined)
+    next.position = Number.isInteger(data.position) ? data.position : null;
+  return next as T;
 }
 
 export async function skillsActions(
@@ -213,7 +243,10 @@ async function batchPublishSkills(
         continue;
       }
 
-      const skillData = { ...item.data, category_id: resolvedCategoryId };
+      const skillData = withNormalizedSkillFields({
+        ...item.data,
+        category_id: resolvedCategoryId,
+      });
       const validation = validateSkillData(skillData);
       if (!validation.isValid) {
         markFailed(evidence, {
@@ -401,7 +434,8 @@ async function batchPublishSkills(
     }
 
     for (const item of operation.updateSkills) {
-      const validation = validateSkillData(item.data);
+      const updateFields = withNormalizedSkillFields(item.data);
+      const validation = validateSkillData(updateFields);
       if (!validation.isValid) {
         markFailed(evidence, {
           kind: 'update',
@@ -413,7 +447,7 @@ async function batchPublishSkills(
 
       const { error } = await admin
         .from('skills')
-        .update(item.data)
+        .update(updateFields)
         .eq('id', item.id)
         .select('id')
         .single();
@@ -426,6 +460,39 @@ async function batchPublishSkills(
         });
       } else {
         markUpdated(evidence, item.id);
+      }
+    }
+
+    // Runs last so a reorder always wins over the row updates above: the
+    // position column is the source of truth for the order inside a category.
+    // Evidence ids are namespaced (`skill:<id>`) because a skill id and a
+    // category id can collide numerically.
+    for (const item of operation.skillOrder) {
+      const resolvedId =
+        typeof item.id === 'string' ? tempIdToRealId[item.id] : item.id;
+      if (resolvedId === undefined) {
+        markFailed(evidence, {
+          kind: 'reorder',
+          id: `skill:${String(item.id).replace(/^skill:/, '')}`,
+          error: 'Unknown skill',
+        });
+        continue;
+      }
+      const { error } = await admin
+        .from('skills')
+        .update({ position: item.position })
+        .eq('id', resolvedId)
+        .select('id')
+        .single();
+
+      if (error) {
+        markFailed(evidence, {
+          kind: 'reorder',
+          id: `skill:${resolvedId}`,
+          error: error.message,
+        });
+      } else {
+        markReordered(evidence, `skill:${resolvedId}`);
       }
     }
 
@@ -489,7 +556,8 @@ async function createSkill(
   skillData: CreateSkillData
 ): Promise<SkillsResult> {
   try {
-    const validation = validateSkillData(skillData);
+    const normalized = withNormalizedSkillFields(skillData);
+    const validation = validateSkillData(normalized);
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
@@ -497,7 +565,7 @@ async function createSkill(
     const admin = getAdminClient();
     const { data, error } = await admin
       .from('skills')
-      .insert(skillData)
+      .insert(normalized)
       .select()
       .single();
 
@@ -523,7 +591,8 @@ async function updateSkill(
   updateData: UpdateSkillData
 ): Promise<SkillsResult> {
   try {
-    const validation = validateSkillData(updateData);
+    const updateFields = withNormalizedSkillFields(updateData);
+    const validation = validateSkillData(updateFields);
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
@@ -541,7 +610,7 @@ async function updateSkill(
 
     const { data, error } = await admin
       .from('skills')
-      .update(updateData)
+      .update(updateFields)
       .eq('id', skillId)
       .select();
 

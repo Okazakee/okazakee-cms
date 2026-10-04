@@ -1,7 +1,7 @@
 {
   "copy": {
     "requestTitle": "Modulo richieste",
-    "requestDescription": "Personalizza etichette, opzioni e messaggio del modulo pubblico. L'anteprima non invia richieste.",
+    "requestDescription": "Non ancora pubblicato sul sito. Queste etichette sono di proprietà del componente del modulo pubblico finché non passerà alle traduzioni del CMS. Modificarle qui non ha effetto sul sito pubblico.",
     "siteTitle": "Testi del sito",
     "siteDescription": "Personalizza link dei post, stati vuoti, errori, sottotitolo privacy ed etichette condivise nelle due lingue.",
     "namespaces": {
@@ -11,6 +11,24 @@
       "privacyPolicy": "Sottotitolo privacy",
       "common": "Etichette condivise"
     }
+  },
+  "requests": {
+    "title": "Richieste di progetto",
+    "subtitle": "Richieste inviate tramite il modulo pubblico. Dati personali: solo admin, mai messe in cache pubblica.",
+    "loading": "Caricamento richieste…",
+    "emptyActive": "Nessuna richiesta aperta.",
+    "emptyArchived": "Nessuna richiesta archiviata.",
+    "filterActive": "Attive",
+    "filterArchived": "Archiviate",
+    "archive": "Archivia",
+    "restore": "Ripristina",
+    "archivedBadge": "Archiviata",
+    "delete": "Elimina",
+    "deleteTitle": "Eliminare questa richiesta?",
+    "confirmDelete": "Elimina",
+    "confirmDeleteMessage": "La richiesta e i dati personali che contiene vengono rimossi definitivamente. Archiviarla se vuoi solo toglierla dalla casella di arrivo.",
+    "consentGiven": "Informativa privacy accettata",
+    "consentMissing": "Informativa privacy non accettata"
   },
   "sidebar": {
     "workspace": "Gestione contenuti",
@@ -26,12 +44,19 @@
       "blog": "Blog",
       "contacts": "Contatti",
       "request-form": "Modulo richieste",
+      "requests": "Richieste",
       "site-copy": "Testi del sito",
-      "layout": "Layout",
+      "header": "Intestazione",
+      "footer": "Piè di pagina",
       "privacy-policy": "Privacy Policy",
       "users": "Gestisci Utenti",
       "account": "Il mio Account",
       "settings": "Impostazioni"
+    },
+    "navGroup": {
+      "page": "Pagina",
+      "inbox": "Posta in arrivo",
+      "system": "Sistema"
     },
     "home": "Home",
     "logout": "Esci",
@@ -44,6 +69,7 @@
     "apply": "Applica",
     "applyChanges": "Applica Modifiche",
     "preview": "Anteprima",
+    "planned": "In arrivo",
     "delete": "Elimina",
     "edit": "Modifica",
     "close": "Chiudi",
@@ -125,8 +151,6 @@
     "namePlaceholder": "es. Cristian ****Di Carlo****",
     "roleLabel": "Ruolo",
     "rolePlaceholder": "es. Fullstack ****Developer****",
-    "aboutMeTitleLabel": "Titolo",
-    "aboutMeTitlePlaceholder": "es. Chi sono",
     "aboutMeParagraphLabel": "Paragrafo",
     "aboutMeParagraphPlaceholder": "Inserisci il paragrafo chi sono...",
     "heroImageTitle": "Immagine Hero",
@@ -146,7 +170,28 @@
     "errorDownloadImage": "Impossibile scaricare l'immagine",
     "errorUpdateHero": "Impossibile aggiornare la sezione hero",
     "successUpdate": "Sezione hero aggiornata con successo!",
-    "previewTitle": "Anteprima Sezione Hero"
+    "previewTitle": "Anteprima Sezione Hero",
+    "displaySection": "Ritratto e animazione",
+    "shapeLabel": "Forma del ritratto",
+    "shapeHint": "Pebble è il contorno originale; gli altri preset usano raggi e clip-path del sito.",
+    "shapeOptions": {
+      "pebble": "Pebble (predefinito)",
+      "square": "Quadrato",
+      "rounded": "Arrotondato",
+      "squircle": "Squircle"
+    },
+    "typewriterLabel": "Animazione macchina da scrivere",
+    "typewriterTargetLabel": "Ruolo animato",
+    "typewriterTargets": {
+      "role1": "Primo ruolo",
+      "role2": "Secondo ruolo",
+      "all": "Tutti i ruoli"
+    },
+    "typewriterHint": "Il ruolo scelto viene digitato sul sito. Chi richiede il movimento ridotto vede sempre il testo completo.",
+    "typewriterPreviewNote": "Macchina da scrivere (statica in anteprima)",
+    "addRole": "Aggiungi ruolo",
+    "removeRole": "Rimuovi ruolo",
+    "rolesHint": "I ruoli sono un elenco ordinato. Finché l'elenco è vuoto il sito usa il campo Ruolo singolo."
   },
   "skills": {
     "title": "Editor Sezione Competenze",
@@ -163,6 +208,8 @@
     "renameCategory": "Rinomina categoria",
     "skillTitlePlaceholder": "Titolo competenza",
     "skillIconPlaceholder": "https://esempio.com/icona.svg",
+    "skillLinkLabel": "URL Link",
+    "skillLinkPlaceholder": "https://esempio.com (opzionale)",
     "invertLabel": "Inverti in modalità scura",
     "addSkill": "Aggiungi Competenza",
     "newSkill": "Nuova Competenza",
@@ -170,6 +217,7 @@
     "confirmDeleteCategory": "Sei sicuro di voler eliminare questa categoria? Tutte le competenze devono essere rimosse prima.",
     "errorRequiredFields": "Compila tutti i campi obbligatori",
     "errorIconUrl": "Inserisci un URL per l'icona",
+    "errorInvalidLink": "Inserisci un link http(s) valido",
     "errorCategoryName": "Il nome della categoria è obbligatorio",
     "previewTitle": "Anteprima Sezione Competenze"
   },
@@ -216,9 +264,6 @@
     "descriptionEnLabel": "Descrizione in Inglese",
     "descriptionItLabel": "Descrizione in Italiano",
     "descriptionPlaceholder": "Inserisci descrizione del lavoro",
-    "companyDescEnLabel": "Descrizione Azienda in Inglese",
-    "companyDescItLabel": "Descrizione Azienda in Italiano",
-    "companyDescPlaceholder": "Inserisci descrizione azienda",
     "skillsPlaceholder": "[\"ReactJS\", \"Express.js\", \"Angular\", \"CMS\"]",
     "startDateLabel": "Data di Inizio",
     "endDateLabel": "Data di Fine",
@@ -239,12 +284,24 @@
     "titleItLabel": "Titolo in Italiano",
     "titleEnPlaceholder": "Inserisci titolo in inglese",
     "titleItPlaceholder": "Inserisci titolo in italiano",
-    "sourceLinkLabel": "Link al Codice Sorgente",
-    "sourceLinkPlaceholder": "https://github.com/...",
-    "demoLinkLabel": "Link Demo",
-    "demoLinkPlaceholder": "https://demo.esempio.com",
-    "storeLinkLabel": "Link Store",
-    "storeLinkPlaceholder": "https://play.google.com/...",
+    "buttonsTitle": "Pulsanti",
+    "buttonsHint": "L'ordine è l'ordine in cui compaiono sul sito. Il sito gestisce icona ed etichetta di un tipo noto; solo Custom usa la tua etichetta.",
+    "buttonsEmpty": "Nessun pulsante. Questo progetto non mostra collegamenti rapidi.",
+    "addButton": "Aggiungi Pulsante",
+    "buttonKindLabel": "Tipo di pulsante",
+    "buttonKind": {
+      "website": "Sito web",
+      "source": "Codice Sorgente",
+      "demo": "Demo Live",
+      "store": "Google Play",
+      "fdroid": "F-Droid",
+      "ios": "App Store",
+      "custom": "Personalizzato"
+    },
+    "buttonUrlLabel": "URL del Pulsante",
+    "buttonUrlPlaceholder": "https://...",
+    "buttonLabelLabel": "Etichetta del Pulsante",
+    "buttonLabelPlaceholder": "es. Changelog",
     "descriptionEnLabel": "Descrizione in Inglese",
     "descriptionItLabel": "Descrizione in Italiano",
     "descriptionEnPlaceholder": "Inserisci descrizione in inglese",
@@ -379,10 +436,29 @@
     "footerLightModeLabel": "Modalità Chiara",
     "headerThemeLabel": "Tema",
     "headerLanguageLabel": "Lingua",
+    "headerResumeLabel": "Pulsante curriculum",
     "headerSettingsLabel": "Impostazioni",
     "headerNavButtonsLabel": "Pulsanti Navigazione",
+    "headerLogosTitle": "Logo Intestazione",
+    "headerLogoDarkLabel": "Logo tema scuro",
+    "headerLogoLightLabel": "Logo tema chiaro",
+    "headerLogoStoredNote": "È pubblicato un logo personalizzato per questo tema. Rimuovendolo torna il logo predefinito del sito.",
+    "headerLogoFallbackNote": "Nessun logo personalizzato: il sito mostra il suo logo predefinito per questo tema.",
+    "headerAnchorsLabel": "Ancoraggi di Navigazione",
+    "headerAnchorsNote": "Ogni link di navigazione punta a un ancoraggio nella home. Lascia un campo sul valore predefinito per mantenere il link attuale; svuota un ancoraggio personalizzato per ripristinarlo.",
+    "headerAnchorDefaultLabel": "Predefinito",
+    "errorFetch": "Impossibile caricare le impostazioni dell'intestazione",
+    "errorAnchors": "Impossibile salvare gli ancoraggi di navigazione",
     "headerButtonPlaceholder": "Pulsante {index}",
     "previewTitle": "Anteprima Layout"
+  },
+  "headerSection": {
+    "title": "Intestazione",
+    "subtitle": "Etichette di navigazione e testi dell'intestazione, in inglese e italiano"
+  },
+  "footerSection": {
+    "title": "Piè di pagina",
+    "subtitle": "Crediti, sorgente, torna su e privacy del piè di pagina, in inglese e italiano"
   },
   "privacy": {
     "title": "Editor Privacy Policy",

@@ -23,8 +23,6 @@ interface PreviewCareerEntry {
   location_it: string;
   description_en: string;
   description_it: string;
-  company_description_en: string;
-  company_description_it: string;
 }
 
 interface CareerPreviewProps {
@@ -74,7 +72,7 @@ export function CareerPreview({ entries }: CareerPreviewProps) {
   const tr = (key: string) => (t.has(key) ? t(key) : '');
   const localized = (
     entry: PreviewCareerEntry,
-    field: 'location' | 'description' | 'company_description'
+    field: 'location' | 'description'
   ): string =>
     (entry[`${field}_${locale}` as keyof PreviewCareerEntry] as string) ?? '';
 
@@ -169,7 +167,6 @@ export function CareerPreview({ entries }: CareerPreviewProps) {
         <div className="relative space-y-12 pl-6 sm:pl-8">
           {groups.map((group, index) => {
             const [latest, ...older] = group.positions;
-            const companyDescription = localized(latest, 'company_description');
 
             return (
               <div className="group relative" key={group.company}>
@@ -202,12 +199,6 @@ export function CareerPreview({ entries }: CareerPreviewProps) {
                     </div>
                     {pill(latest)}
                   </div>
-
-                  {companyDescription && (
-                    <p className="mb-5 text-xs font-light leading-relaxed text-text-dim">
-                      {companyDescription}
-                    </p>
-                  )}
 
                   {position(latest, false)}
 

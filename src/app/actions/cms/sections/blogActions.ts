@@ -423,9 +423,7 @@ async function batchPublishBlog(
             });
           }
         }
-        const deletable = operation.deletes.filter((id) =>
-          existingIds.has(id)
-        );
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
         if (deletable.length > 0) {
           const { data: deletedRows, error } = await admin
             .from('blog_posts')

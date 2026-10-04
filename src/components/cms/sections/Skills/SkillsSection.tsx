@@ -23,6 +23,7 @@ import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Skill, SkillsCategory } from '@/types/fetchedData.types';
+import { isValidHttpUrl } from '@/utils/cms/validation';
 
 type EditableSkill = Skill & { isEditing?: boolean };
 type EditableCategory = Omit<SkillsCategory, 'skills'> & {
@@ -65,6 +66,7 @@ export default function SkillsSection() {
     new Set()
   );
   const [categoryOrderChanged, setCategoryOrderChanged] = useState(false);
+  const [skillOrderChanged, setSkillOrderChanged] = useState(false);
 
   const {
     translations,
@@ -84,7 +86,8 @@ export default function SkillsSection() {
     modifiedCategories.size > 0 ||
     newCategories.length > 0 ||
     deletedCategories.size > 0 ||
-    categoryOrderChanged;
+    categoryOrderChanged ||
+    skillOrderChanged;
 
   const isDirty = hasDataChanges || transDirty;
 
@@ -148,10 +151,13 @@ export default function SkillsSection() {
           invert: latest.invert,
           category_id: latest.category_id,
           blurhashURL: latest.blurhashURL || '',
+          link: latest.link ?? null,
+          position: latest.position ?? null,
         },
       };
     });
     const skillTempIds = newSkills.map(({ skill }) => String(skill.id));
+    const skillTempSet = new Set(skillTempIds);
 
     const updateSkillKeys = Array.from(modifiedSkills).filter((key) => {
       const [, skillStr] = key.split('-');
@@ -171,6 +177,7 @@ export default function SkillsSection() {
                 title: skill.title,
                 icon: skill.icon,
                 invert: skill.invert,
+                link: skill.link ?? null,
               },
             },
           ]
@@ -190,6 +197,19 @@ export default function SkillsSection() {
           position: i,
         }))
       : [];
+    // Positions are dense per category and sent for every category, mirroring
+    // categoryOrder: reordering one category backfills the others so the
+    // public nulls-last ordering never splits a category in two groups.
+    const skillOrder = skillOrderChanged
+      ? categories.flatMap((cat) =>
+          cat.skills.map((skill, index) => ({
+            id: skillTempSet.has(String(skill.id))
+              ? `skill:${skill.id}`
+              : skill.id,
+            position: index,
+          }))
+        )
+      : [];
 
     try {
       let retainedCategories = categoryTempIds;
@@ -199,6 +219,7 @@ export default function SkillsSection() {
       let retainedSkillDeletes = deleteSkillIds;
       let retainedCategoryDeletes = deleteCategoryIds;
       let retainedOrder = categoryOrderChanged;
+      let retainedSkillOrder = skillOrderChanged;
       // Committed-only view of the categories, kept in sync with setCategories
       // so the revert baseline never stores stale temp ids.
       let remappedCategories = categories;
@@ -210,6 +231,7 @@ export default function SkillsSection() {
         deleteSkills: deleteSkillIds,
         deleteCategories: deleteCategoryIds,
         categoryOrder,
+        skillOrder,
         updateCategories,
         updateSkills,
       });
@@ -333,6 +355,20 @@ export default function SkillsSection() {
           );
         }
         setCategoryOrderChanged(retainedOrder);
+
+        if (skillOrderChanged) {
+          // Skill reorder evidence is namespaced (`skill:<id>`) so a skill id
+          // can never be mistaken for a reordered category id.
+          const reordered = new Set(evidence.reordered.map(String));
+          retainedSkillOrder = skillOrder.some((item) => {
+            const resolved =
+              typeof item.id === 'string'
+                ? (skillRemap.get(item.id.replace('skill:', '')) ?? item.id)
+                : item.id;
+            return !reordered.has(`skill:${resolved}`);
+          });
+        }
+        setSkillOrderChanged(retainedSkillOrder);
       }
 
       if (transDirty) {
@@ -351,7 +387,8 @@ export default function SkillsSection() {
         retainedCategoryUpdates.length +
         retainedSkillDeletes.length +
         retainedCategoryDeletes.length +
-        (retainedOrder ? 1 : 0);
+        (retainedOrder ? 1 : 0) +
+        (retainedSkillOrder ? 1 : 0);
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -378,6 +415,7 @@ export default function SkillsSection() {
     modifiedCategories,
     modifiedSkills,
     categoryOrderChanged,
+    skillOrderChanged,
     transDirty,
     saveTranslations,
     t,
@@ -393,6 +431,7 @@ export default function SkillsSection() {
     setNewCategories([]);
     setDeletedCategories(new Set());
     setCategoryOrderChanged(false);
+    setSkillOrderChanged(false);
     revertTranslations();
     setError(null);
   };
@@ -426,6 +465,11 @@ export default function SkillsSection() {
       setError(t('skills.errorRequiredFields'));
       return;
     }
+    const link = ns.link?.trim() || '';
+    if (!isValidHttpUrl(link)) {
+      setError(t('skills.errorInvalidLink'));
+      return;
+    }
     const tempId = Date.now();
     const skill: EditableSkill = {
       id: tempId,
@@ -434,6 +478,9 @@ export default function SkillsSection() {
       invert: ns.invert || false,
       category_id: catId,
       blurhashURL: ns.blurhashURL || '',
+      link: link === '' ? null : link,
+      // New skills land last in their category; publishing makes that durable.
+      position: cat ? cat.skills.length : 0,
       isEditing: false,
     };
     setCategories((prev) =>
@@ -444,6 +491,7 @@ export default function SkillsSection() {
       )
     );
     setNewSkills((prev) => [...prev, { categoryId: catId, skill }]);
+    setSkillOrderChanged(true);
   };
 
   const toggleEditSkill = (catId: number, skillId: number) => {
@@ -606,6 +654,29 @@ export default function SkillsSection() {
     [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
     setCategories(next);
     setCategoryOrderChanged(true);
+  };
+
+  const moveSkill = (catId: number, skillId: number, dir: -1 | 1) => {
+    const cat = categories.find((c) => c.id === catId);
+    const idx = cat?.skills.findIndex((s) => s.id === skillId) ?? -1;
+    if (!cat || idx < 0 || idx + dir < 0 || idx + dir >= cat.skills.length)
+      return;
+
+    setCategories((prev) =>
+      prev.map((category) => {
+        if (category.id !== catId) return category;
+        const next = [...category.skills];
+        [next[idx], next[idx + dir]] = [next[idx + dir], next[idx]];
+        // Positions are re-densified locally so the preview (which sorts by
+        // position) matches the order shown in the editor, and publishing
+        // persists exactly what the editor displays.
+        return {
+          ...category,
+          skills: next.map((s, i) => ({ ...s, position: i })),
+        };
+      })
+    );
+    setSkillOrderChanged(true);
   };
 
   const inputClass =
@@ -796,7 +867,7 @@ export default function SkillsSection() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {cat.skills.map((skill) => (
+              {cat.skills.map((skill, skillIdx) => (
                 <div
                   key={skill.id}
                   className={`rounded-lg p-4 text-center transition-colors ${
@@ -810,6 +881,11 @@ export default function SkillsSection() {
                       {skill.title}
                     </h3>
                     <CardToolbar
+                      showReorder
+                      isFirst={skillIdx === 0}
+                      isLast={skillIdx === cat.skills.length - 1}
+                      onMoveUp={() => moveSkill(cat.id, skill.id, -1)}
+                      onMoveDown={() => moveSkill(cat.id, skill.id, 1)}
                       onEdit={() => toggleEditSkill(cat.id, skill.id)}
                       onDelete={() => deleteSkill(cat.id, skill.id)}
                     />
@@ -864,6 +940,25 @@ export default function SkillsSection() {
                           }
                           className={`${inputClass} text-xs`}
                           placeholder="https://example.com/icon.svg"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-text-muted mb-1">
+                          {t('skills.skillLinkLabel')}
+                        </label>
+                        <input
+                          type="url"
+                          value={skill.link ?? ''}
+                          onChange={(e) =>
+                            handleSkillChange(
+                              cat.id,
+                              skill.id,
+                              'link',
+                              e.target.value
+                            )
+                          }
+                          className={`${inputClass} text-xs`}
+                          placeholder={t('skills.skillLinkPlaceholder')}
                         />
                       </div>
                       <label className="flex items-center gap-2 text-sm text-text-muted ">
@@ -972,6 +1067,27 @@ export default function SkillsSection() {
                         placeholder="https://example.com/icon.svg"
                       />
                     </div>
+                    <input
+                      type="url"
+                      value={cat.newSkill.link || ''}
+                      onChange={(e) =>
+                        setCategories((prev) =>
+                          prev.map((c) =>
+                            c.id === cat.id
+                              ? {
+                                  ...c,
+                                  newSkill: {
+                                    ...c.newSkill!,
+                                    link: e.target.value,
+                                  },
+                                }
+                              : c
+                          )
+                        )
+                      }
+                      className={`${inputClass} text-xs`}
+                      placeholder={t('skills.skillLinkPlaceholder')}
+                    />
                     <label className="flex items-center gap-2 text-sm text-text-muted ">
                       <input
                         type="checkbox"
@@ -1069,6 +1185,8 @@ export default function SkillsSection() {
               icon: s.icon,
               invert: s.invert,
               blurhashURL: s.blurhashURL,
+              link: s.link ?? null,
+              position: s.position ?? null,
             })),
           }))}
         />

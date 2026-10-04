@@ -35,6 +35,15 @@ describe('getContentInvalidation', () => {
     ).toEqual(['privacy-policy']);
   });
 
+  it('maps header settings mutations to the site-settings tag', () => {
+    expect(
+      getContentInvalidation({ entity: 'settings', operation: 'update' })
+    ).toEqual(['site-settings']);
+    expect(
+      getContentInvalidation({ entity: 'settings', operation: 'asset-update' })
+    ).toEqual(['site-settings']);
+  });
+
   it('blog create invalidates collection + posts list only', () => {
     expect(
       getContentInvalidation({ entity: 'blog', operation: 'create' })

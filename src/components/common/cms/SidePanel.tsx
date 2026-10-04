@@ -5,8 +5,10 @@ import {
   Contact,
   FileText,
   Home,
+  Inbox,
   Languages,
-  LayoutGrid,
+  PanelBottom,
+  PanelTop,
   LogOut,
   MessageSquare,
   NotebookPen,
@@ -19,6 +21,14 @@ import { useTranslations } from 'next-intl';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
+import {
+  SIDEBAR_ROW,
+  SIDEBAR_ROW_ACTIVE,
+  SIDEBAR_ROW_DESTRUCTIVE,
+  SIDEBAR_ROW_ICON,
+  SIDEBAR_ROW_LABEL,
+  SIDEBAR_ROW_NEUTRAL,
+} from '@/components/layout/sidebarRowStyle';
 import { useDialogFocus } from '@/hooks/cms/useDialogFocus';
 import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
@@ -32,11 +42,7 @@ const publicSiteUrl =
 // desktop header is gone). Rendered above the section list on desktop and at
 // the top of the fullscreen mobile menu (logo omitted there — the mobile
 // header already shows it).
-function UserBanner({
-  compact = false,
-}: {
-  compact?: boolean;
-}) {
+function UserBanner({ compact = false }: { compact?: boolean }) {
   const user = useCmsStore((s) => s.user);
   const t = useTranslations('cms');
   const roleLabel =
@@ -88,23 +94,44 @@ interface MenuItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   adminOnly: boolean;
+  /** Marks a section that exists but does not reach the website yet. */
+  planned?: boolean;
 }
 
-const CONTENT_ITEMS: MenuItem[] = [
+// The sidebar mirrors the public page top to bottom, then the inbox, then
+// everything that is not page content.
+const PAGE_ITEMS: MenuItem[] = [
+  { id: 'header', label: '', icon: PanelTop, adminOnly: true },
   { id: 'hero', label: '', icon: Home, adminOnly: true },
   { id: 'skills', label: '', icon: Zap, adminOnly: true },
   { id: 'career', label: '', icon: User2, adminOnly: true },
   { id: 'portfolio', label: '', icon: Briefcase, adminOnly: false },
   { id: 'blog', label: '', icon: NotebookPen, adminOnly: false },
   { id: 'contacts', label: '', icon: Contact, adminOnly: true },
-  { id: 'request-form', label: '', icon: MessageSquare, adminOnly: true },
+  { id: 'footer', label: '', icon: PanelBottom, adminOnly: true },
 ];
 
-const CONFIG_ITEMS: MenuItem[] = [
-  { id: 'layout', label: '', icon: LayoutGrid, adminOnly: true },
+const INBOX_ITEMS: MenuItem[] = [
+  { id: 'requests', label: '', icon: Inbox, adminOnly: true },
+];
+
+const SYSTEM_ITEMS: MenuItem[] = [
+  {
+    id: 'request-form',
+    label: '',
+    icon: MessageSquare,
+    adminOnly: true,
+    planned: true,
+  },
   { id: 'site-copy', label: '', icon: Languages, adminOnly: true },
   { id: 'privacy-policy', label: '', icon: FileText, adminOnly: true },
   { id: 'users', label: '', icon: Users, adminOnly: true },
+];
+
+const MENU_GROUPS: Array<{ caption: string; items: MenuItem[] }> = [
+  { caption: 'page', items: PAGE_ITEMS },
+  { caption: 'inbox', items: INBOX_ITEMS },
+  { caption: 'system', items: SYSTEM_ITEMS },
 ];
 
 const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
@@ -144,8 +171,10 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     blog: t('sidebar.nav.blog'),
     contacts: t('sidebar.nav.contacts'),
     'request-form': t('sidebar.nav.request-form'),
+    requests: t('sidebar.nav.requests'),
     'site-copy': t('sidebar.nav.site-copy'),
-    layout: t('sidebar.nav.layout'),
+    header: t('sidebar.nav.header'),
+    footer: t('sidebar.nav.footer'),
     'privacy-policy': t('sidebar.nav.privacy-policy'),
     users: t('sidebar.nav.users'),
     account: t('sidebar.myAccount'),
@@ -187,17 +216,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     if (!user || isAdmin) return;
     if (typeof window !== 'undefined' && activeSection) {
       const savedSection = localStorage.getItem('cms_active_section');
-      const adminOnlySections = [
-        'hero',
-        'skills',
-        'career',
-        'contacts',
-        'layout',
-        'site-copy',
-        'request-form',
-        'privacy-policy',
-        'users',
-      ];
+      // Derived from the menu so a section can never be admin-only in the nav
+      // but missing here (which would strand an editor on it).
+      const adminOnlySections = MENU_GROUPS.flatMap((group) =>
+        group.items.filter((item) => item.adminOnly).map((item) => item.id)
+      );
       if (
         adminOnlySections.includes(activeSection) &&
         (!savedSection || adminOnlySections.includes(savedSection))
@@ -228,6 +251,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       <span className="font-medium flex-1">
         {sectionLabelMap[item.id] || item.label}
       </span>
+      {item.planned && (
+        <span className="shrink-0 rounded border border-border-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-dim">
+          {t('common.planned')}
+        </span>
+      )}
       {hasDraft(item.id) && (
         <span className="w-2 h-2 bg-amber-400 rounded-full flex-shrink-0" />
       )}
@@ -240,20 +268,18 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   // configuration split; the account row closes the list and theme/language,
   // Home and logout live in the pinned footer block. Hidden rows stay
   // unfocusable via tabIndex -1 (the aside itself is inert when closed).
-  const mobileNav: Array<{ id: string; caption: string | null }> = [];
-  for (const item of getFilteredItems(CONTENT_ITEMS)) {
-    mobileNav.push({
-      id: item.id,
-      caption: mobileNav.length === 0 ? t('common.content') : null,
-    });
-  }
-  for (const item of getFilteredItems(CONFIG_ITEMS)) {
-    mobileNav.push({
-      id: item.id,
-      caption:
-        mobileNav.length === getFilteredItems(CONTENT_ITEMS).length
-          ? t('common.configuration')
-          : null,
+  const mobileNav: Array<{
+    id: string;
+    caption: string | null;
+    planned?: boolean;
+  }> = [];
+  for (const group of MENU_GROUPS) {
+    getFilteredItems(group.items).forEach((item, index) => {
+      mobileNav.push({
+        id: item.id,
+        caption: index === 0 ? t(`sidebar.navGroup.${group.caption}`) : null,
+        planned: item.planned,
+      });
     });
   }
   mobileNav.push({ id: 'account', caption: null });
@@ -378,6 +404,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
                   <span className="font-heading flex-1 text-3xl tracking-tight">
                     {sectionLabelMap[row.id]}
                   </span>
+                  {row.planned && (
+                    <span className="shrink-0 self-center rounded border border-border-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-dim">
+                      {t('common.planned')}
+                    </span>
+                  )}
                   {hasDraft(row.id) && (
                     <span
                       role="img"
@@ -398,30 +429,30 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
           className={`flex flex-col gap-3 pt-6 pb-6 transition-[opacity,translate] duration-200 ease-out ${
             isOpen ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
           }`}
-          style={{ transitionDelay: isOpen ? `${mobileNav.length * 40}ms` : '0ms' }}
+          style={{
+            transitionDelay: isOpen ? `${mobileNav.length * 40}ms` : '0ms',
+          }}
         >
-          <div className="grid grid-cols-1 gap-2">
-            <LanguageToggle sidebar />
-          </div>
+          <LanguageToggle sidebar />
           <a
             href={publicSiteUrl}
             target="_blank"
             rel="noopener noreferrer"
             tabIndex={isOpen ? 0 : -1}
-            className="flex min-h-[52px] items-center gap-1.5 rounded-lg border border-accent-violet/40 bg-accent-violet/10 px-3 py-3 font-mono text-sm text-accent-violet-light transition-colors hover:border-accent-violet hover:bg-accent-violet/20"
+            className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_NEUTRAL}`}
           >
-            <Home className="h-4 w-4 shrink-0" />
-            {t('sidebar.home')}
+            <Home className={SIDEBAR_ROW_ICON} />
+            <span className={SIDEBAR_ROW_LABEL}>{t('sidebar.home')}</span>
           </a>
           <button
             type="button"
             onClick={handleLogout}
             disabled={isLoggingOut}
             tabIndex={isOpen ? 0 : -1}
-            className="flex items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-400 transition-all duration-200 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
+            className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_DESTRUCTIVE} disabled:opacity-50`}
           >
-            <LogOut className="h-5 w-5 shrink-0" />
-            <span className="font-medium">
+            <LogOut className={SIDEBAR_ROW_ICON} />
+            <span className={SIDEBAR_ROW_LABEL}>
               {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
             </span>
           </button>
@@ -495,59 +526,55 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
 
         <div className="flex flex-1 flex-col overflow-y-auto">
           <div className="p-4 pb-2">
-            <p className="mb-2 text-xs font-semibold tracking-wider text-text-dim uppercase">
-              {t('common.content')}
-            </p>
-            <nav className="space-y-1">
-              {getFilteredItems(CONTENT_ITEMS).map(renderNavItem)}
-            </nav>
-
-            <p className="mt-4 mb-2 text-xs font-semibold tracking-wider text-text-dim uppercase">
-              {t('common.configuration')}
-            </p>
-            <nav className="space-y-1">
-              {getFilteredItems(CONFIG_ITEMS).map(renderNavItem)}
-            </nav>
+            {MENU_GROUPS.map((group) => (
+              <div key={group.caption} className="mb-4 last:mb-0">
+                <p className="mb-2 text-xs font-semibold tracking-wider text-text-dim uppercase">
+                  {t(`sidebar.navGroup.${group.caption}`)}
+                </p>
+                <nav className="space-y-1">
+                  {getFilteredItems(group.items).map(renderNavItem)}
+                </nav>
+              </div>
+            ))}
           </div>
 
           <div className="space-y-1 border-t border-border-subtle px-4 pt-4 pb-4">
-            <div className="mb-2 grid grid-cols-2 gap-2">
-              <ThemeToggle sidebar />
-              <LanguageToggle sidebar />
-            </div>
-
+            <ThemeToggle sidebar />
+            <LanguageToggle sidebar />
             <button
               type="button"
               onClick={() => handleSelectSection('account')}
               aria-current={activeSection === 'account' ? 'page' : undefined}
-              className={`flex w-full items-center gap-3 rounded-lg p-3 transition-all duration-200 ${
+              className={`${SIDEBAR_ROW} ${
                 activeSection === 'account'
-                  ? 'border border-accent-violet/30 bg-accent-violet/10 text-accent-violet '
-                  : 'border border-border-subtle bg-surface-card text-text-main hover:border-border-hover hover:bg-surface-raised hover:text-text-main '
+                  ? SIDEBAR_ROW_ACTIVE
+                  : SIDEBAR_ROW_NEUTRAL
               }`}
             >
-              <Settings className="h-5 w-5" />
-              <span className="font-medium">{t('sidebar.myAccount')}</span>
+              <Settings className={SIDEBAR_ROW_ICON} />
+              <span className={SIDEBAR_ROW_LABEL}>
+                {t('sidebar.myAccount')}
+              </span>
             </button>
 
             <a
               href={publicSiteUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex w-full items-center gap-3 rounded-lg bg-surface-card p-3 text-text-main transition-all duration-200 hover:bg-surface-raised hover:text-text-main"
+              className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_NEUTRAL}`}
             >
-              <Home className="h-5 w-5" />
-              <span className="font-medium">{t('sidebar.home')}</span>
+              <Home className={SIDEBAR_ROW_ICON} />
+              <span className={SIDEBAR_ROW_LABEL}>{t('sidebar.home')}</span>
             </a>
 
             <button
               type="button"
               onClick={handleLogout}
               disabled={isLoggingOut}
-              className="flex w-full items-center gap-3 rounded-lg bg-red-500/10 p-3 text-red-400 transition-all duration-200 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
+              className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_DESTRUCTIVE} disabled:opacity-50`}
             >
-              <LogOut className="h-5 w-5" />
-              <span className="font-medium">
+              <LogOut className={SIDEBAR_ROW_ICON} />
+              <span className={SIDEBAR_ROW_LABEL}>
                 {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
               </span>
             </button>

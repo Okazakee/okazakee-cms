@@ -11,10 +11,12 @@ import {
   RequestCopySection,
   SiteCopySection,
 } from '@/components/cms/sections/Copy/CopySections';
+import HeaderSection from '@/components/cms/sections/Header/HeaderSection';
 import HeroSection from '@/components/cms/sections/Hero/HeroSection';
-import LayoutSection from '@/components/cms/sections/Layout/LayoutSection';
+import FooterSection from '@/components/cms/sections/Footer/FooterSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
 import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
+import RequestsSection from '@/components/cms/sections/Requests/RequestsSection';
 import SkillsSection from '@/components/cms/sections/Skills/SkillsSection';
 import UsersSection from '@/components/cms/sections/Users/UsersSection';
 import AccountSection from '@/components/common/cms/AccountSection';
@@ -22,24 +24,32 @@ import { CmsHeader } from '@/components/common/cms/CmsHeader';
 import SidePanel from '@/components/common/cms/SidePanel';
 import { useCmsStore } from '@/store/cmsStore';
 
-const adminSections = [
+// Page order: the sidebar reads top-to-bottom like the public page does.
+const pageSections = [
+  'header',
   'hero',
   'skills',
   'career',
   'portfolio',
   'blog',
   'contacts',
+  'footer',
+];
+const inboxSections = ['requests'];
+const systemSections = [
   'request-form',
-  'layout',
   'site-copy',
   'privacy-policy',
   'users',
   'account',
 ];
+const adminSections = [...pageSections, ...inboxSections, ...systemSections];
 const editorSections = ['portfolio', 'blog', 'account'];
 
 function Editor({ section }: { section: string }) {
   switch (section) {
+    case 'header':
+      return <HeaderSection />;
     case 'hero':
       return <HeroSection />;
     case 'skills':
@@ -54,8 +64,10 @@ function Editor({ section }: { section: string }) {
       return <ContactsSection />;
     case 'request-form':
       return <RequestCopySection />;
-    case 'layout':
-      return <LayoutSection />;
+    case 'requests':
+      return <RequestsSection />;
+    case 'footer':
+      return <FooterSection />;
     case 'site-copy':
       return <SiteCopySection />;
     case 'privacy-policy':

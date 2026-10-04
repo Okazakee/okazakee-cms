@@ -22,7 +22,8 @@ export type ContentEntity =
   | 'resume'
   | 'translations'
   | 'privacy'
-  | 'author';
+  | 'author'
+  | 'settings';
 
 export type ContentOperation =
   | 'create'
@@ -68,6 +69,9 @@ export function getContentInvalidation(
       break;
     case 'translations':
       tags.add(cacheTags.translations);
+      break;
+    case 'settings':
+      tags.add(cacheTags.siteSettings);
       break;
     case 'privacy':
       tags.add(cacheTags.privacyPolicy);

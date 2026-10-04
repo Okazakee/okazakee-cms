@@ -133,6 +133,7 @@ export const cacheTagVocabulary = {
     'posts',
     'resume',
     'hero_section',
+    'site-settings',
   ],
   patterns: [/^post:(blog|portfolio):[^:]+$/, /^author:[^:]+$/],
 };

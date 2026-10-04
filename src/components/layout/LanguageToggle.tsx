@@ -2,6 +2,12 @@
 
 import { Languages } from 'lucide-react';
 import type { AppLocale } from '@/i18n/routing';
+import {
+  SIDEBAR_ROW,
+  SIDEBAR_ROW_ICON,
+  SIDEBAR_ROW_LABEL,
+  SIDEBAR_ROW_NEUTRAL,
+} from '@/components/layout/sidebarRowStyle';
 import useUiLocaleStore from '@/store/uiLocaleStore';
 
 // CMS UI language selector. Switching mutates uiLocaleStore: CmsIntlProvider
@@ -28,11 +34,11 @@ export default function LanguageToggle({
       <button
         type="button"
         onClick={switchLanguage}
-        className="w-full flex items-center gap-3 p-3 rounded-lg bg-surface-card hover:bg-surface-raised text-text-main hover:text-text-main transition-all duration-200"
+        className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_NEUTRAL}`}
         data-umami-event="Language toggle"
       >
-        <Languages className="w-4 h-4 flex-shrink-0" />
-        <span className="font-medium text-sm truncate">
+        <Languages className={SIDEBAR_ROW_ICON} />
+        <span className={SIDEBAR_ROW_LABEL}>
           {isItalian ? 'Italiano' : 'English'}
         </span>
       </button>

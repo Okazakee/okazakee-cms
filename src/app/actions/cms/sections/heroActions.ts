@@ -14,11 +14,16 @@ import {
 } from '@/app/actions/cms/utils/fileHelpers';
 import type { MutationResult } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { HeroShape, TypewriterTarget } from '@/types/fetchedData.types';
+import {
+  normalizeHeroShape,
+  normalizeTypewriterTarget,
+} from '@/utils/heroDisplay';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
   | { type: 'GET' }
-  | { type: 'UPDATE'; data: HeroUpdateData }
+  | { type: 'UPDATE_DISPLAY'; data: HeroDisplayData }
   | {
       type: 'UPLOAD_IMAGE';
       file: File;
@@ -38,14 +43,18 @@ type HeroOperation =
       blurhashURL?: string;
     };
 
-type HeroUpdateData = {
-  name?: string;
-  role?: string;
-  about?: string;
+type HeroAssetUpdateData = {
   propic?: string;
   blurhashURL?: string;
   resume_en?: string;
   resume_it?: string;
+};
+
+/** Portrait preset and typewriter configuration; unknown values degrade. */
+type HeroDisplayData = {
+  shape?: string;
+  typewriter?: boolean;
+  typewriter_target?: string;
 };
 
 type HeroFileData = {
@@ -81,8 +90,8 @@ export async function heroActions(
       case 'GET':
         return await getHeroData(supabase);
 
-      case 'UPDATE':
-        return await updateHero(supabase, operation.data);
+      case 'UPDATE_DISPLAY':
+        return await updateHeroDisplay(supabase, operation.data);
 
       case 'UPLOAD_IMAGE':
         return await uploadHeroImage(
@@ -126,7 +135,7 @@ async function getHeroData(supabase: SupabaseClient): Promise<HeroResult> {
   try {
     const { data: heroSection } = await supabase
       .from('hero_section')
-      .select('id, propic, blurhashURL')
+      .select('id, propic, blurhashURL, shape, typewriter, typewriter_target')
       .single();
     const { data: resumeData } = await supabase
       .from('hero_section')
@@ -156,17 +165,43 @@ async function getHeroData(supabase: SupabaseClient): Promise<HeroResult> {
   }
 }
 
-async function updateHero(
+async function updateHeroDisplay(
   _supabase: SupabaseClient,
-  updateData: HeroUpdateData
+  updateData: HeroDisplayData
 ): Promise<HeroResult> {
   try {
     const admin = getAdminClient();
+    const patch: {
+      shape?: HeroShape;
+      typewriter?: boolean;
+      typewriter_target?: TypewriterTarget;
+    } = {};
+
+    // Unknown presets/targets degrade to the documented defaults instead of
+    // being written verbatim.
+    if (updateData.shape !== undefined) {
+      patch.shape = normalizeHeroShape(updateData.shape);
+    }
+    if (updateData.typewriter !== undefined) {
+      patch.typewriter = updateData.typewriter === true;
+    }
+    if (updateData.typewriter_target !== undefined) {
+      patch.typewriter_target = normalizeTypewriterTarget(
+        updateData.typewriter_target
+      );
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return { success: false, error: 'No changes to save' };
+    }
+
+    // `.single()` is the commit evidence: with no hero row the update matches
+    // zero rows and PostgREST raises PGRST116 instead of a false success.
     const { data, error } = await admin
       .from('hero_section')
-      .update(updateData)
+      .update(patch)
       .eq('id', 1)
-      .select()
+      .select('shape, typewriter, typewriter_target')
       .single();
 
     if (error) throw error;
@@ -178,7 +213,7 @@ async function updateHero(
 
     return { success: true, data, revalidation };
   } catch (error) {
-    console.error('Error updating hero:', error);
+    console.error('Error updating hero display:', error);
     return {
       success: false,
       error: 'Failed to update hero section',
@@ -372,7 +407,7 @@ async function updateWithFiles(
     }
   }
 
-  const updates: HeroUpdateData = {};
+  const updates: HeroAssetUpdateData = {};
   const staged: Array<{
     path: string;
     field: 'propic' | 'resume_en' | 'resume_it';

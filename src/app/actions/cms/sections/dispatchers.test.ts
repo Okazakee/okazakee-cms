@@ -249,6 +249,7 @@ describe('skills BATCH_PUBLISH temp category mapping', () => {
       updateCategories: [],
       deleteCategories: [],
       categoryOrder: [],
+      skillOrder: [],
     });
 
     expect(result.success).toBe(true);
@@ -571,6 +572,7 @@ describe('skills entity-scoped evidence', () => {
       deleteSkills: [],
       deleteCategories: [],
       categoryOrder: [],
+      skillOrder: [],
       updateCategories: [{ id: 1, data: { name: 'New' } }],
       updateSkills: [{ id: 1, data: { title: 'New' } }],
     });
@@ -588,11 +590,99 @@ describe('skills entity-scoped evidence', () => {
       deleteSkills: [],
       deleteCategories: [],
       categoryOrder: [],
+      skillOrder: [],
       updateCategories: [],
       updateSkills: [{ id: 999, data: { title: 'New' } }],
     });
     expect(result.success).toBe(false);
     expect(result.data).toMatchObject({ updated: [], failed: [{ id: 999 }] });
+  });
+
+  it('persists the link and the dense per-category positions', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      skills: [
+        { id: 1, title: 'TypeScript', category_id: 1 },
+        { id: 2, title: 'Rust', category_id: 1 },
+        { id: 3, title: 'Bun', category_id: 2 },
+      ],
+    });
+
+    const result = await skillsActions({
+      type: 'BATCH_PUBLISH',
+      newCategories: [],
+      newSkills: [],
+      deleteSkills: [],
+      deleteCategories: [],
+      categoryOrder: [],
+      skillOrder: [
+        { id: 2, position: 0 },
+        { id: 1, position: 1 },
+        { id: 3, position: 0 },
+      ],
+      updateCategories: [],
+      updateSkills: [
+        { id: 1, data: { title: 'TypeScript', link: 'https://ts.dev/' } },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      reordered: ['skill:2', 'skill:1', 'skill:3'],
+      updated: [1],
+    });
+    expect(h.fake.state.tables.skills).toEqual([
+      expect.objectContaining({
+        id: 1,
+        link: 'https://ts.dev/',
+        position: 1,
+      }),
+      expect.objectContaining({ id: 2, position: 0 }),
+      expect.objectContaining({ id: 3, position: 0 }),
+    ]);
+  });
+
+  it('stores a blank link as null and rejects a non-http scheme', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      skills: [{ id: 1, title: 'TypeScript', category_id: 1 }],
+    });
+
+    const cleared = await skillsActions({
+      type: 'UPDATE',
+      id: 1,
+      data: { link: '   ' },
+    });
+    expect(cleared.success).toBe(true);
+    expect(h.fake.state.tables.skills[0].link).toBeNull();
+
+    const rejected = await skillsActions({
+      type: 'UPDATE',
+      id: 1,
+      data: { link: 'javascript:alert(1)' },
+    });
+    expect(rejected.success).toBe(false);
+    expect(h.fake.state.tables.skills[0].link).toBeNull();
+  });
+
+  it('fails a skill reorder for an unknown temp id instead of reporting a commit', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, skills: [] });
+    const result = await skillsActions({
+      type: 'BATCH_PUBLISH',
+      newCategories: [],
+      newSkills: [],
+      deleteSkills: [],
+      deleteCategories: [],
+      categoryOrder: [],
+      skillOrder: [{ id: 'skill:ghost', position: 0 }],
+      updateCategories: [],
+      updateSkills: [],
+    });
+    expect(result.success).toBe(false);
+    expect(result.data).toMatchObject({
+      reordered: [],
+      failed: [{ kind: 'reorder', id: 'skill:ghost' }],
+    });
   });
 });
 

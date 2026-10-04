@@ -1,21 +1,20 @@
 'use client';
 
-import {
-  CirclePlay,
-  Clock,
-  ExternalLink,
-  Globe,
-  Smartphone,
-} from 'lucide-react';
+import { Clock } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useState } from 'react';
 import type { Author } from '@/app/actions/cms/sections/blogActions';
+import type { PostButton as PortfolioPostButton } from '@/utils/cms/postButtons';
+import { deriveButtonsFromPost } from '@/utils/cms/postButtons';
 import { formatDMY } from '@/utils/formatDate';
-import { AppleIcon, GithubIcon } from './canonical/BrandIcons';
 import { ClientMarkdown } from './canonical/ClientMarkdown';
 import { GitHubStars } from './canonical/GitHubStars';
+import {
+  previewButtonEvents,
+  previewButtonIcon,
+  previewButtonLabel,
+} from './canonical/postButtons';
 import { slugifyTitle } from './canonical/postHref';
 import { ShareButton } from './canonical/ShareButton';
 import { Tags } from './canonical/Tags';
@@ -47,12 +46,7 @@ type PortfolioFormData = {
   post_tags: string;
   created_at: string;
   author_id: string;
-  source_link: string;
-  demo_link: string;
-  store_link: string;
-  fdroid_link?: string | null;
-  website?: string | null;
-  ios_store_link?: string | null;
+  buttons?: PortfolioPostButton[];
 };
 
 type PostPreviewProps = {
@@ -80,9 +74,6 @@ export function PostPreview({
   views = 0,
 }: PostPreviewProps) {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const t = useTranslations('posts-section');
-  const tr = (key: string) => (t.has(key) ? t(key) : '');
-
   useEffect(() => {
     if (imageFile) {
       const reader = new FileReader();
@@ -119,73 +110,21 @@ export function PostPreview({
   const mobileLinkClass =
     'flex flex-1 items-center justify-center gap-2 rounded-lg border border-accent-violet/40 bg-accent-violet/10 px-3 py-3 font-mono text-xs text-accent-violet-light transition-colors hover:border-accent-violet hover:bg-accent-violet/20';
 
+  const buttons = portfolioData ? deriveButtonsFromPost(portfolioData) : [];
   const metaLinks: {
     key: string;
     href: string;
     label: string | null;
     icon: ReactNode;
     event: string;
-  }[] = [];
-
-  if (portfolioData?.website) {
-    metaLinks.push({
-      key: 'website',
-      href: portfolioData.website,
-      label: null,
-      icon: <Globe size={14} />,
-      event: 'Website button',
-    });
-  }
-
-  if (portfolioData?.source_link) {
-    metaLinks.push({
-      key: 'source',
-      href: portfolioData.source_link,
-      label: tr('source'),
-      icon: <GithubIcon size={14} />,
-      event: 'View Source Code button',
-    });
-  }
-
-  if (portfolioData?.demo_link) {
-    metaLinks.push({
-      key: 'demo',
-      href: portfolioData.demo_link,
-      label: tr('demo'),
-      icon: <ExternalLink size={14} />,
-      event: 'View Demo button',
-    });
-  }
-
-  if (portfolioData?.store_link) {
-    metaLinks.push({
-      key: 'store',
-      href: portfolioData.store_link,
-      label: tr('store'),
-      icon: <CirclePlay size={14} />,
-      event: 'Play Store button',
-    });
-  }
-
-  if (portfolioData?.fdroid_link) {
-    metaLinks.push({
-      key: 'fdroid',
-      href: portfolioData.fdroid_link,
-      label: tr('fdroid'),
-      icon: <Smartphone size={14} />,
-      event: 'F-Droid button',
-    });
-  }
-
-  if (portfolioData?.ios_store_link) {
-    metaLinks.push({
-      key: 'ios',
-      href: portfolioData.ios_store_link,
-      label: tr('ios'),
-      icon: <AppleIcon size={14} />,
-      event: 'iOS Store button',
-    });
-  }
+  }[] = buttons.map((button, index) => ({
+    key: `${button.kind}-${index}`,
+    href: button.url,
+    label: previewButtonLabel(button, locale),
+    icon: previewButtonIcon(button.kind),
+    event: previewButtonEvents[button.kind],
+  }));
+  const hasSourceButton = buttons.some((b) => b.kind === 'source');
 
   const authorBlock = author ? (
     <>
@@ -270,7 +209,7 @@ export function PostPreview({
           <span>{formatDMY(formData.created_at)}</span>
         </span>
 
-        {portfolioData?.source_link && <GitHubStars />}
+        {hasSourceButton && <GitHubStars />}
 
         <ViewCount views={views} />
 

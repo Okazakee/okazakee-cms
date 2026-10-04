@@ -28,7 +28,7 @@ import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { useCmsStore } from '@/store/cmsStore';
+import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
 
 export default function ContactsSection() {
@@ -204,12 +204,12 @@ export default function ContactsSection() {
             resume_en?: string;
             resume_it?: string;
           };
-          setHeroSection({
-            mainImage: heroSection?.mainImage || null,
-            blurhashURL: heroSection?.blurhashURL || null,
-            resume_en: data.resume_en || heroSection?.resume_en || null,
-            resume_it: data.resume_it || heroSection?.resume_it || null,
-          });
+          setHeroSection(
+            mergeHeroSettings(heroSection, {
+              resume_en: data.resume_en || heroSection?.resume_en || null,
+              resume_it: data.resume_it || heroSection?.resume_it || null,
+            })
+          );
           const heroWarning = revalidationWarning(result);
           if (heroWarning) useCmsStore.getState().setWarning(heroWarning);
           resumeEnUpload.clearFile();
