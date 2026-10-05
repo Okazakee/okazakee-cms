@@ -4,9 +4,9 @@ import {
   Briefcase,
   Contact,
   FileText,
+  ExternalLink,
   Home,
   Inbox,
-  Languages,
   PanelBottom,
   PanelTop,
   LogOut,
@@ -19,9 +19,16 @@ import {
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { RoleChip } from '@/components/cms/shared/RoleChip';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import {
+  SIDEBAR_MOBILE_INDEX,
+  SIDEBAR_MOBILE_LABEL,
+  SIDEBAR_MOBILE_ROW,
+  SIDEBAR_MOBILE_ROW_ACTIVE,
+  SIDEBAR_MOBILE_ROW_DESTRUCTIVE,
+  SIDEBAR_MOBILE_ROW_NEUTRAL,
   SIDEBAR_ROW,
   SIDEBAR_ROW_ACTIVE,
   SIDEBAR_ROW_DESTRUCTIVE,
@@ -39,22 +46,24 @@ const publicSiteUrl =
 
 // Non-interactive signed-in identity banner. The desktop sidebar owns the
 // brand: the CMS wordmark sits centered above the avatar/name/role card (the
-// desktop header is gone). Rendered above the section list on desktop and at
-// the top of the fullscreen mobile menu (logo omitted there — the mobile
-// header already shows it).
+// desktop header is gone). It closes both bottom clusters — last, after the
+// theme, language, account, Home and logout rows — so the controls an editor
+// reaches for stay in one readable group and the identity reads as the
+// sidebar's footer. The mobile instance omits the logo (the mobile header
+// already shows it).
+//
+// The mobile instance is translucent so the drawer's frosted panel reads
+// through it instead of stopping at an opaque tile. It must NOT add its own
+// `backdrop-blur-*`: the drawer already has one, and a nested backdrop-filter
+// blurs the backdrop rather than the panel.
 function UserBanner({ compact = false }: { compact?: boolean }) {
   const user = useCmsStore((s) => s.user);
-  const t = useTranslations('cms');
-  const roleLabel =
-    user?.role === 'admin'
-      ? t('users.roleAdmin')
-      : user?.role === 'editor'
-        ? t('users.roleEditor')
-        : null;
   return (
     <div
-      className={`flex items-center gap-3 rounded-2xl border border-border-subtle bg-surface-card ${
-        compact ? 'p-3' : 'p-4'
+      className={`flex items-center gap-3 rounded-2xl border ${
+        compact
+          ? 'border-border-subtle/60 bg-surface-card/40 p-3'
+          : 'border-border-subtle bg-surface-card p-4'
       }`}
     >
       {user?.avatarUrl ? (
@@ -75,9 +84,9 @@ function UserBanner({ compact = false }: { compact?: boolean }) {
         <span className="block truncate font-medium text-text-main">
           {user?.displayName}
         </span>
-        {roleLabel && (
-          <span className="mt-0.5 block font-mono text-[11px] tracking-[0.2em] text-text-dim uppercase">
-            {roleLabel}
+        {user?.role && (
+          <span className="mt-1 block">
+            <RoleChip cmsRole={user.role} />
           </span>
         )}
       </span>
@@ -123,7 +132,6 @@ const SYSTEM_ITEMS: MenuItem[] = [
     adminOnly: true,
     planned: true,
   },
-  { id: 'site-copy', label: '', icon: Languages, adminOnly: true },
   { id: 'privacy-policy', label: '', icon: FileText, adminOnly: true },
   { id: 'users', label: '', icon: Users, adminOnly: true },
 ];
@@ -172,7 +180,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     contacts: t('sidebar.nav.contacts'),
     'request-form': t('sidebar.nav.request-form'),
     requests: t('sidebar.nav.requests'),
-    'site-copy': t('sidebar.nav.site-copy'),
     header: t('sidebar.nav.header'),
     footer: t('sidebar.nav.footer'),
     'privacy-policy': t('sidebar.nav.privacy-policy'),
@@ -236,19 +243,19 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       key={item.id}
       onClick={() => handleSelectSection(item.id)}
       aria-current={activeSection === item.id ? 'page' : undefined}
-      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 text-left ${
+      className={`${SIDEBAR_ROW} ${
         activeSection === item.id
-          ? 'border border-accent-violet/30 bg-accent-violet/10 text-accent-violet '
-          : 'border border-transparent hover:bg-surface-raised text-text-muted hover:text-text-white '
+          ? SIDEBAR_ROW_ACTIVE
+          : SIDEBAR_ROW_NEUTRAL
       }`}
     >
       <div className="relative">
-        <item.icon className="w-5 h-5" />
+        <item.icon className={SIDEBAR_ROW_ICON} />
         {hasDraft(item.id) && (
           <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />
         )}
       </div>
-      <span className="font-medium flex-1">
+      <span className={SIDEBAR_ROW_LABEL}>
         {sectionLabelMap[item.id] || item.label}
       </span>
       {item.planned && (
@@ -265,9 +272,10 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   // Mobile menu mirrors the public website canon (docs/DESIGN.md §4):
   // heading-size rows with mono index prefixes and hairline dividers over one
   // continuous 01..N sequence. Group captions preserve the CMS content /
-  // configuration split; the account row closes the list and theme/language,
-  // Home and logout live in the pinned footer block. Hidden rows stay
-  // unfocusable via tabIndex -1 (the aside itself is inert when closed).
+  // configuration split; the account row closes the section list. Language,
+  // Home and logout share the row shape in the pinned footer block but sit
+  // outside the sequence, so they carry no index. Hidden rows stay unfocusable
+  // via tabIndex -1 (the aside itself is inert when closed).
   const mobileNav: Array<{
     id: string;
     caption: string | null;
@@ -305,9 +313,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       aria-label={t('sidebar.workspace')}
       inert={isMobile && !isOpen ? true : undefined}
       tabIndex={-1}
-      className={`text-text-main flex flex-col bg-surface-base transition-all duration-300 ${
+      className={`text-text-main flex flex-col lg:bg-surface-base lg:transition-all lg:duration-300 ${
         onClose
-          ? `fixed inset-x-0 top-16 bottom-0 z-40 overflow-y-auto bg-surface-base/[0.98] backdrop-blur-xl transition-[opacity,translate,visibility] duration-200 ease-out lg:static lg:bottom-auto lg:z-auto lg:h-full lg:w-72 lg:max-w-none lg:overflow-visible lg:border-r lg:border-border-subtle lg:bg-surface-base lg:backdrop-blur-none lg:transition-all lg:duration-300 ${
+          ? `fixed inset-x-0 top-16 bottom-0 z-40 overflow-y-auto bg-surface-base/70 backdrop-blur-md transition-[opacity,translate,visibility] duration-200 ease-out lg:static lg:bottom-auto lg:z-auto lg:h-full lg:w-72 lg:max-w-none lg:overflow-visible lg:border-r lg:border-border-subtle lg:backdrop-blur-none ${
               isOpen
                 ? 'visible translate-y-0 opacity-100 lg:translate-x-0'
                 : 'invisible -translate-y-2 opacity-0 lg:visible lg:translate-x-0 lg:translate-y-0 lg:opacity-100'
@@ -318,9 +326,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       {/* Mobile fullscreen menu: the open/close toggle lives in the CMS
         header (like the website header), so no inner header row here. */}
       <div className="flex min-h-full flex-col px-6 pt-6 pb-[env(safe-area-inset-bottom)] lg:hidden">
-        <div className="pt-6">
-          <UserBanner compact />
-        </div>
 
         {pendingCount > 0 && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/50 dark:bg-amber-900/10">
@@ -373,7 +378,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             return (
               <Fragment key={row.id}>
                 {row.caption && (
-                  <p className="pt-4 pb-1 font-mono text-[11px] tracking-[0.2em] text-text-dim uppercase">
+                  <p
+                    className={`pb-1 font-mono text-[11px] tracking-[0.2em] text-text-dim uppercase ${
+                      index === 0 ? '' : 'pt-4'
+                    }`}
+                  >
                     {row.caption}
                   </p>
                 )}
@@ -385,23 +394,20 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
                   style={{
                     transitionDelay: isOpen ? `${index * 40}ms` : '0ms',
                   }}
-                  className={`flex w-full items-baseline gap-3.5 border-b border-border-subtle/50 px-1 py-3.5 text-left transition-[opacity,translate] duration-200 ease-out ${
+                  className={`${SIDEBAR_MOBILE_ROW} ${
                     isOpen
                       ? 'translate-y-0 opacity-100'
                       : 'translate-y-2 opacity-0'
                   } ${
                     active
-                      ? 'font-semibold text-accent-violet-light'
-                      : 'text-text-white'
+                      ? SIDEBAR_MOBILE_ROW_ACTIVE
+                      : SIDEBAR_MOBILE_ROW_NEUTRAL
                   }`}
                 >
-                  <span
-                    aria-hidden="true"
-                    className="min-w-6 font-mono text-[11px] tracking-[0.2em] text-text-dim"
-                  >
+                  <span aria-hidden="true" className={SIDEBAR_MOBILE_INDEX}>
                     {String(index + 1).padStart(2, '0')}
                   </span>
-                  <span className="font-heading flex-1 text-3xl tracking-tight">
+                  <span className={SIDEBAR_MOBILE_LABEL}>
                     {sectionLabelMap[row.id]}
                   </span>
                   {row.planned && (
@@ -426,41 +432,45 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
           while keeping it reachable with breathing room on long menus. */}
         <div aria-hidden="true" className="min-h-6 flex-1 lg:hidden" />
         <div
-          className={`flex flex-col gap-3 pt-6 pb-6 transition-[opacity,translate] duration-200 ease-out ${
+          className={`flex flex-col pt-6 pb-6 transition-[opacity,translate] duration-200 ease-out ${
             isOpen ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
           }`}
           style={{
             transitionDelay: isOpen ? `${mobileNav.length * 40}ms` : '0ms',
           }}
         >
-          <LanguageToggle sidebar />
+          <LanguageToggle sidebar mobile />
           <a
             href={publicSiteUrl}
             target="_blank"
             rel="noopener noreferrer"
             tabIndex={isOpen ? 0 : -1}
-            className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_NEUTRAL}`}
+            className={`${SIDEBAR_MOBILE_ROW} ${SIDEBAR_MOBILE_ROW_NEUTRAL}`}
           >
-            <Home className={SIDEBAR_ROW_ICON} />
-            <span className={SIDEBAR_ROW_LABEL}>{t('sidebar.home')}</span>
+            <span className={SIDEBAR_MOBILE_LABEL}>{t('sidebar.home')}</span>
+            <ExternalLink className="h-4 w-4 shrink-0 self-center text-text-dim" />
           </a>
           <button
             type="button"
             onClick={handleLogout}
             disabled={isLoggingOut}
             tabIndex={isOpen ? 0 : -1}
-            className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_DESTRUCTIVE} disabled:opacity-50`}
+            className={`${SIDEBAR_MOBILE_ROW} ${SIDEBAR_MOBILE_ROW_DESTRUCTIVE} disabled:opacity-50`}
           >
-            <LogOut className={SIDEBAR_ROW_ICON} />
-            <span className={SIDEBAR_ROW_LABEL}>
+            <span className={SIDEBAR_MOBILE_LABEL}>
               {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
             </span>
           </button>
+          <div className="mt-3">
+            <UserBanner compact />
+          </div>
         </div>
       </div>
       {/* Desktop static sidebar */}
       <div className="hidden h-full flex-col lg:flex">
-        <div className="flex flex-col gap-4 px-4 pt-6">
+        {/* Hairline mirrors the one between the nav and the profile card, so
+            both separators carry the same 16px of breathing room. */}
+        <div className="border-b border-border-subtle px-4 py-4">
           <span className="flex items-center justify-center px-2">
             {/* biome-ignore lint/performance/noImgElement: static CMS brand asset */}
             <img
@@ -479,7 +489,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               className="block h-7 w-auto max-w-full shrink-0 object-contain dark:hidden"
             />
           </span>
-          <UserBanner />
         </div>
         {pendingCount > 0 && (
           <div className="mx-4 mt-4 mb-1 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/50 dark:bg-amber-900/10">
@@ -525,7 +534,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
         )}
 
         <div className="flex flex-1 flex-col overflow-y-auto">
-          <div className="p-4 pb-2">
+          <div className="p-4">
             {MENU_GROUPS.map((group) => (
               <div key={group.caption} className="mb-4 last:mb-0">
                 <p className="mb-2 text-xs font-semibold tracking-wider text-text-dim uppercase">
@@ -578,6 +587,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
                 {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
               </span>
             </button>
+            <div className="mt-3">
+              <UserBanner />
+            </div>
           </div>
         </div>
       </div>

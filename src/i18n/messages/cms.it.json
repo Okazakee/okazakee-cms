@@ -2,12 +2,9 @@
   "copy": {
     "requestTitle": "Modulo richieste",
     "requestDescription": "Non ancora pubblicato sul sito. Queste etichette sono di proprietà del componente del modulo pubblico finché non passerà alle traduzioni del CMS. Modificarle qui non ha effetto sul sito pubblico.",
-    "siteTitle": "Testi del sito",
-    "siteDescription": "Personalizza link dei post, stati vuoti, errori, sottotitolo privacy ed etichette condivise nelle due lingue.",
     "namespaces": {
       "request-form": "Modulo richieste",
-      "posts-section": "Link dei post e stati vuoti",
-      "errors": "Pagine di errore",
+      "posts-section": "Titoli delle sezioni post",
       "privacyPolicy": "Sottotitolo privacy",
       "common": "Etichette condivise"
     }
@@ -463,6 +460,7 @@
   "privacy": {
     "title": "Editor Privacy Policy",
     "subtitle": "Gestisci il contenuto della privacy policy",
+    "bodyLabel": "Corpo della informativa",
     "saveChanges": "Salva Modifiche",
     "errorFetch": "Impossibile recuperare i dati della privacy policy",
     "errorSave": "Impossibile aggiornare la privacy policy",

@@ -170,24 +170,57 @@ the terminal traffic-light dots (`#ff5f57` / `#febc2e` / `#28c840`) and `::selec
   `Toggle theme`); the button toggles Menu/X in place (`aria-expanded`,
   `aria-controls`); there is no inner menu header and no profile control:
   identity lives only in the sidebar user banner.
-- Desktop is headerless: the sidebar user banner carries the CMS wordmark
-  above avatar/name/role, and the full workspace width goes to content.
-- User banner: non-interactive `rounded-2xl border bg-surface-card` card with
-  avatar (or initial fallback), display name and mono role label. Rendered
-  above the section list on desktop (with logo) and at the top of the
-  fullscreen mobile menu (logo omitted — the mobile header shows it); the
-  Account section stays the only interactive profile surface.
+- Desktop is headerless: the CMS wordmark sits in its own hairline-bounded block
+  at the top of the sidebar, and the full workspace width goes to content.
+- User banner: non-interactive `rounded-2xl` card with avatar (or initial
+  fallback), display name and the shared `RoleChip` pill. It **closes both
+  bottom clusters** — last, after the theme, language, account, Home and logout
+  rows — in the desktop sidebar and in the pinned footer block of the fullscreen
+  mobile menu (logo omitted there; the mobile header shows it). Keeping the
+  interactive controls in one group and the identity last reads as a sidebar
+  footer rather than splitting the two. The Account section stays the only
+  interactive profile surface. Desktop paints
+  it `border-border-subtle bg-surface-card`; **mobile paints it
+  `border-border-subtle/60 bg-surface-card/40`** so the frosted panel reads
+  through it rather than the banner stopping it dead. It takes no
+  `backdrop-blur-*` of its own — that would nest inside the drawer's filter and
+  blur the backdrop instead of the panel.
+- Sidebar rows come in exactly two shapes, both owned by
+  `src/components/layout/sidebarRowStyle.ts`. `SIDEBAR_ROW*` is the desktop
+  row — `min-h-11`, `p-3`, `rounded-lg`, always-declared border, `h-5` icon,
+  `text-sm font-medium` label — and the **section navigation and the bottom
+  cluster (theme, language, account, home, logout) share it**, so only the
+  semantic state differs: neutral is a transparent idle that raises to
+  `bg-surface-raised` on hover, active is `accent-violet/30` +
+  `accent-violet/10`, logout is a red hover. No bottom control carries its own
+  background fill or its own icon size.
+- `SIDEBAR_MOBILE_ROW*` is the fullscreen drawer row: `text-3xl` heading labels
+  and hairline dividers, active row `font-semibold text-accent-violet-light`,
+  rows stagger in 40ms apart. **Section rows carry a mono `01`–`N` index** over
+  one continuous sequence. The `mt-auto` footer block (language, Home link,
+  logout) uses that same row shape but sits **outside the sequence and takes no
+  index**, so its labels align with the drawer's own left edge instead of the
+  indented section labels. Every row answers to a press: the base transition
+  covers `background-color` alongside `opacity`/`translate`, idle rows raise to
+  `bg-surface-raised`, the active section to `accent-violet/5`, logout to
+  `red-500/10`, and `active:` matches each hover so a tap reads as a tap.
 - Mobile menu: fullscreen panel under the CMS header (`fixed inset-x-0 top-16
-  bottom-0`, `bg-surface-base/[0.98]`, backdrop blur, `overflow-y-auto`,
-  safe-area bottom padding); rows are `text-3xl` headings with mono `01`–`N`
-  index prefixes and hairline dividers, active row `font-semibold
-  text-accent-violet-light`, rows stagger in 40ms apart; language toggle plus
-  the Home link and logout live in a `mt-auto` footer block with matching
-  top/bottom breathing room; body scroll lock and focus trap while open;
+  bottom-0`, `bg-surface-base/70` + `backdrop-blur-md`, `overflow-y-auto`,
+  safe-area bottom padding); body scroll lock and focus trap while open;
   closes on section select, link tap and Escape; `aria-expanded` /
   `aria-controls` wired, hidden rows `tabIndex={-1}`. Draft dots,
   `aria-current` and the single-confirm global discard are preserved on both
   mobile and desktop.
+- Two rules the panel must not break, because Tailwind resolves conflicting
+  utilities by stylesheet order and not by class order: the drawer declares its
+  background **once** (the opaque `lg:bg-surface-base` lives on the base, the
+  mobile `/70` on the branch), and its transition **once** (the `lg:` overrides
+  live on the base, the mobile property list on the branch). An opaque fill at
+  mobile opacity, or a `transition-all` racing a property list, silently kills
+  the frosted backdrop.
+- The first group caption carries no `pt-4`: the panel's own `pt-6` already
+  spaces it from the header, and stacking both opens a 40px hole above the
+  first row.
 - The bespoke `xs:` / `tablet:` / `mdh:` utilities are retired: standard Tailwind tiers
   cover every case. `SkillsCarousel` and the old `ResumeButton` card went with them,
 
@@ -250,6 +283,50 @@ tone was too weak), lists with violet markers, links `accent-violet-light` under
 tables as bordered rounded panels with mono uppercase headers, figures with mono
 captions and the blurhash as the placeholder background.
 
+### 5.8 CMS editor surfaces
+
+The editor is a different app from the page it edits, but it answers to the same
+canon. Every section renders through the shared pieces rather than its own markup,
+so a new section cannot drift into a private look:
+
+- **Page head** — `SectionHeader`: `font-heading text-2xl sm:text-3xl` title,
+  mono `text-accent-violet-light` description and a 10×2 accent rule, centred. It
+  renders at every breakpoint; the mobile header carries only the wordmark, so a
+  section that hides its own title leaves mobile with no heading at all.
+- **Cards** — `rounded-2xl border border-border-subtle bg-surface-card p-6` with a
+  `mb-5 text-lg font-bold text-text-white` heading. `rounded-xl` is for *nested*
+  panels (a composer inside a card), not for cards. The one exception is the danger
+  zone: `rounded-2xl border border-red-500/30 bg-red-500/5`.
+- **Fields** — label `block text-sm font-medium text-text-main mb-1`; control
+  `w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-sm
+  text-text-main focus:border-accent-violet focus:outline-none`. Borders are
+  `border-subtle` until the field is interacted with, never `accent-violet` at rest.
+- **Actions** — primary `flex items-center gap-1.5 rounded-lg bg-accent-violet-deep
+  px-3 py-1.5 text-sm text-white hover:bg-accent-violet`; neutral `rounded-lg
+  bg-surface-base px-3 py-1.5 text-sm text-text-main hover:bg-surface-raised`;
+  destructive `bg-red-500 hover:bg-red-600` filled, or `border border-red-500/40
+  bg-red-500/10 text-red-400` when it only opens a confirmation.
+- **Status** — `ErrorBanner` for any failure, both the page-level one and a
+  scoped one inside a card. Never a hand-rolled `bg-red-500/10` block.
+- **Spinners** — `border-2 border-<colour> border-t-transparent`, never `border-b-2`.
+- **Role** — `RoleChip` / `RoleSelect` from `@/components/cms/shared/RoleChip`, one
+  source of truth for how a role reads. The prop is `cmsRole`, **not** `role`:
+  `role` is a reserved ARIA attribute, and a literal `role="admin"` on a component
+  fails `useValidAriaRole` and is invalid ARIA if it ever reaches a DOM node.
+- Read-only values are rendered with the field classes on a `<span>` inside a
+  bordered `bg-surface-base` panel, so a value and its editable twin read as the
+  same object.
+- **Copy lives next to what it labels.** The `Website copy` section is gone; there is
+  no place to edit copy that has no home. `privacyPolicy.description` is edited from
+  the Privacy policy section, `posts-section` `title1`/`subtitle1` from Portfolio and
+  `title2`/`subtitle2` from Blog — each as a `CopyEditor` keyed `<section>:copy`, so
+  Publish All and the draft dot still reach it. Frozen copy (§8) is not editable here
+  at all.
+- **Copy editors are addressed by their namespace key**, never by DOM position. A
+  section that embeds a `CopyEditor` must give its own body control an `aria-label`,
+  and tests select on that: `querySelector('textarea')` silently retargets to
+  whichever copy editor mounted first.
+
 ---
 
 ## 6. Page patterns
@@ -295,7 +372,8 @@ Invented copy is a defect, not a placeholder.
 
 | UI | source |
 |---|---|
-| all copy | `i18n_translations.translations` (namespaces: `header`, `hero-section`, `skills-section`, `career-section`, `contacts-section`, `posts-section`, `footer`, `privacyPolicy`, `request-form`, `errors`) |
+| all copy | `i18n_translations.translations`, editable namespaces only: `hero-section`, `skills-section`, `career-section`, `contacts-section`, `posts-section` (headings only), `privacyPolicy` (description only), `request-form` |
+| frozen copy | `header`, `footer`, `errors` and the `posts-section` chrome are **not** in the database any more: they are site invariants and live in `okazakee-ws` at `src/i18n/messages/site.{en,it}.json`, merged one namespace deep with **local winning** (`src/i18n/siteCopy.ts`). Migration `20261005120000_freeze_static_site_copy.sql` drops them. **The ws local files must deploy in the same release as the migration** — applied alone, those namespaces are simply absent. Same rule, same shape, as `requestForm` and `postButtons` |
 | hero name/about | `hero-section.top.name`, `hero-section.aboutme.*` |
 | hero roles | `hero-section.top.roles.0…` as a numeric index map (`top.roles.1`, `top.roles.2`, …) when the list exists; the singular `hero-section.top.role` stays as the live fallback for content written before the list and is never migrated away |
 | hero portrait/animation | `hero_section.shape` (`pebble` \| `square` \| `rounded` \| `squircle`, null = pebble), `hero_section.typewriter`, `hero_section.typewriter_target` (`role1` \| `role2` \| `all`, null = role1) |
@@ -307,7 +385,7 @@ Invented copy is a defect, not a placeholder.
 | legacy link columns | `website` / `source_link` / `demo_link` / `store_link` / `fdroid_link` / `ios_store_link` stay in the table but are no longer written. They are the fallback: a row with null/empty `buttons` renders from them (website, source, demo, store, fdroid, ios), which is what makes the migration a no-op for existing content. Migration `20261004111000_backfill_post_buttons.sql` populates `buttons` from them; dropping the columns is a separate, later decision |
 | author | `user_profiles` via `author_id` (`display_name`, `avatar_url`) |
 | header chrome | `site_settings` — one row: `header_logo_dark` / `header_logo_light` (absolute URL, NULL = the bundled `title-ws*.png` asset, resolved per theme) and `nav_anchors`. These are configuration, not copy, so they live in their own table rather than in the `i18n_translations` jsonb |
-| nav anchors | `site_settings.nav_anchors` — an ordered jsonb array of `{ id, anchor }` where `id` ∈ `home` \| `skills` \| `career` \| `portfolio` \| `blog` \| `contacts`. **Written index-aligned with `header.buttons.N`, read by `id`.** `anchor` is a fragment-safe element id with no leading `#`; blank/omitted falls back to the item id, which reproduces the href the site has always rendered. The destinations and the sections' `id=` attributes stay site-side — an editor cannot retarget a nav item at another page |
+| nav anchors | `site_settings.nav_anchors` — an ordered jsonb array of `{ id, anchor }` where `id` ∈ `home` \| `skills` \| `career` \| `portfolio` \| `blog` \| `contacts`. **Written index-aligned with `header.buttons.N`, read by `id`.** `header.buttons` is frozen in the site, so that alignment is now a cross-repo contract: the array order must match the label order in `okazakee-ws/src/i18n/messages/site.{en,it}.json`, in **both** locales. `anchor` is a fragment-safe element id with no leading `#`; blank/omitted falls back to the item id, which reproduces the href this header has always rendered. The destinations and the sections' `id=` attributes stay site-side — an editor cannot retarget a nav item at another page |
 | resume | `hero_section.resume_en` / `resume_it` |
 | project requests | `project_requests` (`locale`, `name`, `email`, `company`, `website`, `project_type`, `budget`, `timeline`, `request`, `consent`, `created_at`, `archived`, `archived_at`) — **personal data**: service_role only, no anon/authenticated grant, never in the public cache-tag vocabulary. Rows arrive from `okazakee-ws` `POST /api/requests`, which re-validates the payload server-side and writes through the service-role client; the CMS inbox is the only reader |
 
@@ -367,8 +445,8 @@ is deliberately left in place as the fallback for content that predates the list
   VALUES are storage (`project_type` / `budget` / `timeline`) and stay English
   in both locales; only their display labels are translated.
 
-**New copy that will need i18n keys** for the drawer: its `Language` label
-(`header.language` already exists).
+**The drawer `Language` label** (`header.language`) is frozen in the site copy and
+read from both navs; nothing in the drawer is English-only any more.
 
 ---
 

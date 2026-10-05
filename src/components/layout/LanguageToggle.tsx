@@ -3,6 +3,9 @@
 import { Languages } from 'lucide-react';
 import type { AppLocale } from '@/i18n/routing';
 import {
+  SIDEBAR_MOBILE_LABEL,
+  SIDEBAR_MOBILE_ROW,
+  SIDEBAR_MOBILE_ROW_NEUTRAL,
   SIDEBAR_ROW,
   SIDEBAR_ROW_ICON,
   SIDEBAR_ROW_LABEL,
@@ -16,9 +19,12 @@ import useUiLocaleStore from '@/store/uiLocaleStore';
 export default function LanguageToggle({
   compact = false,
   sidebar = false,
+  mobile = false,
 }: {
   compact?: boolean;
   sidebar?: boolean;
+  /** Drawer row: heading-size label, unnumbered like the other footer rows. */
+  mobile?: boolean;
 }) {
   const locale = useUiLocaleStore((s) => s.locale);
   const setLocale = useUiLocaleStore((s) => s.setLocale);
@@ -28,6 +34,24 @@ export default function LanguageToggle({
     const newLocale: AppLocale = isItalian ? 'en' : 'it';
     setLocale(newLocale);
   };
+
+  // The drawer row, not the desktop one: same heading-size shape as the
+  // section rows, but carrying no `01`–`N` index — the footer controls sit
+  // outside the numbered sequence.
+  if (mobile) {
+    return (
+      <button
+        type="button"
+        onClick={switchLanguage}
+        className={`${SIDEBAR_MOBILE_ROW} ${SIDEBAR_MOBILE_ROW_NEUTRAL}`}
+        data-umami-event="Language toggle"
+      >
+        <span className={SIDEBAR_MOBILE_LABEL}>
+          {isItalian ? 'Italiano' : 'English'}
+        </span>
+      </button>
+    );
+  }
 
   if (sidebar) {
     return (

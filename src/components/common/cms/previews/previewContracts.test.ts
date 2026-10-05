@@ -87,10 +87,7 @@ vi.mock('@/app/public/title-cms-lightmode.png', () => ({
 
 import BlogSection from '@/components/cms/sections/Blog/BlogSection';
 import CareerSection from '@/components/cms/sections/Career/CareerSection';
-import {
-  RequestCopySection,
-  SiteCopySection,
-} from '@/components/cms/sections/Copy/CopySections';
+import { RequestCopySection } from '@/components/cms/sections/Copy/CopySections';
 import FooterSection from '@/components/cms/sections/Footer/FooterSection';
 import HeaderSection from '@/components/cms/sections/Header/HeaderSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
@@ -269,7 +266,9 @@ describe('localized draft preview boundary', () => {
             data: [{ language: 'en', privacy_policy: '# Stale policy' }],
           })
         );
-        expect(container.querySelector('textarea')).toBeNull();
+        expect(
+          container.querySelector('[aria-label="Policy body"]')
+        ).toBeNull();
       }
       await act(async () =>
         latest.complete({
@@ -277,7 +276,7 @@ describe('localized draft preview boundary', () => {
           data: [{ language: 'en', privacy_policy: '# Latest policy' }],
         })
       );
-      await fill('textarea', '# Keep my unsaved policy');
+      await fill('[aria-label="Policy body"]', '# Keep my unsaved policy');
       if (!oldFirst)
         await act(async () =>
           old.complete({
@@ -285,7 +284,11 @@ describe('localized draft preview boundary', () => {
             data: [{ language: 'en', privacy_policy: '# Stale policy' }],
           })
         );
-      expect(container.querySelector('textarea')?.value).toBe(
+      expect(
+        container.querySelector<HTMLTextAreaElement>(
+          '[aria-label="Policy body"]'
+        )?.value
+      ).toBe(
         '# Keep my unsaved policy'
       );
     }
@@ -328,7 +331,7 @@ describe('localized draft preview boundary', () => {
       })),
     });
     await mount(createElement(PrivacyPolicySection));
-    await fill('textarea', '# Keep my unsaved privacy');
+    await fill('[aria-label="Policy body"]', '# Keep my unsaved privacy');
     await mount(createElement(PrivacyPolicySection), {
       ...base,
       cms: { ...cmsEn },
@@ -337,7 +340,11 @@ describe('localized draft preview boundary', () => {
         button: 'Sibling copy changed',
       },
     });
-    expect(container.querySelector('textarea')?.value).toBe(
+    expect(
+      container.querySelector<HTMLTextAreaElement>(
+        '[aria-label="Policy body"]'
+      )?.value
+    ).toBe(
       '# Keep my unsaved privacy'
     );
     expect(h.read).toHaveBeenCalledTimes(1);
@@ -526,19 +533,6 @@ describe('honest website customization and offline controls', () => {
     ]) {
       expect(container.textContent).toContain(label);
     }
-  });
-  it('edits sharing/rate-limit and post error labels in actual website namespaces', async () => {
-    await mount(createElement(SiteCopySection));
-    for (const label of [
-      'posts-section.preCopy (EN)',
-      'posts-section.ratelimit (EN)',
-      'errors.postErrorTitle (EN)',
-      'errors.postErrorText (EN)',
-      'errors.postNotFoundText (EN)',
-    ]) {
-      expect(container.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
-    }
-    expect(container.querySelector('[aria-label^="common."]')).toBeNull();
   });
   it('edits career work-location labels under the consumed career-section namespace', async () => {
     await mount(createElement(CareerSection));

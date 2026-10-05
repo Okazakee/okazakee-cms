@@ -2,12 +2,9 @@
   "copy": {
     "requestTitle": "Request form",
     "requestDescription": "Not published to the website yet. These labels are owned by the public request form component until it moves to CMS translations. Editing here has no effect on the live site.",
-    "siteTitle": "Website copy",
-    "siteDescription": "Customize post links, empty states, error pages, privacy metadata and shared labels in both languages.",
     "namespaces": {
       "request-form": "Request form",
-      "posts-section": "Post links and empty states",
-      "errors": "Error pages",
+      "posts-section": "Post section headings",
       "privacyPolicy": "Privacy page subtitle",
       "common": "Shared labels"
     }
@@ -463,6 +460,7 @@
   "privacy": {
     "title": "Privacy Policy Editor",
     "subtitle": "Manage your privacy policy content",
+    "bodyLabel": "Policy body",
     "saveChanges": "Save Changes",
     "errorFetch": "Failed to fetch privacy policy data",
     "errorSave": "Failed to update privacy policy",

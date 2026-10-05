@@ -8,7 +8,6 @@ import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
-import { useCmsStore } from '@/store/cmsStore';
 
 const requestFields = [
   'eyebrow',
@@ -34,33 +33,8 @@ const requestFields = [
   'submit',
   'comingSoon',
 ];
-const siteGroups = [
-  {
-    namespace: 'posts-section',
-    fields: ['button', 'no-posts', 'preCopy', 'ratelimit', 'searchbar'],
-  },
-  {
-    namespace: 'errors',
-    fields: [
-      'code',
-      'notFoundLabel',
-      'notFoundTitle',
-      'notFoundText',
-      'goBack',
-      'home',
-      'errorLabel',
-      'errorTitle',
-      'errorText',
-      'retry',
-      'postErrorTitle',
-      'postErrorText',
-      'postNotFoundText',
-    ],
-  },
-  { namespace: 'privacyPolicy', fields: ['description'] },
-];
 
-function CopyEditor({
+export function CopyEditor({
   namespace,
   sectionKey,
   fields,
@@ -181,36 +155,6 @@ export function RequestCopySection() {
         fields={requestFields}
         showAll
       />
-    </div>
-  );
-}
-
-export function SiteCopySection() {
-  const t = useTranslations('cms');
-  const publishAll = useCmsStore((s) => s.publishAll);
-  return (
-    <div className="space-y-6">
-      <SectionHeader
-        title={t('copy.siteTitle')}
-        description={t('copy.siteDescription')}
-        actions={
-          <button
-            type="button"
-            onClick={() => void publishAll()}
-            className="min-h-11 rounded-lg bg-accent-violet-deep px-4 text-sm text-white"
-          >
-            {t('sidebar.publishAll')}
-          </button>
-        }
-      />
-      {siteGroups.map((group) => (
-        <CopyEditor
-          key={group.namespace}
-          namespace={group.namespace}
-          sectionKey={`site-copy:${group.namespace || 'common'}`}
-          fields={group.fields}
-        />
-      ))}
     </div>
   );
 }

@@ -7,10 +7,7 @@ import { getCmsBootData } from '@/app/actions/cms/getUser';
 import BlogSection from '@/components/cms/sections/Blog/BlogSection';
 import CareerSection from '@/components/cms/sections/Career/CareerSection';
 import ContactsSection from '@/components/cms/sections/Contacts/ContactsSection';
-import {
-  RequestCopySection,
-  SiteCopySection,
-} from '@/components/cms/sections/Copy/CopySections';
+import { RequestCopySection } from '@/components/cms/sections/Copy/CopySections';
 import HeaderSection from '@/components/cms/sections/Header/HeaderSection';
 import HeroSection from '@/components/cms/sections/Hero/HeroSection';
 import FooterSection from '@/components/cms/sections/Footer/FooterSection';
@@ -38,7 +35,6 @@ const pageSections = [
 const inboxSections = ['requests'];
 const systemSections = [
   'request-form',
-  'site-copy',
   'privacy-policy',
   'users',
   'account',
@@ -68,8 +64,6 @@ function Editor({ section }: { section: string }) {
       return <RequestsSection />;
     case 'footer':
       return <FooterSection />;
-    case 'site-copy':
-      return <SiteCopySection />;
     case 'privacy-policy':
       return <PrivacyPolicySection />;
     case 'users':

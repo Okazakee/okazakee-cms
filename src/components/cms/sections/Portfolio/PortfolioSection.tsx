@@ -16,6 +16,7 @@ import {
   type Author,
   portfolioActions,
 } from '@/app/actions/cms/sections/portfolioActions';
+import { CopyEditor } from '@/components/cms/sections/Copy/CopySections';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
@@ -486,6 +487,11 @@ export default function PortfolioSection() {
           </div>
         </div>
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
+        <CopyEditor
+          namespace="posts-section"
+          sectionKey="portfolio:copy"
+          fields={['title1', 'subtitle1']}
+        />
 
         {/* Content */}
         <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">

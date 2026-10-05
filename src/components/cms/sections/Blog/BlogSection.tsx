@@ -15,6 +15,7 @@ import {
   type Author,
   blogActions,
 } from '@/app/actions/cms/sections/blogActions';
+import { CopyEditor } from '@/components/cms/sections/Copy/CopySections';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
@@ -442,6 +443,11 @@ export default function BlogSection() {
           </div>
         </div>
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
+        <CopyEditor
+          namespace="posts-section"
+          sectionKey="blog:copy"
+          fields={['title2', 'subtitle2']}
+        />
 
         {/* Content */}
         <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
