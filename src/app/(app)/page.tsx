@@ -8,9 +8,8 @@ import BlogSection from '@/components/cms/sections/Blog/BlogSection';
 import CareerSection from '@/components/cms/sections/Career/CareerSection';
 import ContactsSection from '@/components/cms/sections/Contacts/ContactsSection';
 import { RequestCopySection } from '@/components/cms/sections/Copy/CopySections';
-import HeaderSection from '@/components/cms/sections/Header/HeaderSection';
 import HeroSection from '@/components/cms/sections/Hero/HeroSection';
-import FooterSection from '@/components/cms/sections/Footer/FooterSection';
+import { LayoutSection } from '@/components/cms/sections/Layout/LayoutSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
 import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
 import RequestsSection from '@/components/cms/sections/Requests/RequestsSection';
@@ -23,29 +22,23 @@ import { useCmsStore } from '@/store/cmsStore';
 
 // Page order: the sidebar reads top-to-bottom like the public page does.
 const pageSections = [
-  'header',
+  'layout',
   'hero',
   'skills',
   'career',
   'portfolio',
   'blog',
   'contacts',
-  'footer',
 ];
 const inboxSections = ['requests'];
-const systemSections = [
-  'request-form',
-  'privacy-policy',
-  'users',
-  'account',
-];
+const systemSections = ['request-form', 'privacy-policy', 'users', 'account'];
 const adminSections = [...pageSections, ...inboxSections, ...systemSections];
 const editorSections = ['portfolio', 'blog', 'account'];
 
 function Editor({ section }: { section: string }) {
   switch (section) {
-    case 'header':
-      return <HeaderSection />;
+    case 'layout':
+      return <LayoutSection />;
     case 'hero':
       return <HeroSection />;
     case 'skills':
@@ -62,8 +55,6 @@ function Editor({ section }: { section: string }) {
       return <RequestCopySection />;
     case 'requests':
       return <RequestsSection />;
-    case 'footer':
-      return <FooterSection />;
     case 'privacy-policy':
       return <PrivacyPolicySection />;
     case 'users':

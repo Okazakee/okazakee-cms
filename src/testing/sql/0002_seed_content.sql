@@ -101,9 +101,11 @@ values
   ('admin@isolated.test', 'fixture-admin', 'admin'),
   ('editor@isolated.test', 'fixture-editor', 'editor');
 
--- Match the public-copy namespaces, with deterministic non-production labels.
+-- Match the public-copy namespaces the website still reads, with deterministic
+-- non-production labels. Header and footer chrome is deliberately absent: it is
+-- frozen in the site repo (src/i18n/messages/site.{en,it}.json) and is no longer
+-- stored in i18n_translations.
 update public.i18n_translations set translations = translations || '{
-  "header": {"buttons":["Home","Skills","Career","Portfolio","Blog","Contacts"]},
   "hero-section": {"top":{"name":"Fixture author","role":"Software developer"},"aboutme":{"title":"About me","paragraph":"Building deterministic tools"}},
   "skills-section": {"title":"Skills","subtitle":"Tools for the work"},
   "career-section": {"title":"Career","subtitle":"Experience and learning","month":"month","months":"months","year":"year","years":"years","present":"Present","remote":{"full":"Remote","hybrid":"Hybrid","onSite":"On site"}},
@@ -111,14 +113,12 @@ update public.i18n_translations set translations = translations || '{
   "blog-section": {"title":"Blog","description":"Notes and ideas"},
   "contacts-section": {"title":"Contacts","subtitle":"Get in touch","resume":"Download resume"},
   "posts-section": {"title1":"Portfolio","subtitle1":"Selected projects","title2":"Blog","subtitle2":"Notes and ideas","button":"Read more","no-posts":"No posts yet","source":"Source","demo":"Demo","store":"Google Play","fdroid":"F-Droid","ios":"App Store","preCopy":"Copy link","ratelimit":"Please try again later","searchbar":"Search posts"},
-  "footer": {"left":"Made with care","middle":"Fixture website","right":"All rights reserved","source":"Source code","buttonTitle":"Back to top","privacyPolicy":"Privacy policy"},
   "privacyPolicy": {"description":"How this fixture handles data"},
   "errors": {"code":"404","notFoundLabel":"Not found","notFoundTitle":"Page missing","notFoundText":"This page does not exist","goBack":"Go back","home":"Home","errorLabel":"Error","errorTitle":"Something went wrong","errorText":"Please try again","retry":"Retry","postErrorTitle":"Post unavailable","postErrorText":"Please try again later","postNotFoundText":"This post does not exist"},
   "request-form": {"eyebrow":"Project requests","title":"Have a project in mind?","subtitle":"Tell me about it","website":"Website","websitePlaceholder":"https://example.test","name":"Name","namePlaceholder":"Your name","email":"Email","emailPlaceholder":"you@example.test","company":"Company","companyPlaceholder":"Your company","type":"Project type","typeOptions":["Select type","Website","App"],"budget":"Budget","budgetOptions":["Select budget","Under 1000","1000 to 5000"],"timeline":"Timeline","timelineOptions":["Select timeline","This month","Flexible"],"request":"Request","requestPlaceholder":"Describe your project","consent":"I accept the privacy policy","submit":"Send request","comingSoon":"Coming soon"}
 }'::jsonb;
 
 update public.i18n_translations set translations = translations || '{
-  "header": {"buttons":["Home","Skills","Carriera","Portfolio","Blog","Contatti"]},
   "skills-section": {"title":"Competenze","subtitle":"Strumenti per il lavoro"},
   "career-section": {"title":"Carriera","subtitle":"Esperienza e formazione","month":"mese","months":"mesi","year":"anno","years":"anni","present":"Presente","remote":{"full":"Remoto","hybrid":"Ibrido","onSite":"In sede"}},
   "portfolio-section": {"title":"Portfolio","description":"Progetti selezionati"},

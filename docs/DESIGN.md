@@ -256,7 +256,9 @@ redesign.
 
 ### 5.4 Contacts and the project request form
 - Contacts are the four real rows (Email, LinkedIn, GitHub, Telegram) with the DB
-  `bg_color` as the tile accent, plus the resume action from `hero_section.resume_en`.
+  `bg_color` as the tile accent. The résumé is the **header's** action, not a
+  contact row: the site renders it from `hero_section.resume_${locale}`, and both
+  PDFs are edited from **Layout** — Contacts owns its rows and its translations only.
 - The request form is mock-only for now and will be built on `precall` (a library where
   the consumer owns the form and each field carries policy metadata such as
   `sendToAI`; email is the obvious not-to-AI field). Fields: Name, Email, Company,
@@ -270,6 +272,14 @@ redesign.
 Left: `Made with ❤️ by` + the name **linked to the GitHub profile**, then `Source Code`
 linking the repo — both with the violet hover. Middle: the VAT value as a
 copy affordance carrying `footer.buttonTitle`. Right: CMS and Privacy Policy links.
+
+Everything in that sentence except two values is frozen chrome (§8). The **display
+name** and the **VAT number** are data — `site_settings.footer_name` and
+`footer_vat_number`, both nullable `TEXT` — and they render the literals `Okazakee`
+and `02863310815` whenever a column is null or blank, so an unconfigured row is
+indistinguishable from the footer before the CMS existed. One resolved string feeds
+both the label and the clipboard, so a leading zero survives, and the GitHub, repo,
+CMS and privacy hrefs stay site-owned: a custom name never retargets them.
 
 ### 5.6 Back to top
 Fixed bottom-right, inverted fill (`bg-text-main` on `text-surface-base`), `rounded-xl`,
@@ -321,7 +331,10 @@ so a new section cannot drift into a private look:
   the Privacy policy section, `posts-section` `title1`/`subtitle1` from Portfolio and
   `title2`/`subtitle2` from Blog — each as a `CopyEditor` keyed `<section>:copy`, so
   Publish All and the draft dot still reach it. Frozen copy (§8) is not editable here
-  at all.
+  at all, and the header and footer have no copy editor for the same reason — both
+  namespaces are frozen in the site — so everything an editor *may* change about the
+  chrome (logos, anchors, résumé PDFs, footer identity) is grouped in the single
+  **Layout** section.
 - **Copy editors are addressed by their namespace key**, never by DOM position. A
   section that embeds a `CopyEditor` must give its own body control an `aria-label`,
   and tests select on that: `querySelector('textarea')` silently retargets to
@@ -384,9 +397,10 @@ Invented copy is a defect, not a placeholder.
 | post buttons | `portfolio_posts.buttons` — an ordered jsonb array of `{ kind, url, label? }`, `kind` ∈ `website` \| `source` \| `demo` \| `store` \| `fdroid` \| `ios` \| `custom`. **Array order is render order.** The editor owns the order and the URL only: the label and icon of a preset belong to the public site, so `label` is read only for `custom` and is required there. `url` must be an absolute http(s) URL. Blog posts have no buttons — the column is portfolio-only |
 | legacy link columns | `website` / `source_link` / `demo_link` / `store_link` / `fdroid_link` / `ios_store_link` stay in the table but are no longer written. They are the fallback: a row with null/empty `buttons` renders from them (website, source, demo, store, fdroid, ios), which is what makes the migration a no-op for existing content. Migration `20261004111000_backfill_post_buttons.sql` populates `buttons` from them; dropping the columns is a separate, later decision |
 | author | `user_profiles` via `author_id` (`display_name`, `avatar_url`) |
-| header chrome | `site_settings` — one row: `header_logo_dark` / `header_logo_light` (absolute URL, NULL = the bundled `title-ws*.png` asset, resolved per theme) and `nav_anchors`. These are configuration, not copy, so they live in their own table rather than in the `i18n_translations` jsonb |
+| chrome configuration | `site_settings` — one row: `header_logo_dark` / `header_logo_light` (absolute URL, NULL = the bundled `title-ws*.png` asset, resolved per theme), `nav_anchors`, and the footer identity (`footer_name`, `footer_vat_number`). These are configuration, not copy, so they live in their own table rather than in the `i18n_translations` jsonb, and every one of them is edited from the single **Layout** section |
 | nav anchors | `site_settings.nav_anchors` — an ordered jsonb array of `{ id, anchor }` where `id` ∈ `home` \| `skills` \| `career` \| `portfolio` \| `blog` \| `contacts`. **Written index-aligned with `header.buttons.N`, read by `id`.** `header.buttons` is frozen in the site, so that alignment is now a cross-repo contract: the array order must match the label order in `okazakee-ws/src/i18n/messages/site.{en,it}.json`, in **both** locales. `anchor` is a fragment-safe element id with no leading `#`; blank/omitted falls back to the item id, which reproduces the href this header has always rendered. The destinations and the sections' `id=` attributes stay site-side — an editor cannot retarget a nav item at another page |
-| resume | `hero_section.resume_en` / `resume_it` |
+| footer identity | `site_settings.footer_name` / `footer_vat_number` — nullable `TEXT` (the leading zero of an Italian VAT number is part of the identifier, so the value is never parsed and never numeric); NULL or blank stores NULL and renders the defaults the site already ships, `Okazakee` and `02863310815`. Added by `20261005145655_add_site_settings_footer_identity.sql`: explicitly `dev_staging.`-qualified, nullable columns with **no backfill**, so it is a no-op for the rendered footer and `public` is untouched until that file is deliberately promoted |
+| resume | `hero_section.resume_en` / `resume_it` — the columns are unchanged, but the **Layout** section owns them: the editors moved here from Contacts, which now edits contact rows and its translations only |
 | project requests | `project_requests` (`locale`, `name`, `email`, `company`, `website`, `project_type`, `budget`, `timeline`, `request`, `consent`, `created_at`, `archived`, `archived_at`) — **personal data**: service_role only, no anon/authenticated grant, never in the public cache-tag vocabulary. Rows arrive from `okazakee-ws` `POST /api/requests`, which re-validates the payload server-side and writes through the service-role client; the CMS inbox is the only reader |
 
 **Custom formatting to honour**

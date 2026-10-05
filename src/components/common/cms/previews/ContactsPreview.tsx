@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import type React from 'react';
 import { useEffect, useState } from 'react';
-import type { Contact, ResumeData } from '@/types/fetchedData.types';
+import type { Contact } from '@/types/fetchedData.types';
 import { formatLabels } from '@/utils/formatLabels';
 import { AppleIcon, GithubIcon, LinkedinIcon } from './canonical/BrandIcons';
 import { InnerHtml } from './canonical/InnerHtml';
@@ -13,7 +13,6 @@ import { RequestFormPreview } from './canonical/RequestForm';
 
 interface ContactsPreviewProps {
   contacts: Contact[];
-  resumeData?: ResumeData;
 }
 
 // Preview icon loader for non-brand names: resolves from lucide-react at

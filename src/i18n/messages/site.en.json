@@ -1,0 +1,26 @@
+{
+  "header": {
+    "buttons": [
+      "Home",
+      "Skills",
+      "Career",
+      "Portfolio",
+      "Blog",
+      "Contacts",
+      "Resume"
+    ],
+    "language": "Language",
+    "resume": "Resume",
+    "theme": "Theme"
+  },
+  "footer": {
+    "left": "Made with ❤️ by",
+    "right": "Top",
+    "middle": "VAT IT",
+    "source": "Source Code",
+    "darkmode": "Dark Mode",
+    "lightmode": "Light Mode",
+    "buttonTitle": "Click to copy VAT number",
+    "privacyPolicy": "Privacy Policy"
+  }
+}

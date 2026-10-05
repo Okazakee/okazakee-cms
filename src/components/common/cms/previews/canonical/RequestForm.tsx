@@ -3,19 +3,22 @@
 import Link from 'next/link';
 import { useLocale, useMessages, useTranslations } from 'next-intl';
 import { ErrorDiv } from '@/components/common/ErrorDiv';
+import { getLayoutCopy } from './layoutCopy';
 
 /**
  * Canonical project request form (docs/DESIGN.md §5.4) rendered as a preview:
  * the fields and the "coming soon" band are identical to the public site, but
  * submit is inert and the privacy link opens in a new tab, so a preview cannot
- * navigate or mutate anything. When the public `request-form` / `footer`
- * messages are not available, the CMS error banner is shown instead of an
- * invented copy.
+ * navigate or mutate anything. When the public `request-form` messages are not
+ * available, the CMS error banner is shown instead of an invented copy.
+ *
+ * The privacy link label is frozen site-side copy like the layout chrome, so it
+ * comes from `getLayoutCopy` rather than a `footer` translation namespace.
  */
 export function RequestFormPreview() {
   const messages = useMessages();
 
-  if (!messages['request-form'] || !messages.footer) {
+  if (!messages['request-form']) {
     return <ErrorDiv>Request form preview unavailable</ErrorDiv>;
   }
 
@@ -24,7 +27,6 @@ export function RequestFormPreview() {
 
 function RequestFormPreviewInner() {
   const t = useTranslations('request-form');
-  const tFooter = useTranslations('footer');
   const currentLocale = useLocale();
 
   const tr = (key: string) => (t.has(key) ? t(key) : '');
@@ -160,7 +162,7 @@ function RequestFormPreviewInner() {
                 rel="noopener noreferrer"
                 target="_blank"
               >
-                {tFooter.has('privacyPolicy') ? tFooter('privacyPolicy') : ''}
+                {getLayoutCopy(currentLocale).footer.privacyPolicy}
               </Link>
               .
             </span>

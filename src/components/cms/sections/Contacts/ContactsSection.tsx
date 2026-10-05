@@ -1,15 +1,13 @@
 'use client';
 
-import { ExternalLink, Plus, Trash2, X } from 'lucide-react';
+import { Plus, Trash2, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { contactsActions } from '@/app/actions/cms/sections/contactsActions';
-import { heroActions } from '@/app/actions/cms/sections/heroActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { IconPicker } from '@/components/cms/shared/IconPicker';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
@@ -22,18 +20,16 @@ import {
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
-import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
+import { useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
 
 export default function ContactsSection() {
   const t = useTranslations('cms');
-  const { heroSection, setHeroSection } = useCmsStore();
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,10 +52,6 @@ export default function ContactsSection() {
   });
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
-  const resumeEnUpload = useFileUpload({ accept: '.pdf', maxSizeMB: 10 });
-  const resumeItUpload = useFileUpload({ accept: '.pdf', maxSizeMB: 10 });
-  const resumeInitRef = useRef(false);
-
   const {
     translations,
     isDirty: transDirty,
@@ -76,9 +68,7 @@ export default function ContactsSection() {
     newContacts.length > 0 ||
     deletedIds.size > 0 ||
     orderChanged ||
-    transDirty ||
-    resumeEnUpload.file !== null ||
-    resumeItUpload.file !== null;
+    transDirty;
   useSectionDirty('contacts', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -109,15 +99,6 @@ export default function ContactsSection() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  useEffect(() => {
-    if (!heroSection || resumeInitRef.current) return;
-    resumeInitRef.current = true;
-    if (heroSection.resume_en)
-      resumeEnUpload.setFileFromUrl(heroSection.resume_en);
-    if (heroSection.resume_it)
-      resumeItUpload.setFileFromUrl(heroSection.resume_it);
-  }, [heroSection, resumeEnUpload, resumeItUpload]);
 
   const handleAdd = () => {
     if (!newForm.label || !newForm.icon || !newForm.link) {
@@ -183,40 +164,6 @@ export default function ContactsSection() {
     const positions = new Map(contacts.map((c, i) => [c.id, i]));
 
     try {
-      // Resume uploads via hero actions
-      if (resumeEnUpload.file || resumeItUpload.file) {
-        const result = await heroActions({
-          type: 'UPDATE_WITH_FILES',
-          files: {
-            ...(resumeEnUpload.file ? { resume_en: resumeEnUpload.file } : {}),
-            ...(resumeItUpload.file ? { resume_it: resumeItUpload.file } : {}),
-          },
-          currentData: {
-            mainImage: heroSection?.mainImage || '',
-            resume_en: heroSection?.resume_en || '',
-            resume_it: heroSection?.resume_it || '',
-          },
-        });
-        if (!result.success) {
-          errors.push(result.error || t('hero.errorUpdateHero'));
-        } else {
-          const data = result.data as {
-            resume_en?: string;
-            resume_it?: string;
-          };
-          setHeroSection(
-            mergeHeroSettings(heroSection, {
-              resume_en: data.resume_en || heroSection?.resume_en || null,
-              resume_it: data.resume_it || heroSection?.resume_it || null,
-            })
-          );
-          const heroWarning = revalidationWarning(result);
-          if (heroWarning) useCmsStore.getState().setWarning(heroWarning);
-          resumeEnUpload.clearFile();
-          resumeItUpload.clearFile();
-        }
-      }
-
       // Pending creates always use the latest edited contact, never the stale
       // newContacts snapshot.
       const createTempIds = newContacts.map((c) => String(c.id));
@@ -356,10 +303,6 @@ export default function ContactsSection() {
     transDirty,
     saveTranslations,
     fetchData,
-    resumeEnUpload,
-    resumeItUpload,
-    heroSection,
-    setHeroSection,
     t,
   ]);
 
@@ -370,12 +313,6 @@ export default function ContactsSection() {
     setNewContacts([]);
     setDeletedIds(new Set());
     setOrderChanged(false);
-    resumeEnUpload.clearFile();
-    resumeItUpload.clearFile();
-    if (heroSection?.resume_en)
-      resumeEnUpload.setFileFromUrl(heroSection.resume_en);
-    if (heroSection?.resume_it)
-      resumeItUpload.setFileFromUrl(heroSection.resume_it);
     revertTranslations();
     setError(null);
   };
@@ -628,91 +565,6 @@ export default function ContactsSection() {
           ))}
         </div>
       )}
-
-      {/* Resume PDFs */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4">
-          {t('hero.resumeLinksTitle')}
-        </h2>
-        <div className="grid md:grid-cols-2 gap-6">
-          <div>
-            <h3 className="text-sm font-medium text-text-main mb-2">
-              {t('hero.uploadResumeItalian')}
-            </h3>
-            <FileDropzone
-              previewUrl={resumeItUpload.previewUrl}
-              isDragging={resumeItUpload.isDragging}
-              isProcessing={resumeItUpload.isProcessing}
-              error={resumeItUpload.error}
-              currentUrl={heroSection?.resume_it ?? undefined}
-              dropzoneProps={{
-                onDragOver: resumeItUpload.dropzoneProps.onDragOver,
-                onDragLeave: resumeItUpload.dropzoneProps.onDragLeave,
-                onDrop: resumeItUpload.dropzoneProps.onDrop,
-              }}
-              fileInputProps={{
-                ...resumeItUpload.fileInputProps,
-                accept: '.pdf',
-              }}
-              fileInputRef={resumeItUpload.fileInputRef}
-              onClear={resumeItUpload.clearFile}
-              onBrowse={resumeItUpload.openFileDialog}
-              compact
-            />
-            {heroSection?.resume_it && !resumeItUpload.file && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                <a
-                  href={heroSection.resume_it}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors inline-flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  {t('contacts.openResume')}
-                </a>
-              </div>
-            )}
-          </div>
-          <div>
-            <h3 className="text-sm font-medium text-text-main mb-2">
-              {t('hero.uploadResumeEnglish')}
-            </h3>
-            <FileDropzone
-              previewUrl={resumeEnUpload.previewUrl}
-              isDragging={resumeEnUpload.isDragging}
-              isProcessing={resumeEnUpload.isProcessing}
-              error={resumeEnUpload.error}
-              currentUrl={heroSection?.resume_en ?? undefined}
-              dropzoneProps={{
-                onDragOver: resumeEnUpload.dropzoneProps.onDragOver,
-                onDragLeave: resumeEnUpload.dropzoneProps.onDragLeave,
-                onDrop: resumeEnUpload.dropzoneProps.onDrop,
-              }}
-              fileInputProps={{
-                ...resumeEnUpload.fileInputProps,
-                accept: '.pdf',
-              }}
-              fileInputRef={resumeEnUpload.fileInputRef}
-              onClear={resumeEnUpload.clearFile}
-              onBrowse={resumeEnUpload.openFileDialog}
-              compact
-            />
-            {heroSection?.resume_en && !resumeEnUpload.file && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                <a
-                  href={heroSection.resume_en}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors inline-flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  {t('contacts.openResume')}
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
       <ConfirmDialog
         isOpen={showConfirmRevert}

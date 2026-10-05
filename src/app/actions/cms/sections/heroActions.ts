@@ -31,12 +31,6 @@ type HeroOperation =
       blurhashURL?: string;
     }
   | {
-      type: 'UPLOAD_RESUME';
-      file: File;
-      field: 'resume_en' | 'resume_it';
-      currentResumeUrl?: string;
-    }
-  | {
       type: 'UPDATE_WITH_FILES';
       files: HeroFileData;
       currentData?: HeroCurrentData;
@@ -99,14 +93,6 @@ export async function heroActions(
           operation.file,
           operation.currentImageUrl,
           operation.blurhashURL
-        );
-
-      case 'UPLOAD_RESUME':
-        return await uploadResume(
-          supabase,
-          operation.file,
-          operation.field,
-          operation.currentResumeUrl
         );
 
       case 'UPDATE_WITH_FILES':
@@ -304,75 +290,6 @@ async function uploadHeroImage(
     return {
       success: false,
       error: 'Failed to upload hero image',
-    };
-  }
-}
-
-async function uploadResume(
-  _supabase: SupabaseClient,
-  file: File,
-  field: 'resume_en' | 'resume_it',
-  _currentResumeUrl?: string
-): Promise<HeroResult> {
-  try {
-    const fileValidation = validatePdfFile(file);
-    if (!fileValidation.isValid) {
-      return { success: false, error: fileValidation.error };
-    }
-
-    const admin = getAdminClient();
-    const { data: currentRow, error: fetchError } = await admin
-      .from('hero_section')
-      .select('resume_en, resume_it')
-      .eq('id', 1)
-      .single();
-    if (fetchError || !currentRow)
-      throw fetchError ?? new Error('Hero row not found');
-
-    // Unique immutable PDF path: never overwrites the previous resume.
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const upload = await uploadPdfBuffer(
-      admin,
-      'website',
-      'resumes',
-      field,
-      buffer
-    );
-
-    const { error: updateError } = await admin
-      .from('hero_section')
-      .update({ [field]: upload.publicUrl })
-      .eq('id', 1)
-      .select('id')
-      .single();
-
-    if (updateError) {
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
-      throw updateError;
-    }
-
-    await removePublicFileIfDifferent(
-      admin,
-      currentRow[field] as string | null,
-      'website',
-      upload.path
-    );
-
-    const revalidation = await invalidatePublicContent({
-      entity: 'resume',
-      operation: 'update',
-    });
-
-    return {
-      success: true,
-      data: { [field]: upload.publicUrl },
-      revalidation,
-    };
-  } catch (error) {
-    console.error('Error uploading resume:', error);
-    return {
-      success: false,
-      error: 'Failed to upload resume',
     };
   }
 }

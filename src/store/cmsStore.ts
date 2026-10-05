@@ -20,7 +20,7 @@ export interface PublishFailure {
 
 /**
  * Hero store updates always carry every column, so a section that only owns
- * one of them (resumes in Contacts, display in Hero) never drops the rest.
+ * one of them (résumés in Layout, display in Hero) never drops the rest.
  */
 export function mergeHeroSettings(
   current: HeroSettings | null,

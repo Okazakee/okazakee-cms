@@ -33,13 +33,14 @@ rendering and caching.
   blog/portfolio + account. Every mutation is authorized server-side; the UI
   never is the security boundary
 - **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Request
-  Form copy, Requests, Layout (header/footer), Website Copy, Privacy Policy,
-  Users, Account — each with EN/IT translations, draft/publish state, and live
-  previews. *Requests* is read-only and has no intake path yet: the public
-  form does not submit, so the section renders an explicit "not connected"
-  notice until one does. *Request Form copy* is not published to the site
-  either — the public form owns those strings until it moves to CMS
-  translations.
+  Form copy, Requests, Layout (header logos and anchors, résumé PDFs, footer
+  identity), Website Copy, Privacy Policy, Users, Account — each with EN/IT
+  translations, draft/publish state, and live previews. *Requests* is
+  read-only and has no intake path yet: the public form does not submit, so
+  the section renders an explicit "not connected" notice until one does.
+  *Request Form copy* is not published to the site either — the public form
+  owns those strings until it moves to CMS translations. *Layout* replaces the
+  old Header and Footer sections and is described under [Layout](#layout).
 - **Uploads** — images (client-side WebP preprocessing, server fallback via
   Sharp, SVG rejected) and PDF resumes, stored in the shared `website`
   bucket with format-aware extensions/MIME. Animated WebP skips the
@@ -56,6 +57,39 @@ rendering and caching.
 - **Cache invalidation** — after a committed mutation the CMS sends a signed
   HTTP event to the public site's `/api/internal/content-revalidate`
   (HMAC-SHA256, replay window, hard-coded tag allowlist)
+
+## Layout
+
+The **Layout** section (admin only) is the one owner of the page chrome and of
+the résumé files. It groups three independent editors:
+
+- **Header** — the dark/light logo pair and the six navigation anchors, both
+  columns of the single `site_settings` row.
+- **Résumé** — the EN/IT résumé PDFs, which moved here from Contacts; Contacts
+  now edits contact links only. Persistence is unchanged: the files still live
+  in `hero_section.resume_en` / `resume_it` and are uploaded through
+  `heroActions` (`UPDATE_WITH_FILES`), with the same 10 MB PDF validation and
+  storage ordering.
+- **Footer identity** — the display name and VAT number
+  (`site_settings.footer_name` / `footer_vat_number`).
+
+The settings commit and the résumé upload are separate commits, so one failing
+never rolls back — or re-uploads — the other.
+
+**Header and footer copy is frozen, not editable.** Nav labels, theme and
+language controls, the credit, source, back-to-top and privacy-policy labels are
+structural chrome: they live in
+`okazakee-ws/src/i18n/messages/site.{en,it}.json` and are merged over the
+database by `okazakee-ws/src/i18n/siteCopy.ts`, so no stale row can override
+them. The Header and Footer translation editors were removed for that reason;
+the Layout preview reads the same frozen copy through `getLayoutCopy(locale)`
+and needs no database row at all.
+
+Only the two footer identity fields are editable content. Both are nullable and
+a blank value is stored as `NULL`, which is what tells the website to keep
+rendering its own defaults: the name `Okazakee` and the VAT number
+`02863310815`. `footer_vat_number` is `TEXT` so the Italian leading zero
+survives, and the value is displayed and copied verbatim — never parsed.
 
 ## Architecture
 
@@ -113,7 +147,13 @@ Public-site revalidation (production):
 
 **Tables:** `user_profiles`, `cms_allowed_users`, `blog_posts`,
 `portfolio_posts`, `skills`, `skills_categories`, `career_entries`,
-`contacts`, `hero_section`, `i18n_translations`. **Storage bucket:** `website`.
+`contacts`, `hero_section`, `site_settings`, `i18n_translations`.
+**Storage bucket:** `website`.
+
+`site_settings` is a single row and holds everything the Layout section owns:
+the header logos, the navigation anchors and the footer identity. The
+`header`/`footer` namespaces are *not* in `i18n_translations` — that chrome is
+frozen in the website repository, so nothing here edits it any more.
 
 **Auth redirect URLs** (Supabase Auth → URL Configuration) must include
 exactly these canonical paths — the CMS serves root paths, no `/cms` or
@@ -146,7 +186,13 @@ preview env (which omits it) points at production. Both this app and
 (Dashboard → Data API settings); otherwise PostgREST answers
 `permission denied for schema`. Apply migrations with
 `supabase/migrations/*.sql` to `dev_staging` first, promote to `public` on
-release. Two things are *not* schema-scoped and still hit production:
+release. Schema-owned DDL is explicitly `dev_staging.`-qualified rather than
+resolved through `search_path`, so a migration cannot reach production by
+accident: the footer identity columns
+(`20261005145655_add_site_settings_footer_identity.sql`) are the current
+example, and `public` is untouched until that file is promoted, which is why
+production keeps rendering its own footer defaults. Two things are *not*
+schema-scoped and still hit production:
 
 - **Storage** — buckets are project-level. Use a separate bucket
   (`SUPABASE_BUCKET=website-dev`) so a test upload cannot land in the live one.

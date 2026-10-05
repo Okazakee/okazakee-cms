@@ -120,7 +120,7 @@ src/
 ## 5. Commands and Workflows
 
 - Install: `bun install`
-- Dev server: `bun run dev`
+- Dev server: `bun run dev` (pinned to port 3001; the public site owns 3000)
 - Build: `bun run build`
 - Start production: `bun run start`
 - Lint: `bun run lint` (runs `biome lint .`)

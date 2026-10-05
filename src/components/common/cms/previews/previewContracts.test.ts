@@ -1,11 +1,17 @@
-// @vitest-environment happy-dom
+/**
+ * @vitest-environment happy-dom
+ * @vitest-environment-options {"settings":{"navigation":{"disableChildFrameNavigation":true}}}
+ */
 import { NextIntlClientProvider, useLocale, useTranslations } from 'next-intl';
 import { act, createElement, type ReactNode, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import cmsEn from '@/i18n/messages/cms.en.json';
+import type * as useSectionTranslationsModule from '@/hooks/cms/useSectionTranslations';
+import { useCmsStore } from '@/store/cmsStore';
 
 const h = vi.hoisted(() => ({
+  hero: vi.fn(),
   read: vi.fn(),
   settings: vi.fn(),
   setField: vi.fn(),
@@ -31,21 +37,11 @@ vi.mock('@/hooks/cms/useSectionCallbacks', () => ({
 }));
 vi.mock('@/hooks/cms/useSectionDirty', () => ({ useSectionDirty: () => {} }));
 vi.mock('@/hooks/cms/useSectionTranslations', async (original) => {
-  const actual =
-    await original<typeof import('@/hooks/cms/useSectionTranslations')>();
+  const actual = await original<typeof useSectionTranslationsModule>();
   return {
     ...actual,
-    useSectionTranslations: (namespace: string) => ({
-      translations: {
-        en:
-          namespace === 'header'
-            ? { 'buttons.0': 'Editable home' }
-            : { left: 'English footer' },
-        it:
-          namespace === 'header'
-            ? { 'buttons.1': 'Ignored Italian draft' }
-            : { left: 'Italian footer' },
-      },
+    useSectionTranslations: () => ({
+      translations: { en: {}, it: {} },
       isDirty: false,
       isLoading: false,
       error: null,
@@ -56,6 +52,9 @@ vi.mock('@/hooks/cms/useSectionTranslations', async (original) => {
     }),
   };
 });
+vi.mock('@/app/actions/cms/sections/heroActions', () => ({
+  heroActions: h.hero,
+}));
 vi.mock('next/image', async () => {
   const { createElement } = await import('react');
   return {
@@ -88,8 +87,7 @@ vi.mock('@/app/public/title-cms-lightmode.png', () => ({
 import BlogSection from '@/components/cms/sections/Blog/BlogSection';
 import CareerSection from '@/components/cms/sections/Career/CareerSection';
 import { RequestCopySection } from '@/components/cms/sections/Copy/CopySections';
-import FooterSection from '@/components/cms/sections/Footer/FooterSection';
-import HeaderSection from '@/components/cms/sections/Header/HeaderSection';
+import { LayoutSection } from '@/components/cms/sections/Layout/LayoutSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
 import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
 import SkillsSection from '@/components/cms/sections/Skills/SkillsSection';
@@ -98,21 +96,12 @@ import { ClientMarkdown } from '@/components/common/cms/previews/canonical/Clien
 import { GitHubStars } from '@/components/common/cms/previews/canonical/GitHubStars';
 import { RequestFormPreview } from '@/components/common/cms/previews/canonical/RequestForm';
 import { ViewCount } from '@/components/common/cms/previews/canonical/ViewCount';
+import { LayoutPreview } from '@/components/common/cms/previews/LayoutPreview';
 import { PreviewTranslations } from '@/components/common/cms/previews/PreviewTranslations';
 
 const rows = ['en', 'it'].map((language) => ({
   language,
   translations: {
-    header: {
-      buttons: ['Home', 'Skills', 'Career', 'Portfolio', 'Blog', 'Contacts'],
-    },
-    footer: {
-      left: `Footer ${language}`,
-      middle: 'Tax',
-      source: 'Source',
-      buttonTitle: 'Copy tax ID',
-      privacyPolicy: 'Privacy',
-    },
     'posts-section': {
       button: `Read ${language}`,
       source: `Source ${language}`,
@@ -130,16 +119,44 @@ const rows = ['en', 'it'].map((language) => ({
     },
   },
 }));
+// No `header` or `footer` namespace is loaded anywhere here: that chrome copy
+// is frozen site-side, so both the Layout and request-form previews must read
+// it from local copy and stay functional without those DB namespaces.
 const base = { cms: cmsEn, ...rows[0].translations };
 let root: Root;
 let container: HTMLDivElement;
 
-async function mount(children: ReactNode, messages = base, strict = false) {
-  const props = { locale: 'en', messages, children };
+async function mount(
+  children: ReactNode,
+  messages: Record<string, unknown> = base,
+  strict = false,
+  locale = 'en'
+) {
+  const props = {
+    locale,
+    messages,
+    children,
+  };
   const provider = createElement(NextIntlClientProvider, props);
   await act(async () =>
     root.render(strict ? createElement(StrictMode, null, provider) : provider)
   );
+}
+/** Types `value` into the text field the section renders under `label`. */
+async function fillLabelled(label: string, value: string) {
+  const field = [...container.querySelectorAll('label')].find(
+    (node) => node.querySelector('span')?.textContent === label
+  );
+  const node = field?.querySelector('input');
+  if (!node) throw new Error(`Missing field: ${label}`);
+  const setValue = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    'value'
+  )?.set;
+  await act(async () => {
+    setValue?.call(node, value);
+    node.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 }
 function deferredRead() {
   type Response = { success: boolean; data: unknown };
@@ -192,6 +209,18 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
+  useCmsStore.setState({
+    activeSection: 'layout',
+    heroSection: {
+      mainImage: null,
+      blurhashURL: null,
+      resume_en: null,
+      resume_it: null,
+      shape: null,
+      typewriter: false,
+      typewriter_target: null,
+    },
+  });
   h.read
     .mockReset()
     .mockResolvedValue({ success: true, data: structuredClone(rows) });
@@ -208,6 +237,8 @@ beforeEach(() => {
         'blog',
         'contacts',
       ].map((id) => ({ id, anchor: id })),
+      footer_name: null,
+      footer_vat_number: null,
     },
   });
   h.setField.mockClear();
@@ -288,9 +319,7 @@ describe('localized draft preview boundary', () => {
         container.querySelector<HTMLTextAreaElement>(
           '[aria-label="Policy body"]'
         )?.value
-      ).toBe(
-        '# Keep my unsaved policy'
-      );
+      ).toBe('# Keep my unsaved policy');
     }
   );
   it('keeps edited Skills categories when a superseded mount read arrives late', async () => {
@@ -341,12 +370,9 @@ describe('localized draft preview boundary', () => {
       },
     });
     expect(
-      container.querySelector<HTMLTextAreaElement>(
-        '[aria-label="Policy body"]'
-      )?.value
-    ).toBe(
-      '# Keep my unsaved privacy'
-    );
+      container.querySelector<HTMLTextAreaElement>('[aria-label="Policy body"]')
+        ?.value
+    ).toBe('# Keep my unsaved privacy');
     expect(h.read).toHaveBeenCalledTimes(1);
   });
   it('merges only selected-locale drafts and preserves unrelated public copy', async () => {
@@ -478,61 +504,105 @@ describe('honest website customization and offline controls', () => {
       })
     );
   });
-  it('renders every header field the website consumes and keeps Italian navigation fixed', async () => {
-    await mount(createElement(HeaderSection));
-    // 6 navigation labels + header.theme + header.language + header.resume.
-    // The website reads the last three straight from this namespace
-    // (NavMenu), so without a control here that copy is unreachable.
-    // 6 navigation labels + 6 anchors + header.theme/language/resume, plus
-    // the two hidden file inputs behind the logo dropzones.
-    const texts =
-      container.querySelectorAll<HTMLInputElement>('input[type="text"]');
-    expect(texts).toHaveLength(15);
-    expect(container.querySelectorAll('input[type="file"]')).toHaveLength(2);
-    // The anchors are CMS-editable per theme, so a draft shows up in preview.
-    expect([...texts].slice(6, 12).map((node) => node.value)).toEqual([
-      'home',
-      'skills',
-      'career',
-      'portfolio',
-      'blog',
-      'contacts',
-    ]);
-    expect(container.textContent).toContain('Theme');
-    expect(container.textContent).toContain('Language');
-    expect(container.textContent).toContain('Resume button');
-    await click(button('Italian', container));
-    const inputs = [
-      ...container.querySelectorAll<HTMLInputElement>('input[type="text"]'),
-    ];
-    expect(inputs.slice(0, 6).map((node) => node.value)).toEqual([
-      'Home',
-      'Skills',
-      'Carriera',
-      'Portfolio',
-      'Blog',
-      'Contatti',
-    ]);
-    expect(inputs.slice(0, 6).every((node) => node.disabled)).toBe(true);
-    expect(inputs.slice(6).every((node) => !node.disabled)).toBe(true);
-    // Every field the website reads from this namespace has a control.
-    expect(container.textContent).toContain('Header Logo');
-    expect(container.textContent).toContain('Navigation Anchors');
-    expect(h.setField).not.toHaveBeenCalled();
-  });
-  it('exposes every footer field the website reads', async () => {
-    await mount(createElement(FooterSection));
-    expect(container.querySelectorAll('input')).toHaveLength(6);
-    for (const label of [
-      'Left',
-      'Middle',
-      'Right',
-      'Source',
-      'Button Title',
-      'Privacy Policy',
-    ]) {
-      expect(container.textContent).toContain(label);
+  it.each([
+    ['en', ['Career', 'Contacts'], 'Made with ❤️ by'],
+    ['it', ['Carriera', 'Contatti'], 'Creato con ❤️ da'],
+  ] as const)(
+    'previews the layout chrome from local copy in %s with no header or footer namespace loaded',
+    async (locale, navLabels, credit) => {
+      await mount(createElement(LayoutPreview), { cms: cmsEn }, false, locale);
+      const rendered = container.textContent ?? '';
+      for (const label of navLabels) expect(rendered).toContain(label);
+      expect(rendered).toContain(credit);
+      // A namespace key must never surface as chrome text.
+      expect(rendered).not.toContain('footer.');
     }
+  );
+  it('keeps the website footer identity until a draft supplies one, and hides the résumé link without a PDF', async () => {
+    await mount(createElement(LayoutSection));
+    await click(button('Preview'));
+    const preview = () => document.querySelector('[role=dialog]');
+    expect(preview()?.textContent).toContain('Made with ❤️ by Okazakee');
+    expect(preview()?.textContent).toContain('VAT IT - 02863310815');
+    expect(preview()?.querySelector('a[href$=".pdf"]')).toBeNull();
+    // A draft takes over one field at a time; the untouched one keeps the
+    // site's own value instead of going blank.
+    await click(button('Close'));
+    await fillLabelled('VAT number', '00123456789');
+    await click(button('Preview'));
+    expect(preview()?.textContent).toContain('VAT IT - 00123456789');
+    expect(preview()?.textContent).toContain('Made with ❤️ by Okazakee');
+  });
+
+  it('releases busy state and re-enables the editor after a successful publish', async () => {
+    await mount(createElement(LayoutSection));
+    // Drain the initial fetch + render microtasks.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Initial: clean, Publish/Revert disabled, fieldset enabled.
+    const fs = container.querySelector('fieldset');
+    expect(fs?.hasAttribute('disabled')).toBe(false);
+    expect(button('Publish').disabled).toBe(true);
+
+    // Edit footer to make dirty.
+    await fillLabelled('Display name', 'NewName');
+    expect(button('Publish').disabled).toBe(false);
+
+    // Publish succeeds (h.settings resolves success).
+    await click(button('Publish'));
+    // Drain the async publish callback + resulting state updates.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // busy must release: fieldset re-enabled, dirty cleared, error absent.
+    expect(fs?.hasAttribute('disabled')).toBe(false);
+    expect(button('Publish').disabled).toBe(true);
+    expect(button('Revert').disabled).toBe(true);
+    expect(container.querySelector('[role=alert]')).toBeNull();
+
+    // Editor stays usable: a second edit + publish still works.
+    await fillLabelled('Display name', 'SecondEdit');
+    expect(button('Publish').disabled).toBe(false);
+    await click(button('Publish'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fs?.hasAttribute('disabled')).toBe(false);
+    expect(button('Publish').disabled).toBe(true);
+  });
+  it('previews the anchor a draft points at and the résumé link of the previewed locale', async () => {
+    useCmsStore.setState({
+      heroSection: {
+        mainImage: null,
+        blurhashURL: null,
+        resume_en: '/resumes/en.pdf',
+        resume_it: '/resumes/it.pdf',
+        shape: null,
+        typewriter: false,
+        typewriter_target: null,
+      },
+    });
+    await mount(createElement(LayoutSection));
+    await fillLabelled('Skills', 'competenze');
+    await click(button('Preview'));
+    const preview = () => document.querySelector('[role=dialog]');
+    expect(preview()?.querySelector('a[href="#competenze"]')?.textContent).toBe(
+      'Skills'
+    );
+    // Only the previewed locale's own PDF is offered, as the site resolves the
+    // button from `resume_${locale}`.
+    expect(
+      preview()?.querySelector('a[href="/resumes/en.pdf"]')?.textContent
+    ).toContain('Resume');
+    expect(preview()?.querySelector('a[href="/resumes/it.pdf"]')).toBeNull();
   });
   it('edits career work-location labels under the consumed career-section namespace', async () => {
     await mount(createElement(CareerSection));
@@ -592,6 +662,15 @@ describe('honest website customization and offline controls', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(network).not.toHaveBeenCalled();
     expect(h.read).not.toHaveBeenCalled();
+  });
+  it('renders the request preview from frozen chrome copy with no footer namespace loaded, and only reports unavailable when the request-form copy is gone', async () => {
+    await mount(createElement(RequestFormPreview));
+    const privacy = container.querySelector('a[href="/en/privacy-policy"]');
+    expect(container.querySelector('form')).not.toBeNull();
+    expect(privacy).not.toBeNull();
+    await mount(createElement(RequestFormPreview), { cms: cmsEn });
+    expect(container.querySelector('form')).toBeNull();
+    expect(container.textContent).toContain('unavailable');
   });
   it('uses public code chrome and image captions in draft markdown', async () => {
     const props = {

@@ -7,7 +7,6 @@ import {
   ExternalLink,
   Home,
   Inbox,
-  PanelBottom,
   PanelTop,
   LogOut,
   MessageSquare,
@@ -52,20 +51,18 @@ const publicSiteUrl =
 // sidebar's footer. The mobile instance omits the logo (the mobile header
 // already shows it).
 //
-// The mobile instance is translucent so the drawer's frosted panel reads
-// through it instead of stopping at an opaque tile. It must NOT add its own
-// `backdrop-blur-*`: the drawer already has one, and a nested backdrop-filter
-// blurs the backdrop rather than the panel.
-function UserBanner({ compact = false }: { compact?: boolean }) {
+// The card carries no fill and no border of its own: the avatar, the name and
+// the role chip already carry the identity, and a tile of its own would read
+// as a separate surface in a sidebar that only raises a fill on row hover
+// (SIDEBAR_ROW_NEUTRAL / SIDEBAR_MOBILE_ROW_NEUTRAL). It must NOT add its own
+// `backdrop-blur-*` either: the drawer already has one, and a nested
+// backdrop-filter blurs the backdrop rather than the panel.
+function UserBanner() {
   const user = useCmsStore((s) => s.user);
   return (
-    <div
-      className={`flex items-center gap-3 rounded-2xl border ${
-        compact
-          ? 'border-border-subtle/60 bg-surface-card/40 p-3'
-          : 'border-border-subtle bg-surface-card p-4'
-      }`}
-    >
+    // `p-3` matches SIDEBAR_ROW, so the avatar lands on the same left edge as
+    // the icons in the rows above it.
+    <div className="flex items-center gap-3 p-3">
       {user?.avatarUrl ? (
         // biome-ignore lint/performance/noImgElement: user-uploaded avatar URL, not a static import
         <img
@@ -110,14 +107,13 @@ interface MenuItem {
 // The sidebar mirrors the public page top to bottom, then the inbox, then
 // everything that is not page content.
 const PAGE_ITEMS: MenuItem[] = [
-  { id: 'header', label: '', icon: PanelTop, adminOnly: true },
+  { id: 'layout', label: '', icon: PanelTop, adminOnly: true },
   { id: 'hero', label: '', icon: Home, adminOnly: true },
   { id: 'skills', label: '', icon: Zap, adminOnly: true },
   { id: 'career', label: '', icon: User2, adminOnly: true },
   { id: 'portfolio', label: '', icon: Briefcase, adminOnly: false },
   { id: 'blog', label: '', icon: NotebookPen, adminOnly: false },
   { id: 'contacts', label: '', icon: Contact, adminOnly: true },
-  { id: 'footer', label: '', icon: PanelBottom, adminOnly: true },
 ];
 
 const INBOX_ITEMS: MenuItem[] = [
@@ -180,8 +176,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     contacts: t('sidebar.nav.contacts'),
     'request-form': t('sidebar.nav.request-form'),
     requests: t('sidebar.nav.requests'),
-    header: t('sidebar.nav.header'),
-    footer: t('sidebar.nav.footer'),
+    layout: t('sidebar.nav.layout'),
     'privacy-policy': t('sidebar.nav.privacy-policy'),
     users: t('sidebar.nav.users'),
     account: t('sidebar.myAccount'),
@@ -244,9 +239,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       onClick={() => handleSelectSection(item.id)}
       aria-current={activeSection === item.id ? 'page' : undefined}
       className={`${SIDEBAR_ROW} ${
-        activeSection === item.id
-          ? SIDEBAR_ROW_ACTIVE
-          : SIDEBAR_ROW_NEUTRAL
+        activeSection === item.id ? SIDEBAR_ROW_ACTIVE : SIDEBAR_ROW_NEUTRAL
       }`}
     >
       <div className="relative">
@@ -326,7 +319,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
       {/* Mobile fullscreen menu: the open/close toggle lives in the CMS
         header (like the website header), so no inner header row here. */}
       <div className="flex min-h-full flex-col px-6 pt-6 pb-[env(safe-area-inset-bottom)] lg:hidden">
-
         {pendingCount > 0 && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-2 dark:border-amber-800/50 dark:bg-amber-900/10">
             <div className="mb-1 flex items-center gap-2">
@@ -461,8 +453,8 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
             </span>
           </button>
-          <div className="mt-3">
-            <UserBanner compact />
+          <div className="mt-6">
+            <UserBanner />
           </div>
         </div>
       </div>

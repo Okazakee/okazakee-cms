@@ -63,18 +63,20 @@ describe('siteSettingsActions GET', () => {
     const result = await siteSettingsActions({ type: 'GET' });
 
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({
-      header_logo_dark: null,
-      header_logo_light: null,
-      nav_anchors: [
-        { id: 'home', anchor: 'home' },
-        { id: 'skills', anchor: 'skills' },
-        { id: 'career', anchor: 'career' },
-        { id: 'portfolio', anchor: 'portfolio' },
-        { id: 'blog', anchor: 'blog' },
-        { id: 'contacts', anchor: 'contacts' },
-      ],
-    });
+    const data = result.data as SiteSettingsRow;
+    expect(data.header_logo_dark).toBeNull();
+    expect(data.header_logo_light).toBeNull();
+    // Unconfigured footer identity: the site renders its own default.
+    expect(data.footer_name).toBeNull();
+    expect(data.footer_vat_number).toBeNull();
+    expect(data.nav_anchors.map((entry) => entry.anchor)).toEqual([
+      'home',
+      'skills',
+      'career',
+      'portfolio',
+      'blog',
+      'contacts',
+    ]);
   });
 
   it('rejects a non-admin caller before touching the table', async () => {
@@ -313,5 +315,139 @@ describe('siteSettingsActions UPDATE_ANCHORS', () => {
     expect(
       (result.data as SiteSettingsRow).nav_anchors.map((entry) => entry.anchor)
     ).toEqual(['home', 'skills', 'career', 'portfolio', 'blog', 'contacts']);
+  });
+});
+
+describe('siteSettingsActions UPDATE_FOOTER', () => {
+  it('stores the display name and the VAT number with its leading zero', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
+
+    const result = await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: 'Okazakee',
+      vatNumber: '02863310815',
+    });
+
+    expect(result.success).toBe(true);
+    expect(storedRow()?.footer_name).toBe('Okazakee');
+    expect(storedRow()?.footer_vat_number).toBe('02863310815');
+    expect(h.invalidate).toHaveBeenCalledWith({
+      entity: 'settings',
+      operation: 'update',
+    });
+  });
+
+  it('reads the stored identity back through GET', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
+    await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: 'Okazakee',
+      vatNumber: '02863310815',
+    });
+
+    const result = await siteSettingsActions({ type: 'GET' });
+
+    const data = result.data as SiteSettingsRow;
+    expect(data.footer_name).toBe('Okazakee');
+    expect(data.footer_vat_number).toBe('02863310815');
+  });
+
+  it('clears a field the editor blanked, so the site falls back to its default', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
+    await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: 'Okazakee',
+      vatNumber: '02863310815',
+    });
+
+    const result = await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: '   ',
+      vatNumber: '',
+    });
+
+    expect(result.success).toBe(true);
+    expect(storedRow()?.footer_name).toBeNull();
+    expect(storedRow()?.footer_vat_number).toBeNull();
+    const data = result.data as SiteSettingsRow;
+    expect(data.footer_name).toBeNull();
+    expect(data.footer_vat_number).toBeNull();
+  });
+
+  it('keeps the identity through a logo write and an anchor write', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
+    await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: 'Okazakee',
+      vatNumber: '02863310815',
+    });
+
+    await siteSettingsActions({
+      type: 'UPLOAD_LOGO',
+      variant: 'dark',
+      file: webpFile(),
+    });
+    await siteSettingsActions({
+      type: 'CLEAR_LOGO',
+      variant: 'light',
+    });
+    const anchors = [
+      { id: 'home', anchor: 'top' },
+      { id: 'skills', anchor: 'skills' },
+      { id: 'career', anchor: 'work-history' },
+      { id: 'portfolio', anchor: 'portfolio' },
+      { id: 'blog', anchor: 'writing' },
+      { id: 'contacts', anchor: 'contacts' },
+    ] as const;
+    const result = await siteSettingsActions({
+      type: 'UPDATE_ANCHORS',
+      anchors: [...anchors],
+    });
+
+    expect(result.success).toBe(true);
+    expect(storedRow()?.footer_name).toBe('Okazakee');
+    expect(storedRow()?.footer_vat_number).toBe('02863310815');
+    const data = result.data as SiteSettingsRow;
+    expect(data.footer_name).toBe('Okazakee');
+    expect(data.footer_vat_number).toBe('02863310815');
+  });
+
+  it('does not claim a save the database refused', async () => {
+    h.fake = makeFake(
+      { cms_allowed_users: ADMIN, site_settings: [] },
+      {
+        failNext: {
+          table: 'site_settings',
+          mode: 'upsert',
+          message: 'db down',
+        },
+      }
+    );
+
+    const result = await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: 'Okazakee',
+      vatNumber: '02863310815',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('db down');
+    expect(h.invalidate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-admin caller before touching the table', async () => {
+    h.fake = makeFake({ cms_allowed_users: EDITOR, site_settings: [] });
+
+    const result = await siteSettingsActions({
+      type: 'UPDATE_FOOTER',
+      name: 'Okazakee',
+      vatNumber: '02863310815',
+    });
+
+    expect(result.success).toBe(false);
+    expect(
+      h.fake.state.log.some((entry) => entry.table === 'site_settings')
+    ).toBe(false);
+    expect(h.invalidate).not.toHaveBeenCalled();
   });
 });

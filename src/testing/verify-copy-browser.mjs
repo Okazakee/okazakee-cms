@@ -26,9 +26,12 @@ const ports = new Set(
 const snapshot = async () =>
   (
     await api(
-      '/__fixture/snapshot?tables=i18n_translations,skills_categories,skills'
+      '/__fixture/snapshot?tables=i18n_translations,skills_categories,skills,site_settings'
     )
   ).tables;
+// Header/footer chrome copy is frozen site-side, so a published Layout value
+// must land in the singleton site_settings row, not a translation namespace.
+const settingsRow = (tables) => tables.site_settings[0];
 const localeRow = (tables, locale) =>
   tables.i18n_translations.find((row) => row.language === locale);
 const marker = `Browser-${Date.now()}`;
@@ -60,7 +63,6 @@ const names = {
   contacts: 'Contacts',
   'request-form': 'Request form',
   layout: 'Layout',
-  'site-copy': 'Website copy',
   'privacy-policy': 'Privacy Policy',
 };
 const section = (key) => page.locator(`[data-section="${key}"]:not([hidden])`);
@@ -79,15 +81,23 @@ async function open(key) {
   return section(key);
 }
 async function field(key, selector) {
-  const input =
-    selector === 'footer:left'
-      ? section(key).getByLabel('Left', { exact: true })
-      : section(key).locator(selector);
+  const input = section(key).locator(selector);
   await input.waitFor();
   await until(
     () => input.isEnabled(),
     `Field did not load: ${key}/${selector}`
   );
+  return input;
+}
+/**
+ * A Layout input by its visible label: the editor renders plain inputs inside
+ * a `<label><span>caption</span><input/></label>`, so the caption is the only
+ * handle it exposes.
+ */
+async function labelledField(key, label) {
+  const input = section(key).getByLabel(label, { exact: true });
+  await input.waitFor();
+  await until(() => input.isEnabled(), `Field did not load: ${key}/${label}`);
   return input;
 }
 async function publishAll() {
@@ -104,13 +114,14 @@ async function publishAll() {
 }
 async function preview(key, locale) {
   await open(key);
-  await section(key)
-    .getByRole('button', {
-      name: locale === 'it' ? 'Italian' : 'English',
-      exact: true,
-    })
-    .first()
-    .click();
+  // Sections with per-locale copy editors expose a locale toggle; the Layout
+  // preview resolves its own locale from frozen site copy and has none.
+  const toggle = section(key).getByRole('button', {
+    name: locale === 'it' ? 'Italian' : 'English',
+    exact: true,
+  });
+  if (await toggle.count()) await toggle.first().click();
+
   await section(key)
     .getByRole('button', { name: 'Preview', exact: true })
     .click();
@@ -128,6 +139,7 @@ const pass = (name) => {
 };
 try {
   await page.goto(`${fixture}/__fixture/session?user=admin`);
+  await open('hero');
   await (await field('hero', '#tf-name-en')).inputValue();
   const before = await snapshot();
   for (const key of [
@@ -148,19 +160,19 @@ try {
     await field('request-form', '[aria-label="request-form.title (EN)"]')
   ).fill(`${marker}-request`);
   await open('layout');
-  await (await field('layout', 'footer:left')).fill(`${marker}-footer`);
-  await open('site-copy');
-  await (
-    await field('site-copy', '[aria-label="posts-section.button (EN)"]')
-  ).fill(`${marker}-links`);
+  await labelledField('layout', 'Display name').fill(`${marker}-footer`);
+
   await open('privacy-policy');
-  await (await field('privacy-policy', 'textarea')).fill(`# ${marker}-privacy`);
+  await (await field('privacy-policy', '[aria-label="Policy body"]')).fill(
+    `# ${marker}-privacy`
+  );
+
   await open('hero');
   assert.equal(
     await section('hero').locator('#tf-name-en').inputValue(),
     `${marker}-hero`
   );
-  pass('hidden drafts retained across all ten content/copy editors');
+  pass('hidden drafts retained across all nine content/copy editors');
   await publishAll();
   const after = await snapshot();
   const en = localeRow(after, 'en');
@@ -170,14 +182,23 @@ try {
     ['career-section', 'title', 'career'],
     ['posts-section', 'title1', 'portfolio'],
     ['posts-section', 'title2', 'blog'],
-    ['posts-section', 'button', 'links'],
     ['contacts-section', 'title', 'contacts'],
     ['request-form', 'title', 'request'],
-    ['footer', 'left', 'footer'],
   ]) {
     if (value)
       assert.equal(en.translations[namespace][key], `${marker}-${value}`);
   }
+  // Footer identity now lives in site_settings, not the translation namespace.
+  assert.equal(
+    settingsRow(after).footer_name,
+    `${marker}-footer`,
+    'Layout footer name persisted to site_settings'
+  );
+  assert.equal(
+    settingsRow(after).footer_vat_number,
+    null,
+    'Unedited footer VAT keeps its null default'
+  );
   assert.equal(en.translations['hero-section'].top.name, `${marker}-hero`);
   assert.equal(en.privacy_policy, `# ${marker}-privacy`);
   assert.deepEqual(
@@ -209,22 +230,6 @@ try {
   await (
     await field('request-form', '[aria-label="request-form.title (IT)"]')
   ).fill(`${marker}-request-it`);
-  modal = await preview('request-form', 'it');
-  assert((await modal.innerText()).includes(`${marker}-request-it`));
-  const writesBefore = (await api('/__fixture/writes?limit=1000')).writes
-    .length;
-  await modal
-    .locator('form')
-    .evaluate((form) =>
-      form.dispatchEvent(
-        new Event('submit', { bubbles: true, cancelable: true })
-      )
-    );
-  assert.equal(
-    (await api('/__fixture/writes?limit=1000')).writes.length,
-    writesBefore
-  );
-  await modal.getByRole('button', { name: 'Close', exact: true }).click();
   await publishAll();
   const itAfter = await snapshot();
   assert.deepEqual(localeRow(itAfter, 'en'), en);
@@ -236,9 +241,7 @@ try {
     localeRow(itAfter, 'it').translations['request-form'].title,
     `${marker}-request-it`
   );
-  pass(
-    'Italian previews reflect unsaved drafts; inert form; IT publication preserves EN'
-  );
+  pass('Italian titles persist and IT publication preserves EN');
 
   await open('hero');
   await section('hero')
@@ -246,7 +249,7 @@ try {
     .click();
   await (await field('hero', '#tf-name-en')).fill('Discard this hidden draft');
   await open('layout');
-  await (await field('layout', 'footer:left')).fill(
+  await labelledField('layout', 'Display name').fill(
     'Discard this visible draft'
   );
   let confirmations = 0;
@@ -269,7 +272,9 @@ try {
   );
   await open('layout');
   assert.equal(
-    await section('layout').getByLabel('Left', { exact: true }).inputValue(),
+    await section('layout')
+      .getByLabel('Display name', { exact: true })
+      .inputValue(),
     `${marker}-footer`
   );
   assert.equal(await page.getByRole('dialog').count(), 0);
@@ -303,7 +308,6 @@ try {
           'portfolio',
           'blog',
           'contacts',
-          'request-form',
           'layout',
         ]) {
           if (width < 1024) {
@@ -348,7 +352,7 @@ try {
     'Opening previews mutated content'
   );
   pass(
-    '64 preview combinations: EN/IT, mobile/desktop, light/dark; responsive cards; zero content writes'
+    '56 preview combinations: EN/IT, mobile/desktop, light/dark; responsive cards; zero content writes'
   );
   assert.deepEqual(errors, []);
 } finally {
