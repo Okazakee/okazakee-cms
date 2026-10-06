@@ -24,7 +24,7 @@ export const SIDEBAR_ROW_NEUTRAL =
   'border-transparent text-text-muted hover:bg-surface-raised hover:text-text-white';
 
 export const SIDEBAR_ROW_ACTIVE =
-  'border-accent-violet/30 bg-accent-violet/10 text-accent-violet hover:bg-accent-violet/20';
+  'border-accent-violet/30 bg-accent-violet/10 text-accent-violet-light hover:bg-accent-violet/20';
 
 export const SIDEBAR_ROW_DESTRUCTIVE =
   'border-transparent text-text-muted hover:bg-red-500/10 hover:text-red-400';

@@ -192,7 +192,10 @@ the terminal traffic-light dots (`#ff5f57` / `#febc2e` / `#28c840`) and `::selec
   cluster (theme, language, account, home, logout) share it**, so only the
   semantic state differs: neutral is a transparent idle that raises to
   `bg-surface-raised` on hover, active is `accent-violet/30` +
-  `accent-violet/10`, logout is a red hover. No bottom control carries its own
+  `accent-violet/10` with the label in `accent-violet-light` — the strong
+  `accent-violet` stays on the row's border and fill, exactly as the site's
+  desktop nav puts it on the underline instead of the text — logout is a red
+  hover. No bottom control carries its own
   background fill or its own icon size.
 - `SIDEBAR_MOBILE_ROW*` is the fullscreen drawer row: `text-3xl` heading labels
   and hairline dividers, active row `font-semibold text-accent-violet-light`,
