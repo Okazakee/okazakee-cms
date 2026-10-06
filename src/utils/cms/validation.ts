@@ -146,21 +146,34 @@ export function validatePdfFile(file: File): {
 
 /**
  * Extracts the storage path (within the bucket) from a Supabase public object URL.
- * Returns null if the URL is not from the given bucket or path is empty.
+ * Strict: requires the URL origin to equal the configured Supabase origin and
+ * the pathname to start with the exact `/storage/v1/object/public/<bucket>/`
+ * prefix (segment match, not substring). Query strings are ignored. After
+ * percent-decoding, rejects empty, backslash, NUL, and dot-segment paths.
+ * Returns null on any mismatch — callers treat null as cleanup no-op so
+ * cross-bucket/cross-origin URLs are never deleted.
  */
 export function getStoragePathFromPublicUrl(
   fileUrl: string,
-  bucket: string
+  bucket: string,
+  origin: string
 ): string | null {
   try {
     const url = new URL(fileUrl);
-    const pathParts = url.pathname.split('/');
-    const bucketIndex = pathParts.indexOf(bucket);
-    if (bucketIndex === -1) return null;
-    const filePath = decodeURIComponent(
-      pathParts.slice(bucketIndex + 1).join('/')
-    );
-    return filePath || null;
+    const expectedOrigin = new URL(origin).origin;
+    if (url.origin !== expectedOrigin) return null;
+    const prefix = `/storage/v1/object/public/${bucket}/`;
+    if (!url.pathname.startsWith(prefix)) return null;
+    const encoded = url.pathname.slice(prefix.length);
+    if (!encoded) return null;
+    const filePath = decodeURIComponent(encoded);
+    if (!filePath) return null;
+    if (filePath.includes('\\') || filePath.includes('\0')) return null;
+    const segments = filePath.split('/');
+    for (const segment of segments) {
+      if (segment === '' || segment === '.' || segment === '..') return null;
+    }
+    return filePath;
   } catch {
     return null;
   }

@@ -10,6 +10,7 @@ import {
   uploadImmutablePreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import type { MutationResult } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import {
@@ -148,6 +149,7 @@ async function uploadLogo(
   }
 
   const admin = getAdminClient();
+  const bucket = getCmsStorageBucket();
   const column = logoColumn(variant);
   const prepared = await prepareImageUpload(file, undefined, {
     maxWidth: 1024,
@@ -164,7 +166,7 @@ async function uploadLogo(
 
   const upload = await uploadImmutablePreparedImage(
     admin,
-    'website',
+    bucket,
     'Website Assets/header',
     logoLabel(variant).toLowerCase().replace(/\s+/g, '-'),
     prepared.image
@@ -182,7 +184,7 @@ async function uploadLogo(
 
   if (commitError || !data) {
     // The DB never referenced the new object; drop it.
-    await removeStorageObjectBestEffort(admin, 'website', upload.path);
+    await removeStorageObjectBestEffort(admin, bucket, upload.path);
     return {
       success: false,
       error: commitError?.message ?? 'Failed to save the header logo',
@@ -192,7 +194,7 @@ async function uploadLogo(
   await removePublicFileIfDifferent(
     admin,
     previous[column],
-    'website',
+    bucket,
     upload.path
   );
 
@@ -216,6 +218,7 @@ async function uploadLogo(
  */
 async function clearLogo(variant: LogoVariant): Promise<SiteSettingsResult> {
   const admin = getAdminClient();
+  const bucket = getCmsStorageBucket();
   const column = logoColumn(variant);
   const previous = await readSettingsRow(admin);
 
@@ -233,7 +236,7 @@ async function clearLogo(variant: LogoVariant): Promise<SiteSettingsResult> {
   }
 
   if (previous[column]) {
-    await removePublicFileIfDifferent(admin, previous[column], 'website', '');
+    await removePublicFileIfDifferent(admin, previous[column], bucket, '');
   }
 
   const revalidation = await invalidatePublicContent({

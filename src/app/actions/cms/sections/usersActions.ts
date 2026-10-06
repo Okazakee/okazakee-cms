@@ -4,7 +4,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { refresh } from 'next/cache';
 import {
   findAllowedCmsUser,
+  getUserGithubId,
   getUserGithubUsername,
+  getVerifiedUserEmail,
 } from '@/app/actions/cms/utils/auth';
 import {
   prepareImageUpload,
@@ -18,6 +20,7 @@ import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
@@ -34,6 +37,7 @@ type UserOperation =
 type AllowedUser = {
   id: number;
   email: string | null;
+  github_user_id: string | null;
   github_username: string | null;
   role: 'admin' | 'editor';
   invited_at: string | null;
@@ -68,11 +72,29 @@ async function isAdmin(
   if (!user) return false;
 
   // Allowlist is internal: lookup via admin client (service_role).
-  const allowedUser = await findAllowedCmsUser(
-    getCmsAdminClient(),
-    user.email,
-    getUserGithubUsername(user)
-  );
+  // ID-first, then verified-email (returns immediately per current
+  // behavior — a non-admin email match returns null here without falling
+  // through to an admin GitHub ID), then legacy display handle.
+  const verifiedEmail = getVerifiedUserEmail(user);
+  const githubUserId = getUserGithubId(user);
+  if (githubUserId) {
+    const idMatch = await findAllowedCmsUser(getCmsAdminClient(), {
+      githubUserId,
+    });
+    if (idMatch) return idMatch.role === 'admin';
+  }
+  if (verifiedEmail) {
+    const emailMatch = await findAllowedCmsUser(getCmsAdminClient(), {
+      email: verifiedEmail,
+    });
+    // Email decides here: an allowlisted non-admin email must not fall
+    // through to a legacy/admin GitHub identity on the same session.
+    if (emailMatch) return emailMatch.role === 'admin';
+    return false;
+  }
+  const allowedUser = await findAllowedCmsUser(getCmsAdminClient(), {
+    githubUsernameLegacy: getUserGithubUsername(user),
+  });
   return allowedUser?.role === 'admin';
 }
 
@@ -157,99 +179,71 @@ async function getAllowedUsers(
 
   if (error) throw error;
 
-  // Get current authenticated user to check their auth metadata for GitHub username
+  // Display-only handle from the verified identity; never user_metadata.
+  // Profiles match by email or immutable ID — the allowlist row is never
+  // mutated here (no editable-username back-write).
   const {
     data: { user: authUser },
   } = await supabase.auth.getUser();
-  const authGithubUsername = authUser?.user_metadata?.user_name || null;
+  const authGithubUserId = authUser ? getUserGithubId(authUser) : null;
+  const authGithubUsername = authUser ? getUserGithubUsername(authUser) : null;
 
   // Fetch all user profiles to match with allowed users (no cache to ensure fresh data)
   const adminClient = getCmsAdminClient();
   const { data: profiles, error: profilesError } = await adminClient
     .from('user_profiles')
-    .select('id, email, display_name, avatar_url, github_username');
+    .select(
+      'id, email, display_name, avatar_url, github_username, github_user_id'
+    );
 
   if (profilesError) {
     console.error('Error fetching profiles:', profilesError);
   }
 
-  // If current user's profile is missing GitHub username but auth metadata has it, update the profile
-  if (authUser && authGithubUsername && profiles) {
-    const currentUserProfileIndex = profiles.findIndex(
-      (p) => p.id === authUser.id
+  // Match profiles with allowed users. Display handle prefers the verified
+  // identity for the current session, then the stored profile, then the
+  // allowlist row. No writes: backfill flows own identity persistence.
+  const usersWithProfiles = (data as AllowedUser[]).map((allowedUser) => {
+    // Find profile by email, immutable GitHub ID, or display handle.
+    const profile = profiles?.find(
+      (p) =>
+        (allowedUser.email &&
+          p.email?.toLowerCase() === allowedUser.email.toLowerCase()) ||
+        (allowedUser.github_user_id &&
+          p.github_user_id === allowedUser.github_user_id) ||
+        (allowedUser.github_username &&
+          p.github_username === allowedUser.github_username) ||
+        (authUser?.id &&
+          p.id === authUser.id &&
+          allowedUser.email &&
+          p.email?.toLowerCase() === allowedUser.email.toLowerCase())
     );
+
+    let githubUsername =
+      profile?.github_username || allowedUser.github_username;
     if (
-      currentUserProfileIndex !== -1 &&
-      !profiles[currentUserProfileIndex].github_username
+      authUser &&
+      profile?.id === authUser.id &&
+      authGithubUsername &&
+      (!authGithubUserId ||
+        !allowedUser.github_user_id ||
+        profile?.github_user_id === allowedUser.github_user_id)
     ) {
-      try {
-        await adminClient
-          .from('user_profiles')
-          .update({ github_username: authGithubUsername })
-          .eq('id', authUser.id);
-        // Update the profiles array in memory for immediate use
-        profiles[currentUserProfileIndex].github_username = authGithubUsername;
-      } catch (updateError) {
-        console.error(
-          'Failed to sync GitHub username to profile:',
-          updateError
-        );
-      }
+      githubUsername = authGithubUsername;
     }
-  }
 
-  // Match profiles with allowed users and sync GitHub usernames
-  const usersWithProfiles = await Promise.all(
-    (data as AllowedUser[]).map(async (allowedUser) => {
-      // Find profile by email, GitHub username, or current user's ID
-      const profile = profiles?.find(
-        (p) =>
-          (allowedUser.email &&
-            p.email?.toLowerCase() === allowedUser.email.toLowerCase()) ||
-          (allowedUser.github_username &&
-            p.github_username === allowedUser.github_username) ||
-          (authUser?.id &&
-            p.id === authUser.id &&
-            allowedUser.email &&
-            p.email?.toLowerCase() === allowedUser.email.toLowerCase())
-      );
-
-      // For current user, also check auth metadata for GitHub username
-      let githubUsername =
-        profile?.github_username || allowedUser.github_username;
-      if (authUser && profile?.id === authUser.id && authGithubUsername) {
-        githubUsername = authGithubUsername;
-      }
-
-      // If profile has GitHub username but cms_allowed_users doesn't, update it
-      if (githubUsername && !allowedUser.github_username && allowedUser.email) {
-        try {
-          await getCmsAdminClient()
-            .from('cms_allowed_users')
-            .update({ github_username: githubUsername })
-            .eq('id', allowedUser.id);
-        } catch (updateError) {
-          // Silently fail - this is just a sync operation
-          console.error(
-            'Failed to sync GitHub username to cms_allowed_users:',
-            updateError
-          );
-        }
-      }
-
-      return {
-        ...allowedUser,
-        github_username: githubUsername, // Update github_username with profile/auth value if available
-        profile: profile
-          ? {
-              id: profile.id,
-              display_name: profile.display_name,
-              avatar_url: profile.avatar_url,
-            }
-          : null,
-      };
-    })
-  );
+    return {
+      ...allowedUser,
+      github_username: githubUsername,
+      profile: profile
+        ? {
+            id: profile.id,
+            display_name: profile.display_name,
+            avatar_url: profile.avatar_url,
+          }
+        : null,
+    };
+  });
 
   return { success: true, data: usersWithProfiles };
 }
@@ -304,31 +298,76 @@ async function addGitHubUser(
   github_username: string,
   role: 'admin' | 'editor' = 'editor'
 ): Promise<UsersResult> {
-  // Validate GitHub username
+  // Validate GitHub handle shape first (alphanumeric/hyphens, 1-39 chars).
   const cleanUsername = github_username.trim().replace(/^@/, '');
 
   if (!cleanUsername || !GITHUB_USERNAME_REGEX.test(cleanUsername)) {
     return { success: false, error: 'Please enter a valid GitHub username' };
   }
 
-  // Check if already exists
+  // Resolve the handle to the immutable numeric GitHub user ID via the
+  // public GitHub API (no auth/token). The ID authorizes; the handle is
+  // display-only. Non-logged-in handles can only be added this way.
+  let githubUserId: string;
+  try {
+    const response = await fetch(
+      `https://api.github.com/users/${encodeURIComponent(cleanUsername)}`,
+      { headers: { Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (response.status === 404) {
+      return { success: false, error: 'GitHub user not found' };
+    }
+    if (!response.ok) {
+      return {
+        success: false,
+        error: 'Could not verify the GitHub username. Please try again.',
+      };
+    }
+    const payload = (await response.json()) as {
+      id?: unknown;
+      login?: unknown;
+    };
+    const rawId = payload.id;
+    githubUserId =
+      typeof rawId === 'string' || typeof rawId === 'number'
+        ? String(rawId)
+        : '';
+    if (!/^[0-9]+$/.test(githubUserId)) {
+      return {
+        success: false,
+        error: 'Could not verify the GitHub username. Please try again.',
+      };
+    }
+  } catch {
+    return {
+      success: false,
+      error: 'Could not verify the GitHub username. Please try again.',
+    };
+  }
+
+  // Dedupe on the immutable ID (handles can be renamed/transferred).
   const { data: existing } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .select('id')
-    .eq('github_username', cleanUsername)
+    .eq('github_user_id', githubUserId)
     .single();
 
   if (existing) {
     return {
       success: false,
-      error: 'This GitHub username is already in the allowed list',
+      error: 'This GitHub user is already in the allowed list',
     };
   }
 
-  // Add to allowlist (no invite needed - they'll use GitHub OAuth)
+  // Add to allowlist (no invite needed - they'll use GitHub OAuth).
+  // Both columns persist: ID authorizes, handle only renders.
   const { data: newUser, error: insertError } = await getCmsAdminClient()
     .from('cms_allowed_users')
-    .insert({ github_username: cleanUsername, role })
+    .insert({
+      github_user_id: githubUserId,
+      github_username: cleanUsername,
+      role,
+    })
     .select()
     .single();
 
@@ -539,7 +578,7 @@ async function removeUser(
   // Prevent removing the last admin
   const { data: user } = await getCmsAdminClient()
     .from('cms_allowed_users')
-    .select('role, email, github_username')
+    .select('role, email, github_user_id, github_username')
     .eq('id', id)
     .single();
 
@@ -576,7 +615,17 @@ async function removeUser(
     if (profileByEmail) profileId = profileByEmail.id;
   }
 
-  // Try to find profile by GitHub username if not found by email
+  // Try immutable GitHub ID before the legacy display handle.
+  if (!profileId && user.github_user_id) {
+    const { data: profileByGithubId } = await adminClient
+      .from('user_profiles')
+      .select('id')
+      .eq('github_user_id', user.github_user_id)
+      .single();
+    if (profileByGithubId) profileId = profileByGithubId.id;
+  }
+
+  // Legacy display handle last (dual-allowed transition only).
   if (!profileId && user.github_username) {
     const { data: profileByGithub } = await adminClient
       .from('user_profiles')
@@ -711,6 +760,7 @@ export async function uploadUserAvatar(
   }
 
   const adminClient = getCmsAdminClient();
+  const bucket = getCmsStorageBucket();
 
   // Format-aware processing: extension and MIME follow the ACTUAL processed
   // format (WebP passthrough or Sharp fallback, which may produce PNG).
@@ -742,7 +792,7 @@ export async function uploadUserAvatar(
   try {
     upload = await uploadImmutablePreparedImage(
       adminClient,
-      'website',
+      bucket,
       'Website Assets/avatars',
       profileId,
       prepared.image
@@ -762,7 +812,7 @@ export async function uploadUserAvatar(
     .single();
 
   if (updateError || !updatedProfile) {
-    await removeStorageObjectBestEffort(adminClient, 'website', upload.path);
+    await removeStorageObjectBestEffort(adminClient, bucket, upload.path);
     console.error('Profile update error:', updateError);
     return { success: false, error: 'Failed to update profile' };
   }
@@ -771,7 +821,7 @@ export async function uploadUserAvatar(
   await removePublicFileIfDifferent(
     adminClient,
     currentProfile?.avatar_url,
-    'website',
+    bucket,
     upload.path
   );
 
@@ -875,6 +925,7 @@ export async function updateMyProfile(
   }
 
   const admin = getCmsAdminClient();
+  const bucket = getCmsStorageBucket();
   const displayName = formData.get('displayName') as string | null;
   const avatarFile = formData.get('avatar') as File | null;
 
@@ -931,7 +982,7 @@ export async function updateMyProfile(
     try {
       upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
+        bucket,
         'Website Assets/avatars',
         user.id,
         prepared.image
@@ -969,7 +1020,7 @@ export async function updateMyProfile(
     if (pendingAvatarCleanup) {
       await removeStorageObjectBestEffort(
         pendingAvatarCleanup.client,
-        'website',
+        bucket,
         pendingAvatarCleanup.newPath
       );
     }
@@ -982,7 +1033,7 @@ export async function updateMyProfile(
     await removePublicFileIfDifferent(
       pendingAvatarCleanup.client,
       pendingAvatarCleanup.oldUrl,
-      'website',
+      bucket,
       pendingAvatarCleanup.newPath
     );
   }

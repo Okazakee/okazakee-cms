@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
 import {
-  getUserGithubUsername,
+  getUserGithubId,
   logCmsAuth,
   lookupAllowedCmsUserViaRpc,
 } from '@/app/actions/cms/utils/auth';
@@ -110,7 +110,7 @@ export async function updateSession(request: NextRequest) {
         pathname,
         userId: user.id,
         hasEmail: Boolean(user.email),
-        hasGithubUsername: Boolean(getUserGithubUsername(user)),
+        hasGithubId: Boolean(getUserGithubId(user)),
       });
       await supabase.auth.signOut();
       const redirectUrl = new URL('/login', request.url);

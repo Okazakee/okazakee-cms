@@ -24,10 +24,10 @@ values
    'Isolated Fixture',
    'Test Engineer',
    'Deterministic local fixture content.',
-   'http://127.0.0.1:54321/storage/v1/object/public/website/avatar/avatar.png',
+   'http://127.0.0.1:54321/storage/v1/object/public/website-dev/avatar/avatar.png',
    'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
-   'http://127.0.0.1:54321/storage/v1/object/public/website/resume/resume_en.pdf',
-   'http://127.0.0.1:54321/storage/v1/object/public/website/resume/resume_it.pdf');
+   'http://127.0.0.1:54321/storage/v1/object/public/website-dev/resume/resume_en.pdf',
+   'http://127.0.0.1:54321/storage/v1/object/public/website-dev/resume/resume_it.pdf');
 
 insert into public.i18n_translations (language, translations, privacy_policy)
 values
@@ -50,9 +50,9 @@ values
 
 insert into public.skills (title, icon, invert, category_id, "blurhashURL")
 values
-  ('TypeScript', 'http://127.0.0.1:54321/storage/v1/object/public/website/avatar/avatar.png', false, 1, null),
-  ('Rust', 'http://127.0.0.1:54321/storage/v1/object/public/website/avatar/avatar.png', true, 1, null),
-  ('Docker', 'http://127.0.0.1:54321/storage/v1/object/public/website/avatar/avatar.png', false, 2, null);
+  ('TypeScript', 'http://127.0.0.1:54321/storage/v1/object/public/website-dev/avatar/avatar.png', false, 1, null),
+  ('Rust', 'http://127.0.0.1:54321/storage/v1/object/public/website-dev/avatar/avatar.png', true, 1, null),
+  ('Docker', 'http://127.0.0.1:54321/storage/v1/object/public/website-dev/avatar/avatar.png', false, 2, null);
 
 insert into public.career_entries
   (title, company, website_url, logo, blurhashurl, location_en, location_it,
@@ -73,12 +73,12 @@ insert into public.blog_posts
    body_it, "blurhashURL", post_tags, views, hidden, author_id)
 values
   ('Fixture post one', 'Post fixture uno',
-   'http://127.0.0.1:54321/storage/v1/object/public/website/blog/post-1.png',
+   'http://127.0.0.1:54321/storage/v1/object/public/website-dev/blog/post-1.png',
    'First fixture description.', 'Prima descrizione fixture.',
    '# Body one', '# Corpo uno', 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
    'fixture,test', 3, false, null),
   ('Fixture post two', 'Post fixture due',
-   'http://127.0.0.1:54321/storage/v1/object/public/website/blog/post-2.png',
+   'http://127.0.0.1:54321/storage/v1/object/public/website-dev/blog/post-2.png',
    'Second fixture description.', 'Seconda descrizione fixture.',
    '# Body two', '# Corpo due', 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',
    'fixture', 0, true, null);
@@ -89,7 +89,7 @@ insert into public.portfolio_posts
    fdroid_link, website, ios_store_link, views, hidden, author_id)
 values
   ('Fixture project', 'Progetto fixture',
-   'http://127.0.0.1:54321/storage/v1/object/public/website/portfolio/app.png',
+   'http://127.0.0.1:54321/storage/v1/object/public/website-dev/portfolio/app.png',
    'https://example.com/source', 'https://example.com/demo',
    'Fixture project description.', 'Descrizione progetto fixture.',
    '# Project', '# Progetto', 'LEHV6nWB2yk8pyo0adR*.7kCMdnj',

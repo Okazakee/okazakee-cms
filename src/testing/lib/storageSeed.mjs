@@ -1,7 +1,7 @@
 /**
  * Isolated fixture — deterministic loopback Storage objects.
  *
- * Creates the public `website` bucket and uploads the tiny assets referenced
+ * Creates the public `website-dev` bucket and uploads the tiny assets referenced
  * by the seed SQL, so next/image and the preview components resolve real
  * loopback URLs.
  */

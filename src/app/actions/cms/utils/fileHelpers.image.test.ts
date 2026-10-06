@@ -146,14 +146,14 @@ describe('uploadImmutablePreparedImage — storage contract', () => {
 
     const result = await uploadImmutablePreparedImage(
       supabase,
-      'website',
+      'website-dev',
       'avatar',
       'avatar',
       prepared.image
     );
     const next = await uploadImmutablePreparedImage(
       supabase,
-      'website',
+      'website-dev',
       'avatar',
       'avatar',
       prepared.image
@@ -161,7 +161,7 @@ describe('uploadImmutablePreparedImage — storage contract', () => {
     expect(next.path).not.toBe(result.path);
     expect(result.path).toMatch(/^avatar\/\d+-[a-f0-9-]+-avatar\.webp$/);
 
-    expect(supabase.storage.from).toHaveBeenCalledWith('website');
+    expect(supabase.storage.from).toHaveBeenCalledWith('website-dev');
     expect(upload).toHaveBeenCalledWith(result.path, prepared.image.buffer, {
       cacheControl: '3600',
       contentType: 'image/webp',

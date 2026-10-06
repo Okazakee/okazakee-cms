@@ -15,9 +15,15 @@ import {
   validateImageFile,
   validatePdfFile,
 } from '@/utils/cms/validation';
+import { getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
 import { createClient } from '@/utils/supabase/server';
-import { findAllowedCmsUser, getUserGithubUsername } from './auth';
+import {
+  findAllowedCmsUser,
+  getUserGithubId,
+  getUserGithubUsername,
+  getVerifiedUserEmail,
+} from './auth';
 
 export {
   getStoragePathFromPublicUrl,
@@ -36,7 +42,12 @@ type CmsActionRole = 'authenticated' | 'allowlisted' | 'admin' | 'post-writer';
 
 export type CmsActionContext = {
   supabase: ServerSupabaseClient;
-  user: { id: string; email: string; githubUsername: string | null };
+  user: {
+    id: string;
+    email: string;
+    githubUserId: string | null;
+    githubUsername: string | null;
+  };
   role: string | null;
 };
 
@@ -53,20 +64,25 @@ export async function getCmsActionContext(
     throw new Error('Unauthorized: Authentication required');
   }
 
+  const githubUserId = getUserGithubId(user);
+  const verifiedEmail = getVerifiedUserEmail(user);
+  // Display-only handle from the verified identity; never user_metadata.
   const githubUsername = getUserGithubUsername(user);
   // Trust boundary: the session client authenticates the requester
   // (auth.getUser() above). The CMS role lookup must go through the
   // service_role admin client — authenticated has no SELECT on
   // cms_allowed_users since the hardening (anon/authenticated = no access).
+  // Order: githubUserID -> verified-email (returns immediately) -> legacy
+  // display handle. No user_metadata trust anywhere.
   const role =
     requiredRole === 'authenticated'
       ? null
       : (
-          await findAllowedCmsUser(
-            getCmsAdminClient(),
-            user.email,
-            githubUsername
-          )
+          await findAllowedCmsUser(getCmsAdminClient(), {
+            email: verifiedEmail,
+            githubUserId,
+            githubUsernameLegacy: githubUsername,
+          })
         )?.role || null;
 
   if (requiredRole === 'allowlisted' && !role) {
@@ -93,6 +109,7 @@ export async function getCmsActionContext(
     user: {
       id: user.id,
       email: user.email || '',
+      githubUserId,
       githubUsername,
     },
     role,
@@ -448,15 +465,25 @@ export async function removeStorageObjectBestEffort(
 
 /**
  * Best-effort removal of the file behind a public URL, if it exists.
- * Never throws — see removeStorageObjectBestEffort.
+ * Strict origin + exact bucket-prefix match; cross-bucket/cross-origin
+ * URLs are a no-op. Never throws — see removeStorageObjectBestEffort.
  */
 export async function removePublicFileIfPresent(
   supabase: SupabaseClient,
   fileUrl: string | null | undefined,
-  bucket: string
+  bucket: string,
+  origin?: string
 ): Promise<void> {
   if (!fileUrl) return;
-  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket);
+  let resolved = origin;
+  if (!resolved) {
+    try {
+      resolved = getCmsStorageOrigin();
+    } catch {
+      return;
+    }
+  }
+  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket, resolved);
   if (!filePath) return;
   await removeStorageObjectBestEffort(supabase, bucket, filePath);
 }
@@ -469,10 +496,19 @@ export async function removePublicFileIfDifferent(
   supabase: SupabaseClient,
   fileUrl: string | null | undefined,
   bucket: string,
-  nextPath: string
+  nextPath: string,
+  origin?: string
 ): Promise<void> {
   if (!fileUrl) return;
-  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket);
+  let resolved = origin;
+  if (!resolved) {
+    try {
+      resolved = getCmsStorageOrigin();
+    } catch {
+      return;
+    }
+  }
+  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket, resolved);
   if (!filePath || filePath === nextPath) return;
   await removeStorageObjectBestEffort(supabase, bucket, filePath);
 }

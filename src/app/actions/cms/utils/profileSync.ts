@@ -4,6 +4,7 @@ import {
   getUserAuthProvider,
   getUserAvatarUrl,
   getUserDisplayName,
+  getUserGithubId,
   getUserGithubUsername,
 } from './auth';
 
@@ -14,17 +15,21 @@ type CmsProfile = {
   avatar_url: string | null;
   auth_provider: string | null;
   github_username: string | null;
+  github_user_id?: string | null;
 };
 
 export async function syncCmsUserProfile(user: User): Promise<void> {
   const adminClient = getCmsAdminClient();
+  // Immutable provider subject; display handle is identity-derived, never
+  // user_metadata. Persist both: ID authorizes, username only renders.
+  const githubUserId = getUserGithubId(user);
   const githubUsername = getUserGithubUsername(user);
   const authProvider = getUserAuthProvider(user);
 
   const { data: existingProfile, error: readError } = await adminClient
     .from('user_profiles')
     .select(
-      'id, email, display_name, avatar_url, auth_provider, github_username'
+      'id, email, display_name, avatar_url, auth_provider, github_username, github_user_id'
     )
     .eq('id', user.id)
     .maybeSingle<CmsProfile>();
@@ -39,6 +44,7 @@ export async function syncCmsUserProfile(user: User): Promise<void> {
       avatar_url: getUserAvatarUrl(user),
       auth_provider: authProvider,
       github_username: githubUsername,
+      github_user_id: githubUserId,
     });
     if (error) throw error;
     return;
@@ -51,6 +57,9 @@ export async function syncCmsUserProfile(user: User): Promise<void> {
   }
   if (githubUsername && existingProfile.github_username !== githubUsername) {
     updates.github_username = githubUsername;
+  }
+  if (githubUserId && existingProfile.github_user_id !== githubUserId) {
+    updates.github_user_id = githubUserId;
   }
   if (!existingProfile.display_name) {
     updates.display_name = getUserDisplayName(user);

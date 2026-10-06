@@ -54,6 +54,10 @@ function storedRow() {
 
 beforeEach(() => {
   h.invalidate.mockClear();
+  // Storage hardening: bucket + origin resolve from env per call (dev pairing
+  // -> website-dev, matching the fake public URL origin).
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://fake.supabase.co');
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
 });
 
 describe('siteSettingsActions GET', () => {
@@ -190,7 +194,7 @@ describe('siteSettingsActions UPLOAD_LOGO', () => {
     expect(order).toContain('upsert');
     expect(storedRow()?.header_logo_dark).not.toBe(first);
     const firstPath = decodeURIComponent(
-      new URL(first).pathname.split('/website/')[1]
+      new URL(first).pathname.split('/website-dev/')[1]
     );
     expect(h.fake.state.removed).toContain(firstPath);
   });
@@ -215,7 +219,7 @@ describe('siteSettingsActions CLEAR_LOGO', () => {
     expect((result.data as SiteSettingsRow).header_logo_dark).toBeNull();
     expect(storedRow()?.header_logo_dark).toBeNull();
     expect(h.fake.state.removed).toContain(
-      decodeURIComponent(new URL(stored).pathname.split('/website/')[1])
+      decodeURIComponent(new URL(stored).pathname.split('/website-dev/')[1])
     );
   });
 

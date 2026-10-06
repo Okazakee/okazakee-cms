@@ -28,6 +28,7 @@ import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { type PostButton, validatePostButtons } from '@/utils/cms/postButtons';
 import { createClient } from '@/utils/supabase/server';
@@ -262,6 +263,7 @@ async function batchPublishPortfolio(
   try {
     const context = await getCmsActionContext('post-writer');
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     for (const [index, item] of operation.creates.entries()) {
       const tempId = normalizeTempId(item.tempId, 'portfolio', index);
@@ -287,7 +289,7 @@ async function batchPublishPortfolio(
 
       const upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
+        bucket,
         'Website Assets/portfolio',
         validation.data.title_en || 'untitled',
         prepared.image
@@ -307,7 +309,7 @@ async function batchPublishPortfolio(
         .single();
 
       if (error) {
-        await removeStorageObjectBestEffort(admin, 'website', upload.path);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
         markFailed(evidence, { kind: 'create', tempId, error: error.message });
         continue;
       }
@@ -360,7 +362,7 @@ async function batchPublishPortfolio(
 
         uploaded = await uploadImmutablePreparedImage(
           admin,
-          'website',
+          bucket,
           'Website Assets/portfolio',
           item.data.title_en || `portfolio-${item.id}`,
           prepared.image
@@ -378,7 +380,7 @@ async function batchPublishPortfolio(
 
       if (error) {
         if (uploaded) {
-          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+          await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
         markFailed(evidence, {
           kind: 'update',
@@ -392,7 +394,7 @@ async function batchPublishPortfolio(
         await removePublicFileIfDifferent(
           admin,
           previousImage,
-          'website',
+          bucket,
           uploaded.path
         );
       }
@@ -452,7 +454,7 @@ async function batchPublishPortfolio(
                 await removePublicFileIfPresent(
                   admin,
                   row.image as string | null,
-                  'website'
+                  bucket
                 );
               }
             }
@@ -507,11 +509,14 @@ async function batchPublishPortfolio(
   }
 }
 async function getPortfolioData(
-  supabase: SupabaseClient
+  _supabase: SupabaseClient
 ): Promise<PortfolioResult> {
   try {
-    // For CMS, fetch all portfolio posts without limit
-    const { data: portfolioPosts, error } = await supabase
+    // CMS lists include drafts: published-only RLS hides them from session
+    // reads, so this goes through the admin client after the requireAuth
+    // gate in portfolioActions (service-role-after-check). Authorized CMS
+    // users only; the public site never calls this path.
+    const { data: portfolioPosts, error } = await getAdminClient()
       .from('portfolio_posts')
       .select('*')
       .order('created_at', { ascending: false });
@@ -528,10 +533,12 @@ async function getPortfolioData(
   }
 }
 
-async function getAuthors(supabase: SupabaseClient): Promise<PortfolioResult> {
+async function getAuthors(_supabase: SupabaseClient): Promise<PortfolioResult> {
   try {
-    // Fetch all users who have profiles (have logged in at least once)
-    const { data: profiles, error } = await supabase
+    // Author picker: admin client after the requireAuth gate. Column set is
+    // the picker contract (id/display_name/avatar_url); email never leaves
+    // the allowlist through this path.
+    const { data: profiles, error } = await getAdminClient()
       .from('user_profiles')
       .select('id, display_name, avatar_url')
       .order('display_name', { ascending: true });
@@ -659,6 +666,7 @@ async function deletePortfolio(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: existingPortfolio, error: fetchError } = await admin
       .from('portfolio_posts')
       .select('id, image')
@@ -679,7 +687,7 @@ async function deletePortfolio(
     await removePublicFileIfPresent(
       admin,
       existingPortfolio.image as string | null,
-      'website'
+      bucket
     );
 
     const revalidation = await invalidatePublicContent({
@@ -719,6 +727,7 @@ async function uploadPortfolioImageForNewPost(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     // Shared format-aware pipeline: extension + MIME follow the actual
     // processed format (WebP passthrough or Sharp fallback to PNG).
@@ -732,7 +741,7 @@ async function uploadPortfolioImageForNewPost(
 
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
+      bucket,
       'Website Assets/portfolio',
       titleEn || 'untitled',
       prepared.image
@@ -767,6 +776,7 @@ async function rollbackPortfolioCreate(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     // The row is the authoritative state: delete it first, then remove the
     // uploaded image best-effort. Storage-first would leave a surviving row
     // pointing at a deleted object if the DB delete failed.
@@ -775,7 +785,7 @@ async function rollbackPortfolioCreate(
       .delete()
       .eq('id', postId);
     if (error) throw error;
-    await removeStorageObjectBestEffort(admin, 'website', imagePath);
+    await removeStorageObjectBestEffort(admin, bucket, imagePath);
     return { success: true };
   } catch (error) {
     console.error('Error rolling back portfolio create:', error);
@@ -809,6 +819,7 @@ async function uploadPortfolioImage(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     const { data: existingPortfolio, error: fetchError } = await admin
       .from('portfolio_posts')
@@ -835,7 +846,7 @@ async function uploadPortfolioImage(
     // object. The previous DB-referenced object is removed AFTER the commit.
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
+      bucket,
       'Website Assets/portfolio',
       existingPortfolio.title_en || `portfolio-${portfolioId}`,
       prepared.image
@@ -855,14 +866,14 @@ async function uploadPortfolioImage(
 
     if (updateError) {
       // Best-effort staged cleanup must never mask the DB error.
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
       existingPortfolio.image,
-      'website',
+      bucket,
       upload.path
     );
 

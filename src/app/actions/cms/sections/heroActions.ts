@@ -14,6 +14,7 @@ import {
 } from '@/app/actions/cms/utils/fileHelpers';
 import type { MutationResult } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import type { HeroShape, TypewriterTarget } from '@/types/fetchedData.types';
 import {
   normalizeHeroShape,
@@ -220,6 +221,7 @@ async function uploadHeroImage(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const prepared = await prepareImageUpload(file, blurhashURL, {
       maxWidth: 512,
       maxHeight: 512,
@@ -242,7 +244,7 @@ async function uploadHeroImage(
     // Unique immutable path: the new object never overwrites the previous one.
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
+      bucket,
       'avatar',
       'avatar',
       prepared.image
@@ -264,14 +266,14 @@ async function uploadHeroImage(
       .single();
 
     if (updateError) {
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
       currentRow.propic,
-      'website',
+      bucket,
       upload.path
     );
 
@@ -301,6 +303,7 @@ async function updateWithFiles(
   blurhashURL?: string
 ): Promise<HeroResult> {
   const admin = getAdminClient();
+  const bucket = getCmsStorageBucket();
   const propicFile = files.propic ?? files.mainImage;
 
   // 1. Validate every file before touching storage or the DB. A single invalid
@@ -345,7 +348,7 @@ async function updateWithFiles(
 
       const upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
+        bucket,
         'avatar',
         'avatar',
         prepared.image
@@ -359,7 +362,7 @@ async function updateWithFiles(
       const buffer = Buffer.from(await files.resume_en.arrayBuffer());
       const upload = await uploadPdfBuffer(
         admin,
-        'website',
+        bucket,
         'resumes',
         'resume_en',
         buffer
@@ -372,7 +375,7 @@ async function updateWithFiles(
       const buffer = Buffer.from(await files.resume_it.arrayBuffer());
       const upload = await uploadPdfBuffer(
         admin,
-        'website',
+        bucket,
         'resumes',
         'resume_it',
         buffer
@@ -382,7 +385,7 @@ async function updateWithFiles(
     }
   } catch (stageError) {
     for (const object of staged) {
-      await removeStorageObjectBestEffort(admin, 'website', object.path);
+      await removeStorageObjectBestEffort(admin, bucket, object.path);
     }
     return {
       success: false,
@@ -406,7 +409,7 @@ async function updateWithFiles(
 
   if (fetchError || !currentRow) {
     for (const object of staged)
-      await removeStorageObjectBestEffort(admin, 'website', object.path);
+      await removeStorageObjectBestEffort(admin, bucket, object.path);
     return {
       success: false,
       error: fetchError?.message ?? 'Hero row not found',
@@ -422,7 +425,7 @@ async function updateWithFiles(
 
   if (updateError) {
     for (const object of staged) {
-      await removeStorageObjectBestEffort(admin, 'website', object.path);
+      await removeStorageObjectBestEffort(admin, bucket, object.path);
     }
     return { success: false, error: updateError.message };
   }
@@ -437,7 +440,7 @@ async function updateWithFiles(
     await removePublicFileIfDifferent(
       admin,
       previous ?? null,
-      'website',
+      bucket,
       object.path
     );
   }

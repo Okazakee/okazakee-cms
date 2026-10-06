@@ -8,7 +8,9 @@ import {
   getUserAuthProvider,
   getUserAvatarUrl,
   getUserDisplayName,
+  getUserGithubId,
   getUserGithubUsername,
+  getVerifiedUserEmail,
 } from './utils/auth';
 import { syncCmsUserProfile } from './utils/profileSync';
 
@@ -20,6 +22,7 @@ export type CMSUser = {
   role: 'admin' | 'editor' | '';
   authProvider: 'email' | 'github' | 'dummy';
   githubUsername: string | null;
+  githubUserId?: string | null;
 };
 
 async function buildCmsUser(
@@ -34,20 +37,27 @@ async function buildCmsUser(
     return null;
   }
 
-  // Fetch user profile from user_profiles table
-  const { data: profile } = await supabase
+  // Own profile via the admin client (service-role-after-check: the caller
+  // is authenticated above via auth.getUser). Column-narrowed to the fields
+  // buildCmsUser renders; a session SELECT * cannot survive the narrowed
+  // profile column grants.
+  const { data: profile } = await getCmsAdminClient()
     .from('user_profiles')
-    .select('*')
+    .select(
+      'id, email, display_name, avatar_url, auth_provider, github_username, github_user_id'
+    )
     .eq('id', user.id)
     .single();
 
+  const githubUserId = getUserGithubId(user);
   const githubUsername = getUserGithubUsername(user);
   // Admin client: cms_allowed_users is internal (no anon/authenticated SELECT).
-  const allowedUser = await findAllowedCmsUser(
-    getCmsAdminClient(),
-    user.email,
-    githubUsername
-  );
+  // ID-first, then verified-email (returns immediately), then legacy handle.
+  const allowedUser = await findAllowedCmsUser(getCmsAdminClient(), {
+    email: getVerifiedUserEmail(user),
+    githubUserId,
+    githubUsernameLegacy: githubUsername,
+  });
 
   // If no profile exists yet (edge case), create one from auth metadata
   if (!profile) {
@@ -65,6 +75,7 @@ async function buildCmsUser(
       role: allowedUser?.role || '',
       authProvider,
       githubUsername,
+      githubUserId,
     };
   }
 
@@ -83,6 +94,7 @@ async function buildCmsUser(
     authProvider:
       (profile.auth_provider as 'email' | 'github' | 'dummy') || 'email',
     githubUsername: profile.github_username || null,
+    githubUserId: profile.github_user_id ?? githubUserId,
   };
 }
 

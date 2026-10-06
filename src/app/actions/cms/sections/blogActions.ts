@@ -28,6 +28,7 @@ import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
@@ -247,6 +248,7 @@ async function batchPublishBlog(
   try {
     const context = await getCmsActionContext('post-writer');
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     for (const [index, item] of operation.creates.entries()) {
       const tempId = normalizeTempId(item.tempId, 'blog', index);
@@ -272,7 +274,7 @@ async function batchPublishBlog(
 
       const upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
+        bucket,
         'Website Assets/blog',
         item.data.title_en || 'untitled',
         prepared.image
@@ -292,7 +294,7 @@ async function batchPublishBlog(
         .single();
 
       if (error) {
-        await removeStorageObjectBestEffort(admin, 'website', upload.path);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
         markFailed(evidence, {
           kind: 'create',
           tempId,
@@ -355,7 +357,7 @@ async function batchPublishBlog(
 
         const upload = await uploadImmutablePreparedImage(
           admin,
-          'website',
+          bucket,
           'Website Assets/blog',
           item.data.title_en || `blog-${item.id}`,
           prepared.image
@@ -377,7 +379,7 @@ async function batchPublishBlog(
 
       if (error) {
         if (uploaded) {
-          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+          await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
         markFailed(evidence, {
           kind: 'update',
@@ -392,7 +394,7 @@ async function batchPublishBlog(
         await removePublicFileIfDifferent(
           admin,
           previousImage,
-          'website',
+          bucket,
           uploaded.path
         );
       }
@@ -452,7 +454,7 @@ async function batchPublishBlog(
                 await removePublicFileIfPresent(
                   admin,
                   row.image as string | null,
-                  'website'
+                  bucket
                 );
               }
             }
@@ -504,10 +506,13 @@ async function batchPublishBlog(
     };
   }
 }
-async function getBlogData(supabase: SupabaseClient): Promise<BlogResult> {
+async function getBlogData(_supabase: SupabaseClient): Promise<BlogResult> {
   try {
-    // For CMS, fetch all blog posts without limit
-    const { data: blogPosts, error } = await supabase
+    // CMS lists include drafts: published-only RLS hides them from session
+    // reads, so this goes through the admin client after the requireAuth
+    // gate in blogActions (service-role-after-check). Authorized CMS users
+    // only; the public site never calls this path.
+    const { data: blogPosts, error } = await getAdminClient()
       .from('blog_posts')
       .select('*')
       .order('created_at', { ascending: false });
@@ -530,10 +535,12 @@ async function getBlogData(supabase: SupabaseClient): Promise<BlogResult> {
   }
 }
 
-async function getAuthors(supabase: SupabaseClient): Promise<BlogResult> {
+async function getAuthors(_supabase: SupabaseClient): Promise<BlogResult> {
   try {
-    // Fetch all users who have profiles (have logged in at least once)
-    const { data: profiles, error } = await supabase
+    // Author picker: admin client after the requireAuth gate. Column set is
+    // the picker contract (id/display_name/avatar_url); email never leaves
+    // the allowlist through this path.
+    const { data: profiles, error } = await getAdminClient()
       .from('user_profiles')
       .select('id, display_name, avatar_url')
       .order('display_name', { ascending: true });
@@ -659,6 +666,7 @@ async function deleteBlog(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: existingBlog, error: fetchError } = await admin
       .from('blog_posts')
       .select('id, image')
@@ -679,7 +687,7 @@ async function deleteBlog(
     await removePublicFileIfPresent(
       admin,
       existingBlog.image as string | null,
-      'website'
+      bucket
     );
 
     const revalidation = await invalidatePublicContent({
@@ -719,6 +727,7 @@ async function uploadBlogImageForNewPost(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     // Shared format-aware pipeline: extension + MIME follow the actual
     // processed format (WebP passthrough or Sharp fallback to PNG).
@@ -732,7 +741,7 @@ async function uploadBlogImageForNewPost(
 
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
+      bucket,
       'Website Assets/blog',
       titleEn || 'untitled',
       prepared.image
@@ -767,12 +776,13 @@ async function rollbackBlogCreate(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     // The row is the authoritative state: delete it first, then remove the
     // uploaded image best-effort. Storage-first would leave a surviving row
     // pointing at a deleted object if the DB delete failed.
     const { error } = await admin.from('blog_posts').delete().eq('id', postId);
     if (error) throw error;
-    await removeStorageObjectBestEffort(admin, 'website', imagePath);
+    await removeStorageObjectBestEffort(admin, bucket, imagePath);
     return { success: true };
   } catch (error) {
     console.error('Error rolling back blog create:', error);
@@ -806,6 +816,7 @@ async function uploadBlogImage(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     const { data: existingBlog, error: fetchError } = await admin
       .from('blog_posts')
@@ -833,7 +844,7 @@ async function uploadBlogImage(
     // using the trusted DB value rather than the client payload.
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
+      bucket,
       'Website Assets/blog',
       existingBlog.title_en || `blog-${blogId}`,
       prepared.image
@@ -853,14 +864,14 @@ async function uploadBlogImage(
 
     if (updateError) {
       // Best-effort staged cleanup must never mask the DB error.
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
       existingBlog.image,
-      'website',
+      bucket,
       upload.path
     );
 

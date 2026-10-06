@@ -35,6 +35,7 @@ import { careerActions } from '@/app/actions/cms/sections/careerActions';
 import { contactsActions } from '@/app/actions/cms/sections/contactsActions';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
+import { portfolioActions } from '@/app/actions/cms/sections/portfolioActions';
 import { skillsActions } from '@/app/actions/cms/sections/skillsActions';
 import {
   updateMyProfile,
@@ -88,6 +89,11 @@ const blogCreate = (title: string, tempId: string) => ({
 
 beforeEach(() => {
   h.invalidate.mockClear();
+  // Storage hardening: actions resolve the bucket + origin from env per call.
+  // Loopback-dev pairing routes writes to website-dev with a matching origin
+  // so fake public URLs parse for owned-bucket cleanup tests.
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://fake.supabase.co');
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
 });
 
 describe('blog BATCH_PUBLISH evidence', () => {
@@ -140,7 +146,7 @@ describe('blog BATCH_PUBLISH evidence', () => {
 
   it('on DB failure after upload removes the NEW object but never the trusted OLD one', async () => {
     const oldUrl =
-      'https://fake.supabase.co/storage/v1/object/public/website/Website%20Assets/blog/old.webp';
+      'https://fake.supabase.co/storage/v1/object/public/website-dev/Website%20Assets/blog/old.webp';
     h.fake = makeFake(
       {
         cms_allowed_users: EDITOR,
@@ -727,6 +733,28 @@ describe('asset commit and cleanup authority', () => {
     expect(result.success).toBe(true);
     expect(h.fake.state.removed).toEqual([]);
   });
+  it('never deletes a same-origin cross-bucket URL (prod object from a dev write)', async () => {
+    // Old prod URL is readable but must be a cleanup no-op: the dev bucket
+    // owns nothing at that path, so deleting would remove a prod object.
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      blog_posts: [
+        {
+          id: 1,
+          title_en: 'Existing',
+          image:
+            'https://fake.supabase.co/storage/v1/object/public/website/Website%20Assets/blog/old.webp',
+        },
+      ],
+    });
+    const result = await blogActions({
+      type: 'UPLOAD_IMAGE',
+      blogId: 1,
+      file: webpFile(),
+    });
+    expect(result.success).toBe(true);
+    expect(h.fake.state.removed).toEqual([]);
+  });
 
   it('cleans the staged career logo when the DB update fails', async () => {
     h.fake = makeFake(
@@ -837,6 +865,85 @@ describe('auth allowlist boundary', () => {
       id: 'user-1',
       email: 'admin@example.com',
     });
+  });
+});
+
+describe('draft visibility and author picker', () => {
+  it('serves drafts to allowlisted CMS readers through the admin boundary', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [
+        { id: 1, title_en: 'Draft', hidden: true },
+        { id: 2, title_en: 'Live', hidden: false },
+      ],
+      portfolio_posts: [{ id: 7, title_en: 'Draft work', hidden: true }],
+    });
+    const blog = await blogActions({ type: 'GET' });
+    expect(blog.success).toBe(true);
+    expect(
+      (blog.data as Array<{ title_en: string }>).map((row) => row.title_en)
+    ).toEqual(expect.arrayContaining(['Draft', 'Live']));
+    const portfolio = await portfolioActions({ type: 'GET' });
+    expect(portfolio.success).toBe(true);
+    expect(
+      (portfolio.data as Array<{ title_en: string }>).map((row) => row.title_en)
+    ).toEqual(expect.arrayContaining(['Draft work']));
+  });
+
+  it('rejects unallowlisted readers before touching post tables', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: [],
+      blog_posts: [{ id: 1, title_en: 'Draft', hidden: true }],
+      portfolio_posts: [{ id: 7, title_en: 'Draft work', hidden: true }],
+    });
+    expect((await blogActions({ type: 'GET' })).success).toBe(false);
+    expect((await portfolioActions({ type: 'GET' })).success).toBe(false);
+    expect(
+      h.fake.state.log.filter(
+        (entry) =>
+          (entry.table === 'blog_posts' || entry.table === 'portfolio_posts') &&
+          entry.mode === 'select'
+      )
+    ).toEqual([]);
+  });
+
+  it('exposes only the picker columns for authors, never allowlist emails', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      user_profiles: [
+        {
+          id: 'user-1',
+          email: 'author@example.com',
+          display_name: 'Author',
+          avatar_url: null,
+        },
+      ],
+    });
+    for (const result of [
+      await blogActions({ type: 'GET_AUTHORS' }),
+      await portfolioActions({ type: 'GET_AUTHORS' }),
+    ]) {
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual([
+        { id: 'user-1', display_name: 'Author', avatar_url: null },
+      ]);
+    }
+  });
+
+  it('refuses author enumeration to unallowlisted callers', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: [],
+      user_profiles: [{ id: 'user-1', display_name: 'Author' }],
+    });
+    expect((await blogActions({ type: 'GET_AUTHORS' })).success).toBe(false);
+    expect((await portfolioActions({ type: 'GET_AUTHORS' })).success).toBe(
+      false
+    );
+    expect(
+      h.fake.state.log.filter(
+        (entry) => entry.table === 'user_profiles' && entry.mode === 'select'
+      )
+    ).toEqual([]);
   });
 });
 

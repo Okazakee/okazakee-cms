@@ -8,7 +8,9 @@ import {
   getUserAuthProvider,
   getUserAvatarUrl,
   getUserDisplayName,
+  getUserGithubId,
   getUserGithubUsername,
+  getVerifiedUserEmail,
   lookupAllowedCmsUserViaRpc,
   resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
@@ -111,19 +113,114 @@ describe('buildAuthErrorRedirect', () => {
   });
 });
 
+describe('getUserGithubId', () => {
+  it('derives the numeric subject from the github identity', () => {
+    expect(
+      getUserGithubId(
+        makeUser({
+          identities: [
+            {
+              id: 'ignored',
+              user_id: 'user-1',
+              identity_id: 'iid',
+              provider: 'github',
+              identity_data: { sub: '123456' },
+            },
+          ],
+        })
+      )
+    ).toBe('123456');
+  });
+
+  it('rejects non-numeric subjects and missing github identities', () => {
+    expect(getUserGithubId(makeUser())).toBeNull();
+    expect(
+      getUserGithubId(
+        makeUser({
+          identities: [
+            {
+              id: 'x',
+              user_id: 'user-1',
+              identity_id: 'iid',
+              provider: 'github',
+              identity_data: { sub: 'octocat' },
+            },
+          ],
+        })
+      )
+    ).toBeNull();
+    expect(
+      getUserGithubId(
+        makeUser({
+          identities: [
+            {
+              id: 'x',
+              user_id: 'user-1',
+              identity_id: 'iid',
+              provider: 'google',
+              identity_data: { sub: '999' },
+            },
+          ],
+        })
+      )
+    ).toBeNull();
+  });
+
+  it('ignores editable user_metadata when deriving the ID', () => {
+    expect(
+      getUserGithubId(makeUser({ user_metadata: { user_name: 'spoofed' } }))
+    ).toBeNull();
+  });
+});
+
 describe('getUserGithubUsername', () => {
-  it('returns username from user_metadata', () => {
+  it('reads the display handle from the github identity', () => {
     expect(
       getUserGithubUsername(
-        makeUser({ user_metadata: { user_name: 'octocat' } })
+        makeUser({
+          identities: [
+            {
+              id: 'x',
+              user_id: 'user-1',
+              identity_id: 'iid',
+              provider: 'github',
+              identity_data: { sub: '42', user_name: 'octocat' },
+            },
+          ],
+        })
       )
     ).toBe('octocat');
   });
 
-  it('returns null when missing or non-string', () => {
+  it('returns null when no github identity handle exists', () => {
     expect(getUserGithubUsername(makeUser())).toBeNull();
+  });
+
+  it('never trusts user_metadata for the display handle', () => {
     expect(
-      getUserGithubUsername(makeUser({ user_metadata: { user_name: 42 } }))
+      getUserGithubUsername(
+        makeUser({ user_metadata: { user_name: 'spoofed' } })
+      )
+    ).toBeNull();
+  });
+});
+
+describe('getVerifiedUserEmail', () => {
+  it('returns the email when the auth record proves verification', () => {
+    expect(
+      getVerifiedUserEmail(
+        makeUser({ email_confirmed_at: '2026-01-01T00:00:00Z' })
+      )
+    ).toBe('test@example.com');
+  });
+
+  it('rejects unverified addresses', () => {
+    // Explicit undefined keeps the confirmation keys present via spread
+    // while falsy, exercising the present-but-unverified branch.
+    expect(
+      getVerifiedUserEmail(
+        makeUser({ email_confirmed_at: undefined, confirmed_at: undefined })
+      )
     ).toBeNull();
   });
 });
@@ -183,16 +280,21 @@ describe('getUserAvatarUrl', () => {
 
 describe('findAllowedCmsUser', () => {
   function mockSupabase(
-    rows: { email?: string; github_username?: string; role: string }[]
+    rows: {
+      email?: string;
+      github_user_id?: string;
+      github_username?: string;
+      role: string;
+    }[]
   ) {
     return {
       from: vi.fn(() => ({
         select: vi.fn(() => ({
-          eq: vi.fn((_col: string, value: string) => ({
+          eq: vi.fn((col: string, value: string) => ({
             maybeSingle: vi.fn(async () => ({
               data:
                 rows.find(
-                  (r) => r.email === value || r.github_username === value
+                  (r) => (r as Record<string, unknown>)[col] === value
                 ) ?? null,
             })),
           })),
@@ -201,15 +303,41 @@ describe('findAllowedCmsUser', () => {
     } as unknown as Parameters<typeof findAllowedCmsUser>[0];
   }
 
-  it('matches by email (case-insensitive) with role', async () => {
+  it('matches the immutable GitHub ID first', async () => {
+    const supabase = mockSupabase([{ github_user_id: '123', role: 'admin' }]);
+    const result = await findAllowedCmsUser(supabase, {
+      email: 'someone@example.com',
+      githubUserId: '123',
+      githubUsernameLegacy: 'someone-else',
+    });
+    expect(result).toEqual({ role: 'admin', matchSource: 'github' });
+  });
+
+  it('matches by email when no ID matches', async () => {
     const supabase = mockSupabase([
       { email: 'admin@example.com', role: 'admin' },
     ]);
-    const result = await findAllowedCmsUser(supabase, 'Admin@Example.com');
+    const result = await findAllowedCmsUser(supabase, {
+      email: 'Admin@Example.com',
+      githubUserId: null,
+      githubUsernameLegacy: null,
+    });
     expect(result).toEqual({ role: 'admin', matchSource: 'email' });
   });
 
-  it('matches by GitHub username with role', async () => {
+  it('falls back to the legacy handle only when dual-allowed', async () => {
+    const supabase = mockSupabase([
+      { github_username: 'octocat', role: 'editor' },
+    ]);
+    const result = await findAllowedCmsUser(supabase, {
+      email: null,
+      githubUserId: null,
+      githubUsernameLegacy: 'octocat',
+    });
+    expect(result).toEqual({ role: 'editor', matchSource: 'github' });
+  });
+
+  it('keeps the legacy positional signature for transition callers', async () => {
     const supabase = mockSupabase([
       { github_username: 'octocat', role: 'editor' },
     ]);
@@ -220,13 +348,83 @@ describe('findAllowedCmsUser', () => {
   it('returns null for unknown users', async () => {
     const supabase = mockSupabase([{ email: 'a@b.com', role: 'admin' }]);
     expect(
-      await findAllowedCmsUser(supabase, 'nope@b.com', 'nobody')
+      await findAllowedCmsUser(supabase, {
+        email: 'nope@b.com',
+        githubUserId: '999',
+        githubUsernameLegacy: 'nobody',
+      })
     ).toBeNull();
   });
 
   it('returns null when role is not a valid CMS role', async () => {
     const supabase = mockSupabase([{ email: 'x@y.com', role: 'viewer' }]);
-    expect(await findAllowedCmsUser(supabase, 'x@y.com')).toBeNull();
+    expect(await findAllowedCmsUser(supabase, { email: 'x@y.com' })).toBeNull();
+  });
+});
+
+describe('findAllowedCmsUser hardened order', () => {
+  function sequenceSupabase() {
+    const calls: Array<{ col: string; value: string }> = [];
+    return {
+      calls,
+      client: {
+        from: () => ({
+          select: () => ({
+            eq: (col: string, value: string) => ({
+              maybeSingle: async () => {
+                calls.push({ col, value });
+                // Immutable ID claims admin; legacy handle claims editor;
+                // email claims nothing (non-admin allowlist gap).
+                if (col === 'github_user_id' && value === '123') {
+                  return { data: { role: 'admin' } };
+                }
+                if (col === 'github_username' && value === 'octocat') {
+                  return { data: { role: 'editor' } };
+                }
+                return { data: null };
+              },
+            }),
+          }),
+        }),
+      } as unknown as Parameters<typeof findAllowedCmsUser>[0],
+    };
+  }
+  it('prefers the immutable ID over a conflicting legacy handle', async () => {
+    const { client, calls } = sequenceSupabase();
+    const result = await findAllowedCmsUser(client, {
+      email: null,
+      githubUserId: '123',
+      githubUsernameLegacy: 'octocat',
+    });
+    expect(result).toEqual({ role: 'admin', matchSource: 'github' });
+    expect(calls[0]).toEqual({ col: 'github_user_id', value: '123' });
+  });
+
+  it('never reaches the legacy handle for an allowlisted non-admin email', async () => {
+    const seen: string[] = [];
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: (col: string) => ({
+            maybeSingle: async () => {
+              seen.push(col);
+              if (col === 'email') return { data: { role: 'editor' } };
+              return { data: null };
+            },
+          }),
+        }),
+      }),
+    } as unknown as Parameters<typeof findAllowedCmsUser>[0];
+    // findAllowedCmsUser returns the email match directly; callers enforcing
+    // the no-fallthrough contract (isAdmin) stop here instead of probing
+    // the handle column with a spoofable display value.
+    const result = await findAllowedCmsUser(client, {
+      email: 'editor@example.com',
+      githubUserId: null,
+      githubUsernameLegacy: 'victim-admin',
+    });
+    expect(result).toEqual({ role: 'editor', matchSource: 'email' });
+    expect(seen).not.toContain('github_username');
   });
 });
 
