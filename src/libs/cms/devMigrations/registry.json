@@ -1,0 +1,42 @@
+[
+  {
+    "name": "add_skill_link_and_position",
+    "sourceFile": "supabase/migrations/20261004090000_add_skill_link_and_position.sql",
+    "version": "20261004090000"
+  },
+  {
+    "name": "add_hero_display_options",
+    "sourceFile": "supabase/migrations/20261004101500_add_hero_display_options.sql",
+    "version": "20261004101500"
+  },
+  {
+    "name": "add_post_buttons",
+    "sourceFile": "supabase/migrations/20261004110000_add_post_buttons.sql",
+    "version": "20261004110000"
+  },
+  {
+    "name": "backfill_post_buttons",
+    "sourceFile": "supabase/migrations/20261004111000_backfill_post_buttons.sql",
+    "version": "20261004111000"
+  },
+  {
+    "name": "add_site_settings",
+    "sourceFile": "supabase/migrations/20261004120000_add_site_settings.sql",
+    "version": "20261004120000"
+  },
+  {
+    "name": "add_project_requests",
+    "sourceFile": "supabase/migrations/20261004130000_add_project_requests.sql",
+    "version": "20261004130000"
+  },
+  {
+    "name": "freeze_static_site_copy",
+    "sourceFile": "supabase/migrations/20261005120000_freeze_static_site_copy.sql",
+    "version": "20261005120000"
+  },
+  {
+    "name": "add_site_settings_footer_identity",
+    "sourceFile": "supabase/migrations/20261005150208_add_site_settings_footer_identity.sql",
+    "version": "20261005150208"
+  }
+]

@@ -381,10 +381,27 @@ urgent it feels.
   `WEBSITE_REVALIDATION_URL`, `WEBSITE_REVALIDATION_SECRET`,
   `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_LOCALES`, `NEXT_PUBLIC_DEFAULT_LOCALE`.
   Full list in `.env.local.example`.
-- **Database migrations:** `supabase/migrations/` — login rate limiting
-  (table, split per-IP/per-email buckets, hardening grants/RLS, scheduled
-  purge). Apply with `supabase db push` or the SQL editor; always documented
-  as reversible.
+- **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
+  (`src/utils/cms/devMigrations.ts`;
+  `src/libs/cms/devMigrations/devCheck.ts`; registry
+  `src/libs/cms/devMigrations/registry.json`, 8 `{version,name,sourceFile}`
+  entries) plus login rate limiting / content tables and the dev-only
+  `dev_staging.cms_migration_audit` ledger (8 `verified_existing` rows =
+  effects + source hash audited, not original execution provenance; native
+  history 13: 11 historical + `150208` dev-footer + `234758` dev-only
+  bootstrap, existing 12 unchanged; 7 original public/unqualified sources
+  remain unrecorded globally and must never be replayed against shared
+  `public`). Link once (`supabase login`,
+  `supabase link --project-ref <ref>`); green ends
+  `dev check: N pass / 0 fail / M info`, drift `FAIL`s with exit 1.
+  `--scope` must equal `dev_staging`. That is the only DB command — no
+  apply command exists; the CLI accepts `check` only and rejects
+  unknown/`apply` actions without DB writes. Future DB changes stay
+  explicitly reviewed/manual. NEVER `supabase db push`, `migration repair`,
+  or `search_path`-fallback apply — `public` is off-limits. Source bytes
+  immutable. Owner knows dev state is good when the check reports 0 fail
+  with all 8 records matching; `public`, shared auth, and pre-existing
+  history are not certified.
 - **Deployment:** Vercel with Next.js framework preset. Build output: `.next/`.
 
 ## 15. Red Lines

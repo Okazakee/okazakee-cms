@@ -184,15 +184,72 @@ preview env (which omits it) points at production. Both this app and
 
 `dev_staging` must also be listed in the project's **exposed schemas**
 (Dashboard → Data API settings); otherwise PostgREST answers
-`permission denied for schema`. Apply migrations with
-`supabase/migrations/*.sql` to `dev_staging` first, promote to `public` on
-release. Schema-owned DDL is explicitly `dev_staging.`-qualified rather than
-resolved through `search_path`, so a migration cannot reach production by
-accident: the footer identity columns
-(`20261005145655_add_site_settings_footer_identity.sql`) are the current
-example, and `public` is untouched until that file is promoted, which is why
-production keeps rendering its own footer defaults. Two things are *not*
-schema-scoped and still hit production:
+`permission denied for schema`.
+
+### Dev database verification: `db:dev:check` (read-only)
+
+Never run a blind `supabase db push`, `migration repair`, or
+`search_path`-fallback apply: `public` holds production content and is
+off-limits for dev work. The footer identity columns
+(`20261005150208_...`, renamed from `20261005145655_...` with identical
+statement bytes) are explicitly `dev_staging.`-qualified, nullable with no
+backfill — `public` is untouched, which is why production keeps rendering
+its own footer defaults (`Okazakee` / `02863310815`).
+
+Link once per machine, then verify (`src/utils/cms/devMigrations.ts`;
+`src/libs/cms/devMigrations/devCheck.ts`; registry
+`src/libs/cms/devMigrations/registry.json`, 8 `{version,name,sourceFile}`
+entries):
+
+```bash
+supabase login
+supabase link --project-ref <ref>
+bun run db:dev:check [--scope dev_staging]
+```
+
+That is the only database command. There is no apply command: the CLI
+accepts `check` only and rejects any unknown/`apply` action without any DB
+writes. Future database changes stay explicitly reviewed/manual — no
+automatic apply exists, and there is no pending or interim implementation.
+The 7 original public/unqualified historical sources must never be replayed
+against the shared project's `public`: the safe manual boundary is to leave
+pre-existing `public`/unqualified history alone and change `dev_staging`
+only through reviewed SQL + a fresh read-only check.
+`--scope` defaults to and must equal `dev_staging`; anything else is an
+immediate `FAIL`. The check is read-only (project-local
+`supabase db query --linked --output-format json` metadata `SELECT`s plus
+local source-file reads; `public` is never queried for certification).
+
+Green check prints `PASS H-<version>` per row (ledger hash == source bytes +
+mode), the `C/K/X/P/A/Q` column/constraint/index/policy/ACL findings, the
+footer `F` comment statements verbatim, the `D` data-invariant findings, and
+ends `dev check: N pass / 0 fail / M info`. Drift fails with exit 1, e.g.
+`FAIL H-<v>.hash source DRIFTED… never reapply changed history`,
+`FAIL H-<v>.ledger ledger MISSING…`, `FAIL C-/K-/X-/P-/A-/Q-… diverges`,
+`FAIL …unregistered…`, `FAIL ledger.read/catalog.read` (with a login/link
+hint) — plus the shared-auth NOT-certified note.
+
+Owner knows the development state is good when the check reports `0 fail`
+with all 8 `H-<version>` records matching: source bytes immutable, ledger
+hash matches, live `dev_staging` effects match. `verified_existing` means
+the 93-check audit proved that source's schema effects plus its byte hash —
+it does not prove original execution provenance, and it certifies nothing
+about `public`, shared auth, or pre-existing history.
+
+Migration authority is split. The native `supabase_migrations` history is
+mixed-scope (13 total: 11 historical + `150208` dev-footer + `234758`
+dev-only bootstrap; the existing 12 records unchanged; the 7 original
+public/unqualified sources remain unrecorded globally) and does NOT certify
+content effects. Authority for dev lives in
+`dev_staging.cms_migration_audit`: 8 `verified_existing` rows (effects +
+source hash audited). Source bytes are immutable: a changed registered file
+fails verification, never re-applies. The ledger bootstrap
+(`20261005234758_create_cms_migration_audit_ledger.sql`) is dev-only DDL
+with its own history row, not one of the 8 app records. Baseline (inferred
+fixture, not production parity) and shared auth/storage (`auth.users`
+sessions carry over, buckets are project-level) stay outside this
+certification.
+Two things are *not*
 
 - **Storage** — buckets are project-level. Use a separate bucket
   (`SUPABASE_BUCKET=website-dev`) so a test upload cannot land in the live one.
