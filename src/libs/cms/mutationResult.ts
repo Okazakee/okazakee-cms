@@ -34,6 +34,24 @@ export const PUBLIC_CACHE_WARNING =
   'Changes saved, but the public site cache update failed. The live site may show stale content for a few minutes.';
 
 /**
+ * Extracts a displayable message from a caught value.
+ *
+ * Supabase answers a failed query with a plain `{ message, code, details,
+ * hint }` object, not an `Error` instance, so `error instanceof Error` alone
+ * collapses every database failure into the caller's generic fallback and
+ * hides the actual reason (e.g. a column the deployed schema does not have
+ * yet). Read `message` structurally instead.
+ */
+export function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'object' && error !== null) {
+    const { message } = error as { message?: unknown };
+    if (typeof message === 'string' && message.length > 0) return message;
+  }
+  return fallback;
+}
+
+/**
  * Returns a user-facing warning when a successful mutation could not be
  * propagated to the public site cache, or null otherwise.
  */

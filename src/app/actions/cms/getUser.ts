@@ -1,5 +1,6 @@
 'use server';
 
+import { errorMessage } from '@/libs/cms/mutationResult';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import type { HeroSettings } from '@/types/fetchedData.types';
 import { createClient } from '@/utils/supabase/server';
@@ -157,7 +158,7 @@ export async function getCmsBootData(): Promise<CMSBootData> {
   } catch (error) {
     return {
       status: 'error',
-      error: error instanceof Error ? error.message : 'Failed to load CMS',
+      error: errorMessage(error, 'Failed to load CMS'),
     };
   }
 }
