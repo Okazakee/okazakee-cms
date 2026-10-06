@@ -198,7 +198,7 @@ its own footer defaults (`Okazakee` / `02863310815`).
 
 Link once per machine, then verify (`src/utils/cms/devMigrations.ts`;
 `src/libs/cms/devMigrations/devCheck.ts`; registry
-`src/libs/cms/devMigrations/registry.json`, 8 `{version,name,sourceFile}`
+`src/libs/cms/devMigrations/registry.json`, 9 `{version,name,sourceFile}`
 entries):
 
 ```bash
@@ -230,7 +230,7 @@ ends `dev check: N pass / 0 fail / M info`. Drift fails with exit 1, e.g.
 hint) — plus the shared-auth NOT-certified note.
 
 Owner knows the development state is good when the check reports `0 fail`
-with all 8 `H-<version>` records matching: source bytes immutable, ledger
+with all 9 `H-<version>` records matching: source bytes immutable, ledger
 hash matches, live `dev_staging` effects match. `verified_existing` means
 the 93-check audit proved that source's schema effects plus its byte hash —
 it does not prove original execution provenance, and it certifies nothing
@@ -241,11 +241,13 @@ mixed-scope (13 total: 11 historical + `150208` dev-footer + `234758`
 dev-only bootstrap; the existing 12 records unchanged; the 7 original
 public/unqualified sources remain unrecorded globally) and does NOT certify
 content effects. Authority for dev lives in
-`dev_staging.cms_migration_audit`: 8 `verified_existing` rows (effects +
-source hash audited). Source bytes are immutable: a changed registered file
+`dev_staging.cms_migration_audit`: 9 rows — 8 `verified_existing` (effects +
+source hash audited) plus `20261006233000` `applied` (the dev-only GitHub
+subject catch-up that keeps the clone level with the deployed callers).
+Source bytes are immutable: a changed registered file
 fails verification, never re-applies. The ledger bootstrap
 (`20261005234758_create_cms_migration_audit_ledger.sql`) is dev-only DDL
-with its own history row, not one of the 8 app records. Baseline (inferred
+with its own history row, not one of the audited app records. Baseline (inferred
 fixture, not production parity) and shared auth/storage (`auth.users`
 sessions carry over, buckets are project-level) stay outside this
 certification.

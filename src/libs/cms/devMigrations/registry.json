@@ -38,5 +38,10 @@
     "name": "add_site_settings_footer_identity",
     "sourceFile": "supabase/migrations/20261005150208_add_site_settings_footer_identity.sql",
     "version": "20261005150208"
+  },
+  {
+    "name": "add_identity_github_subject_dev_staging",
+    "sourceFile": "supabase/migrations/20261006233000_add_identity_github_subject_dev_staging.sql",
+    "version": "20261006233000"
   }
 ]

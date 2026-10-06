@@ -384,9 +384,10 @@ urgent it feels.
 - **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
   (`src/utils/cms/devMigrations.ts`;
   `src/libs/cms/devMigrations/devCheck.ts`; registry
-  `src/libs/cms/devMigrations/registry.json`, 8 `{version,name,sourceFile}`
+  `src/libs/cms/devMigrations/registry.json`, 9 `{version,name,sourceFile}`
   entries) plus login rate limiting / content tables and the dev-only
-  `dev_staging.cms_migration_audit` ledger (8 `verified_existing` rows =
+  `dev_staging.cms_migration_audit` ledger (9 rows: 8 `verified_existing`
+  + `20261006233000` `applied`, the dev-only GitHub subject catch-up =
   effects + source hash audited, not original execution provenance; native
   history 13: 11 historical + `150208` dev-footer + `234758` dev-only
   bootstrap, existing 12 unchanged; 7 original public/unqualified sources
