@@ -12,8 +12,6 @@ import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { LayoutPreview } from '@/components/common/cms/previews/LayoutPreview';
 import {
   type UseFileUploadReturn,
   useFileUpload,
@@ -74,7 +72,6 @@ export function LayoutSection() {
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState<SiteSettings>(EMPTY_SETTINGS);
   const settingsRef = useRef<SiteSettings>(settings);
@@ -438,7 +435,6 @@ export function LayoutSection() {
           <SectionActions
             busy={busy}
             isDirty={isDirty}
-            onPreview={() => setPreviewOpen(true)}
             onPublish={() => publish().catch(() => {})}
             onRevert={revert}
           />
@@ -541,28 +537,6 @@ export function LayoutSection() {
           {t('layout.footerDefaultsNote')}
         </p>
       </section>
-
-      <PreviewModal
-        isOpen={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        title={t('layout.previewTitle')}
-      >
-        <LayoutPreview
-          anchors={anchors}
-          footer={{
-            name: footer.name.trim() || null,
-            vatNumber: footer.vatNumber.trim() || null,
-          }}
-          logos={{
-            dark: darkUpload.previewUrl ?? settings.header_logo_dark,
-            light: lightUpload.previewUrl ?? settings.header_logo_light,
-          }}
-          resumeLinks={{
-            en: resumeEnUpload.previewUrl ?? heroSection?.resume_en ?? null,
-            it: resumeItUpload.previewUrl ?? heroSection?.resume_it ?? null,
-          }}
-        />
-      </PreviewModal>
     </fieldset>
   );
 }

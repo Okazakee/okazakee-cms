@@ -12,8 +12,6 @@ import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { HeroPreview } from '@/components/common/cms/previews/HeroPreview';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
@@ -42,7 +40,6 @@ export default function HeroSection() {
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
   const [shape, setShape] = useState<HeroShape>('pebble');
@@ -298,7 +295,6 @@ export default function HeroSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
@@ -547,25 +543,6 @@ export default function HeroSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('hero.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'hero-section',
-          drafts: translations,
-        }}
-      >
-        <HeroPreview
-          blurhashURL={imgUpload.blurhash ?? heroSection.blurhashURL ?? ''}
-          mainImage={mainImageUrl}
-          shape={shape}
-          typewriter={typewriter}
-          typewriterTarget={typewriterTarget}
-        />
-      </PreviewModal>
     </fieldset>
   );
 }

@@ -13,8 +13,6 @@ import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { ContactsPreview } from '@/components/common/cms/previews/ContactsPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
@@ -35,7 +33,6 @@ export default function ContactsSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
 
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
@@ -53,7 +50,6 @@ export default function ContactsSection() {
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
   const {
-    translations,
     isDirty: transDirty,
     isLoading: transLoading,
     error: transError,
@@ -343,7 +339,6 @@ export default function ContactsSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
@@ -575,18 +570,6 @@ export default function ContactsSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('contacts.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'contacts-section',
-          drafts: translations,
-        }}
-      >
-        <ContactsPreview contacts={contacts} />
-      </PreviewModal>
     </fieldset>
   );
 }

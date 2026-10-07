@@ -3,7 +3,6 @@
 import {
   Calendar,
   Edit3,
-  Eye,
   FileText,
   Info,
   Plus,
@@ -28,9 +27,6 @@ import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
 import { ListPostImage } from '@/components/common/cms/ListPostImage';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { PortfolioPreview } from '@/components/common/cms/previews/PortfolioPreview';
-import { PostPreview } from '@/components/common/cms/previews/PostPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
@@ -94,8 +90,6 @@ export default function PortfolioSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isPostPreviewOpen, setIsPostPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [mode, setMode] = useState<FormMode>('list');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -116,7 +110,6 @@ export default function PortfolioSection() {
   });
 
   const {
-    translations,
     isDirty: transDirty,
     isLoading: transLoading,
     error: transError,
@@ -738,42 +731,12 @@ export default function PortfolioSection() {
           </button>
           <button
             type="button"
-            onClick={() => setIsPostPreviewOpen(true)}
-            className="px-4 py-2 bg-accent-violet-deep text-white rounded-lg"
-          >
-            <Eye className="w-4 h-4 inline mr-1" />
-            {t('portfolio.previewPost')}
-          </button>
-          <button
-            type="button"
             onClick={isEditing ? handleUpdate : handleCreate}
             className="px-4 py-2 bg-accent-violet text-white rounded-lg"
           >
             {t('common.done')}
           </button>
         </div>
-
-        <PreviewModal
-          isOpen={isPostPreviewOpen}
-          onClose={() => setIsPostPreviewOpen(false)}
-          title={t('portfolio.postPreviewTitle')}
-          copy={{
-            locale: formLocale,
-            namespace: 'posts-section',
-            drafts: translations,
-          }}
-        >
-          <PostPreview
-            formData={formData}
-            postType="portfolio"
-            locale={formLocale}
-            imageFile={imgUpload.file}
-            author={authors.find((a) => a.id === formData.author_id) || null}
-            views={
-              isEditing ? posts.find((p) => p.id === editingId)?.views || 0 : 0
-            }
-          />
-        </PreviewModal>
       </div>
     );
   }
@@ -792,7 +755,6 @@ export default function PortfolioSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
@@ -915,18 +877,6 @@ export default function PortfolioSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('portfolio.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'posts-section',
-          drafts: translations,
-        }}
-      >
-        <PortfolioPreview posts={posts} deletedPostIds={deletedIds} />
-      </PreviewModal>
     </fieldset>
   );
 }

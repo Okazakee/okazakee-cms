@@ -19,8 +19,8 @@ the portfolio/blog content stored in a shared Supabase project — sections,
 translations, uploads, user management — then notifies the public site to
 refresh its caches.
 
-This repository is **write-side only**. It owns editing, auth flows, uploads,
-previews and revalidation events; the public website
+This repository is **write-side only**. It owns editing, auth flows, uploads
+and revalidation events; the public website
 ([Okazakee/okazakee-ws](https://github.com/Okazakee/okazakee-ws)) owns
 rendering and caching.
 
@@ -35,7 +35,7 @@ rendering and caching.
 - **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Request
   Form copy, Requests, Layout (header logos and anchors, résumé PDFs, footer
   identity), Website Copy, Privacy Policy, Users, Account — each with EN/IT
-  translations, draft/publish state, and live previews. *Requests* is
+  translations and draft/publish state. *Requests* is
   read-only and has no intake path yet: the public form does not submit, so
   the section renders an explicit "not connected" notice until one does.
   *Request Form copy* is not published to the site either — the public form
@@ -82,7 +82,7 @@ structural chrome: they live in
 `okazakee-ws/src/i18n/messages/site.{en,it}.json` and are merged over the
 database by `okazakee-ws/src/i18n/siteCopy.ts`, so no stale row can override
 them. The Header and Footer translation editors were removed for that reason;
-the Layout preview reads the same frozen copy through `getLayoutCopy(locale)`
+the Layout section edits only the two footer identity fields
 and needs no database row at all.
 
 Only the two footer identity fields are editable content. Both are nullable and
@@ -100,7 +100,7 @@ CMS (this repo) ──writes──▶ Supabase ◀──reads── Public websi
 ```
 
 - **Supabase** owns content, auth, storage and the allowlist.
-- **This repo** owns editing, auth flows, uploads, previews and revalidation
+- **This repo** owns editing, auth flows, uploads and revalidation
   events.
 - **The public repo** owns rendering and caching (Next Cache Components).
   Revalidation uses `revalidateTag(tag, { expire: 0 })` there — immediate

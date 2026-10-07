@@ -29,7 +29,7 @@ src/
     actions/
       cms/
         login.ts                  # Email/password login + durable rate limit
-        getUser.ts                # Boot data (user + hero preview data)
+        getUser.ts                # Boot data (user + hero section data)
         deleteAccount.ts          # Self-service account deletion
         utils/
           auth.ts                 # Allowlist matching, GitHub helpers
@@ -41,9 +41,9 @@ src/
     cms/sections/                 # Editor components per section
     cms/shared/                   # Shared CMS UI (ErrorBanner, FileDropzone,
                                   # Dropdown, ...)
-    common/cms/                   # PreviewModal, SidePanel, AccountSection, previews
-    common/                       # Public-section components reused for previews
-    layout/                       # ThemeToggle, MarkdownRenderer, ...
+    common/cms/                   # SidePanel, AccountSection
+    common/                       # Public-section components reused here
+    layout/                       # ThemeToggle, NextImage, ...
   hooks/cms/                      # useFileUpload, useSectionTranslations,
                                   # useRequestEntries (inbox loader + mutations)
   i18n/                           # next-intl config + static CMS messages
@@ -63,7 +63,6 @@ src/
   utils/
     cms/validation.ts             # Pure validators (sizes, URLs, storage paths)
     cmsRouteMatching.ts           # Pure route rules (public paths, /cms compat)
-    getData.ts                    # CMS-local 'use cache' reads (translations)
     imageProcessor.ts             # Client-side WebP preprocessing
     supabase/server.ts            # SSR session client (publishable key)
   proxy.ts                        # Proxy (middleware): locale + session guard
@@ -113,10 +112,10 @@ src/
   `src/utils/cms/webpAnimation.ts` and must be used by any new upload path.
   Animated frames are decoded into one tall surface, so an animation above
   32 MPx total is rejected before decoding.
-- Local CMS `'use cache'` entries (e.g. `getTranslationsSupabase`) are
-  invalidated from Server Actions with `updateTag(tag)` + `refresh()`
-  (`src/libs/cms/localInvalidation.ts`); remote invalidation goes through
-  `invalidatePublicContent` (signed event, never throws, status returned).
+- The CMS's own cache invalidation runs from Server Actions via
+  `updateTag(tag)` + `refresh()` (`src/libs/cms/localInvalidation.ts`); remote
+  invalidation goes through `invalidatePublicContent` (signed event, never
+  throws, status returned).
 
 ## 5. Commands and Workflows
 
@@ -209,7 +208,7 @@ export function SectionHeader({
 - **Section action files:** `{section}Actions.ts`. `blogActions.ts`, `careerActions.ts`
 - **Component files:** PascalCase matching component name. `SectionHeader.tsx`, `TranslationField.tsx`
 - **Hook files:** `use{HookName}.ts`. `useFileUpload.ts`, `useSectionTranslations.ts`
-- **Utility files:** camelCase. `getData.ts`, `imageProcessor.ts`
+- **Utility files:** camelCase. `blurhashUtils.ts`, `imageProcessor.ts`
 - **Constants at module level:** camelCase (not SCREAMING_SNAKE_CASE). `const revalTime = ...`
 
 ## 8. Type Annotations

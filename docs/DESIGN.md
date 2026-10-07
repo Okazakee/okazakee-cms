@@ -290,8 +290,8 @@ mono `Top` label (kept for clarity over the live "Go back up"), fades in on scro
 lifts near the page end.
 
 ### 5.7 Code blocks and prose
-Fenced code renders with the "Code" header bar and a copy affordance (mirrors
-`PreCustom`). Prose: headings `text-white`, body `text-main` (this was the fix — muted
+Fenced code renders with the "Code" header bar and a copy affordance. Prose:
+headings `text-white`, body `text-main` (this was the fix — muted
 tone was too weak), lists with violet markers, links `accent-violet-light` underlined,
 tables as bordered rounded panels with mono uppercase headers, figures with mono
 captions and the blurhash as the placeholder background.
@@ -415,7 +415,7 @@ Invented copy is a defect, not a placeholder.
 
 **Custom formatting to honour**
 
-- `****text****` → violet-tinted `<label>` (`formatLabels`) — hero name/role, the about
+- `****text****` → violet-tinted `<label>` (the site's `formatLabels`) — hero name/role, the about
   paragraph and section subtitles. Only words the DB actually wraps are tinted.
 - `post_tags` is a quoted list (`["Docker","Bun"]`) parsed by regex; unquoted fragments
   (e.g. a stray `Tags` token in one row) are ignored.
@@ -442,7 +442,7 @@ that already cost the `request-form` namespace and the `Top` label once.
 `request-form` `typeOptions`): they are stored as a numeric index map, because
 the section DELTA merges arrays per index and can never shorten one. Removing
 the last entry therefore leaves a `null` at that index rather than truncating
-the array — every reader (the site, the preview, the roles editor) skips
+the array — every reader (the site, the roles editor) skips
 blank/`null` slots, so the hole is invisible. The singular `hero-section.top.role`
 is deliberately left in place as the fallback for content that predates the list.
 

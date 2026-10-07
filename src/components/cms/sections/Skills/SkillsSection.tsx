@@ -13,8 +13,6 @@ import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { SkillsPreview } from '@/components/common/cms/previews/SkillsPreview';
 import { readBatchEvidence, reconcileDrafts } from '@/hooks/cms/batchDrafts';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
@@ -42,7 +40,6 @@ export default function SkillsSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
@@ -69,7 +66,6 @@ export default function SkillsSection() {
   const [skillOrderChanged, setSkillOrderChanged] = useState(false);
 
   const {
-    translations,
     isDirty: transDirty,
     isLoading: transLoading,
     error: transError,
@@ -667,8 +663,8 @@ export default function SkillsSection() {
         if (category.id !== catId) return category;
         const next = [...category.skills];
         [next[idx], next[idx + dir]] = [next[idx + dir], next[idx]];
-        // Positions are re-densified locally so the preview (which sorts by
-        // position) matches the order shown in the editor, and publishing
+        // Positions are re-densified locally so the public site (which sorts
+        // by position) matches the order shown in the editor, and publishing
         // persists exactly what the editor displays.
         return {
           ...category,
@@ -704,7 +700,6 @@ export default function SkillsSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
@@ -1164,33 +1159,6 @@ export default function SkillsSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('skills.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'skills-section',
-          drafts: translations,
-        }}
-      >
-        <SkillsPreview
-          categories={categories.map((c) => ({
-            id: c.id,
-            name: c.name,
-            skills: c.skills.map((s) => ({
-              id: s.id,
-              title: s.title,
-              icon: s.icon,
-              invert: s.invert,
-              blurhashURL: s.blurhashURL,
-              link: s.link ?? null,
-              position: s.position ?? null,
-            })),
-          }))}
-        />
-      </PreviewModal>
     </fieldset>
   );
 }

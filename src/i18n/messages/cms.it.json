@@ -64,7 +64,6 @@
     "cancel": "Annulla",
     "apply": "Applica",
     "applyChanges": "Applica Modifiche",
-    "preview": "Anteprima",
     "planned": "In arrivo",
     "delete": "Elimina",
     "edit": "Modifica",
@@ -163,7 +162,6 @@
     "errorDownloadImage": "Impossibile scaricare l'immagine",
     "errorUpdateHero": "Impossibile aggiornare la sezione hero",
     "successUpdate": "Sezione hero aggiornata con successo!",
-    "previewTitle": "Anteprima Sezione Hero",
     "displaySection": "Ritratto e animazione",
     "shapeLabel": "Forma del ritratto",
     "shapeHint": "Pebble è il contorno originale; gli altri preset usano raggi e clip-path del sito.",
@@ -181,7 +179,6 @@
       "all": "Tutti i ruoli"
     },
     "typewriterHint": "Il ruolo scelto viene digitato sul sito. Chi richiede il movimento ridotto vede sempre il testo completo.",
-    "typewriterPreviewNote": "Macchina da scrivere (statica in anteprima)",
     "addRole": "Aggiungi ruolo",
     "removeRole": "Rimuovi ruolo",
     "rolesHint": "I ruoli sono un elenco ordinato. Finché l'elenco è vuoto il sito usa il campo Ruolo singolo."
@@ -211,8 +208,7 @@
     "errorRequiredFields": "Compila tutti i campi obbligatori",
     "errorIconUrl": "Inserisci un URL per l'icona",
     "errorInvalidLink": "Inserisci un link http(s) valido",
-    "errorCategoryName": "Il nome della categoria è obbligatorio",
-    "previewTitle": "Anteprima Sezione Competenze"
+    "errorCategoryName": "Il nome della categoria è obbligatorio"
   },
   "career": {
     "title": "Sezione Carriera",
@@ -265,8 +261,7 @@
     "creating": "Creazione in corso...",
     "noCareerEntries": "Nessuna voce trovata. Crea la tua prima voce di carriera!",
     "errorNoLogo": "Seleziona un logo per la voce di carriera",
-    "errorFetch": "Impossibile recuperare i dati della carriera",
-    "previewTitle": "Anteprima Sezione Carriera"
+    "errorFetch": "Impossibile recuperare i dati della carriera"
   },
   "portfolio": {
     "title": "Sezione Portfolio",
@@ -308,7 +303,6 @@
     "selectImage": "Seleziona Immagine",
     "syntaxHighlight": "Evidenzia testo in viola",
     "syntaxImage": "Immagini: separa alt e blurhash con un trattino",
-    "previewPost": "Anteprima Progetto",
     "translationTitleLabel": "Titolo",
     "translationTitlePlaceholder": "es. Portfolio",
     "translationSubtitleLabel": "Sottotitolo",
@@ -333,9 +327,7 @@
     "searchbarPlaceholderLabel": "Segnaposto Barra di Ricerca",
     "postsTitle": "Progetti Portfolio",
     "addPortfolioPost": "Aggiungi Progetto Portfolio",
-    "noPortfolioPosts": "Nessun progetto trovato. Crea il tuo primo progetto!",
-    "previewTitle": "Anteprima Sezione Portfolio",
-    "postPreviewTitle": "Anteprima Progetto"
+    "noPortfolioPosts": "Nessun progetto trovato. Crea il tuo primo progetto!"
   },
   "blog": {
     "title": "Sezione Blog",
@@ -359,7 +351,6 @@
     "selectImage": "Seleziona Immagine",
     "syntaxHighlight": "Evidenzia testo in viola",
     "syntaxImage": "Immagini: separa alt e blurhash con un trattino",
-    "previewPost": "Anteprima Post",
     "translationTitleLabel": "Titolo",
     "translationTitlePlaceholder": "es. Blog",
     "translationSubtitleLabel": "Sottotitolo",
@@ -384,9 +375,7 @@
     "searchbarPlaceholderLabel": "Segnaposto Barra di Ricerca",
     "postsTitle": "Post Blog",
     "addBlogPost": "Aggiungi Post Blog",
-    "noBlogPosts": "Nessun post trovato. Crea il tuo primo post!",
-    "previewTitle": "Anteprima Sezione Blog",
-    "postPreviewTitle": "Anteprima Post"
+    "noBlogPosts": "Nessun post trovato. Crea il tuo primo post!"
   },
   "contacts": {
     "title": "Sezione Contatti",
@@ -401,8 +390,7 @@
     "iconNameLabel": "Nome Icona",
     "iconNamePlaceholder": "es. linkedin",
     "linkLabel": "Link",
-    "linkPlaceholder": "https://linkedin.com/in/...",
-    "previewTitle": "Anteprima Sezione Contatti"
+    "linkPlaceholder": "https://linkedin.com/in/..."
   },
   "layout": {
     "title": "Layout",
@@ -433,8 +421,7 @@
     "footerVatNumberLabel": "Partita IVA",
     "footerDefaultsNote": "Entrambi i campi sono opzionali. Lascia vuoto un campo per mantenere il testo del sito: Okazakee per il nome, 02863310815 per la partita IVA.",
     "errorFetch": "Impossibile caricare le impostazioni del layout",
-    "errorAnchors": "Impossibile salvare gli ancoraggi di navigazione",
-    "previewTitle": "Anteprima Layout"
+    "errorAnchors": "Impossibile salvare gli ancoraggi di navigazione"
   },
   "privacy": {
     "title": "Editor Privacy Policy",

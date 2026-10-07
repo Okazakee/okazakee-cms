@@ -1,10 +1,9 @@
 /**
  * CMS-local cache invalidation for committed mutations.
  *
- * The CMS caches Supabase reads in its own Next Cache (Cache Components):
- * `getTranslationsSupabase` (src/utils/getData.ts) tags its result with
- * `cacheTags.translations` and is used by the CMS shell and previews. After a
- * committed mutation the CMS must invalidate BOTH:
+ * A CMS read that caches a Supabase result in its own Next Cache (Cache
+ * Components) tags it with a `cacheTags` entry, so after a committed mutation
+ * the CMS must invalidate BOTH:
  *
  * - its OWN local `'use cache'` entries — via `updateTag()` from the Server
  *   Action (immediate, same-request freshness for read-your-own-writes);

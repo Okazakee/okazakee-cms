@@ -15,8 +15,6 @@ import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { CareerPreview } from '@/components/common/cms/previews/CareerPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
@@ -78,7 +76,6 @@ export default function CareerSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [mode, setMode] = useState<FormMode>('list');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -100,7 +97,6 @@ export default function CareerSection() {
   });
 
   const {
-    translations,
     isDirty: transDirty,
     isLoading: transLoading,
     error: transError,
@@ -687,7 +683,6 @@ export default function CareerSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
@@ -844,18 +839,6 @@ export default function CareerSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('career.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'career-section',
-          drafts: translations,
-        }}
-      >
-        <CareerPreview entries={entries} />
-      </PreviewModal>
     </fieldset>
   );
 }

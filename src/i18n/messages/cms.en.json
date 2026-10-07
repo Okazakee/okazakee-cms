@@ -64,7 +64,6 @@
     "cancel": "Cancel",
     "apply": "Apply",
     "applyChanges": "Apply Changes",
-    "preview": "Preview",
     "planned": "Planned",
     "delete": "Delete",
     "edit": "Edit",
@@ -163,7 +162,6 @@
     "errorDownloadImage": "Failed to download image",
     "errorUpdateHero": "Failed to update hero section",
     "successUpdate": "Hero section updated successfully!",
-    "previewTitle": "Hero Section Preview",
     "displaySection": "Portrait and animation",
     "shapeLabel": "Portrait shape",
     "shapeHint": "Pebble is the original outline; the other presets clip with the site's own radii and clip-path utilities.",
@@ -181,7 +179,6 @@
       "all": "All roles"
     },
     "typewriterHint": "The chosen role is typed out on the website. Visitors who ask for reduced motion always see the full text.",
-    "typewriterPreviewNote": "Typewriter (static in preview)",
     "addRole": "Add role",
     "removeRole": "Remove role",
     "rolesHint": "Roles are an ordered list. While the list is empty the website falls back to the single Role field."
@@ -211,8 +208,7 @@
     "errorRequiredFields": "Please fill in all required fields",
     "errorIconUrl": "Please enter an icon URL",
     "errorInvalidLink": "Please enter a valid http(s) link",
-    "errorCategoryName": "Category name is required",
-    "previewTitle": "Skills Section Preview"
+    "errorCategoryName": "Category name is required"
   },
   "career": {
     "title": "Career Section",
@@ -265,8 +261,7 @@
     "creating": "Creating...",
     "noCareerEntries": "No career entries found. Create your first career entry!",
     "errorNoLogo": "Please select a logo for the career entry",
-    "errorFetch": "Failed to fetch career data",
-    "previewTitle": "Career Section Preview"
+    "errorFetch": "Failed to fetch career data"
   },
   "portfolio": {
     "title": "Portfolio Section",
@@ -308,7 +303,6 @@
     "selectImage": "Select Image",
     "syntaxHighlight": "Highlight text in violet",
     "syntaxImage": "Images: split alt and blurhash with a dash",
-    "previewPost": "Preview Post",
     "translationTitleLabel": "Title",
     "translationTitlePlaceholder": "e.g., Portfolio",
     "translationSubtitleLabel": "Subtitle",
@@ -333,9 +327,7 @@
     "searchbarPlaceholderLabel": "Searchbar Placeholder",
     "postsTitle": "Portfolio Posts",
     "addPortfolioPost": "Add Portfolio Post",
-    "noPortfolioPosts": "No portfolio posts found. Create your first portfolio post!",
-    "previewTitle": "Portfolio Section Preview",
-    "postPreviewTitle": "Post Preview"
+    "noPortfolioPosts": "No portfolio posts found. Create your first portfolio post!"
   },
   "blog": {
     "title": "Blog Section",
@@ -359,7 +351,6 @@
     "selectImage": "Select Image",
     "syntaxHighlight": "Highlight text in violet",
     "syntaxImage": "Images: split alt and blurhash with a dash",
-    "previewPost": "Preview Post",
     "translationTitleLabel": "Title",
     "translationTitlePlaceholder": "e.g., Blog",
     "translationSubtitleLabel": "Subtitle",
@@ -384,9 +375,7 @@
     "searchbarPlaceholderLabel": "Searchbar Placeholder",
     "postsTitle": "Blog Posts",
     "addBlogPost": "Add Blog Post",
-    "noBlogPosts": "No blog posts found. Create your first blog post!",
-    "previewTitle": "Blog Section Preview",
-    "postPreviewTitle": "Post Preview"
+    "noBlogPosts": "No blog posts found. Create your first blog post!"
   },
   "contacts": {
     "title": "Contacts Section",
@@ -401,8 +390,7 @@
     "iconNameLabel": "Icon Name",
     "iconNamePlaceholder": "e.g., linkedin",
     "linkLabel": "Link",
-    "linkPlaceholder": "https://linkedin.com/in/...",
-    "previewTitle": "Contacts Section Preview"
+    "linkPlaceholder": "https://linkedin.com/in/..."
   },
   "layout": {
     "title": "Layout",
@@ -433,8 +421,7 @@
     "footerVatNumberLabel": "VAT number",
     "footerDefaultsNote": "Both fields are optional. Leave one empty to keep the website's own text: Okazakee for the name, 02863310815 for the VAT number.",
     "errorFetch": "Failed to load the layout settings",
-    "errorAnchors": "Failed to save the navigation anchors",
-    "previewTitle": "Layout Preview"
+    "errorAnchors": "Failed to save the navigation anchors"
   },
   "privacy": {
     "title": "Privacy Policy Editor",

@@ -1,6 +1,5 @@
 'use client';
 
-import { Eye, EyeOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
@@ -10,7 +9,6 @@ import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { MarkdownRenderer } from '@/components/layout/MarkdownRenderer';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
@@ -28,7 +26,6 @@ export default function PrivacyPolicySection() {
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
   const isDirty = enMarkdown !== original.en || itMarkdown !== original.it;
@@ -145,18 +142,6 @@ export default function PrivacyPolicySection() {
 
       <div className="flex items-center justify-between gap-2">
         <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
-        <button
-          type="button"
-          onClick={() => setShowPreview((p) => !p)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-surface-card hover:bg-surface-raised text-text-main rounded-lg transition-colors"
-        >
-          {showPreview ? (
-            <EyeOff className="w-4 h-4" />
-          ) : (
-            <Eye className="w-4 h-4" />
-          )}
-          {showPreview ? 'Hide Preview' : 'Show Preview'}
-        </button>
       </div>
 
       <div>
@@ -171,7 +156,7 @@ export default function PrivacyPolicySection() {
             else setItMarkdown(e.target.value);
           }}
           className={textareaClass}
-          rows={showPreview ? 12 : 20}
+          rows={20}
           placeholder={
             activeLocale === 'en'
               ? '# Privacy Policy'
@@ -179,19 +164,6 @@ export default function PrivacyPolicySection() {
           }
         />
       </div>
-
-      {showPreview && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6">
-          <h3 className="text-lg font-bold text-accent-violet mb-4">
-            Live Preview
-          </h3>
-          <div className="prose dark:prose-invert max-w-none bg-surface-base rounded-lg p-4 md:p-6 border border-border-subtle ">
-            <MarkdownRenderer
-              markdown={activeLocale === 'en' ? enMarkdown : itMarkdown}
-            />
-          </div>
-        </div>
-      )}
 
       <ConfirmDialog
         isOpen={showConfirmRevert}
