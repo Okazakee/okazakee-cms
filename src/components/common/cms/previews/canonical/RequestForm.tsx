@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useLocale, useMessages, useTranslations } from 'next-intl';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
 import { ErrorDiv } from '@/components/common/ErrorDiv';
 import { getLayoutCopy } from './layoutCopy';
 
@@ -34,11 +35,20 @@ function RequestFormPreviewInner() {
 
   const fieldClass =
     'w-full rounded-lg border border-border-subtle bg-surface-base px-3 py-2.5 font-mono text-xs text-text-main placeholder:text-text-dim focus:border-accent-violet/60 focus:outline-none';
-  // Mock's select: native appearance off, a chevron 8px from the right edge
-  // and a 16px line box (see .request-select in globals.css).
-  const selectClass = `${fieldClass} request-select`;
   const labelClass =
     'mb-2 block font-mono text-[11px] uppercase tracking-[0.08em] text-text-dim';
+  // The static preview mirrors the site form's choice controls: the first
+  // option is the stored default, so the closed trigger shows its label.
+  const choice = (key: string) => {
+    const items = options(key).map((option) => ({
+      value: option,
+      label: option,
+    }));
+    return { options: items, value: items[0]?.value ?? '' };
+  };
+  const typeChoice = choice('typeOptions');
+  const budgetChoice = choice('budgetOptions');
+  const timelineChoice = choice('timelineOptions');
 
   return (
     <div className="relative mt-14 overflow-hidden rounded-2xl border border-border-subtle bg-surface-card p-6 sm:p-8">
@@ -108,31 +118,37 @@ function RequestFormPreviewInner() {
           <label className={labelClass} htmlFor="request-type">
             {tr('type')}
           </label>
-          <select className={selectClass} id="request-type" name="type">
-            {options('typeOptions').map((option) => (
-              <option key={option}>{option}</option>
-            ))}
-          </select>
+          <Dropdown
+            id="request-type"
+            value={typeChoice.value}
+            onChange={() => {}}
+            options={typeChoice.options}
+            triggerClassName={fieldClass}
+          />
         </div>
         <div>
           <label className={labelClass} htmlFor="request-budget">
             {tr('budget')}
           </label>
-          <select className={selectClass} id="request-budget" name="budget">
-            {options('budgetOptions').map((option) => (
-              <option key={option}>{option}</option>
-            ))}
-          </select>
+          <Dropdown
+            id="request-budget"
+            value={budgetChoice.value}
+            onChange={() => {}}
+            options={budgetChoice.options}
+            triggerClassName={fieldClass}
+          />
         </div>
         <div className="sm:col-span-2">
           <label className={labelClass} htmlFor="request-timeline">
             {tr('timeline')}
           </label>
-          <select className={selectClass} id="request-timeline" name="timeline">
-            {options('timelineOptions').map((option) => (
-              <option key={option}>{option}</option>
-            ))}
-          </select>
+          <Dropdown
+            id="request-timeline"
+            value={timelineChoice.value}
+            onChange={() => {}}
+            options={timelineChoice.options}
+            triggerClassName={fieldClass}
+          />
         </div>
         <div className="sm:col-span-2">
           <label className={labelClass} htmlFor="request-body">

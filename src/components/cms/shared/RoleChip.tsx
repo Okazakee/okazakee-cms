@@ -1,4 +1,4 @@
-import { ChevronDown } from 'lucide-react';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
 
 /**
  * Role pill for an allowlisted CMS user.
@@ -33,30 +33,27 @@ export function RoleSelect({
   onChange,
   disabled,
   editorDisabled,
+  label,
 }: {
   cmsRole: CmsRole;
   labels: RoleChipLabels;
   onChange: (role: CmsRole) => void;
   disabled?: boolean;
   editorDisabled?: boolean;
+  label?: string;
 }) {
   return (
-    <span className="relative inline-flex items-center">
-      <select
-        value={cmsRole}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value as CmsRole)}
-        className={`${roleChipClass(cmsRole)} cursor-pointer appearance-none pr-5 disabled:cursor-not-allowed disabled:opacity-50`}
-      >
-        <option value="editor" disabled={editorDisabled}>
-          {labels.editor}
-        </option>
-        <option value="admin">{labels.admin}</option>
-      </select>
-      <ChevronDown
-        aria-hidden="true"
-        className="pointer-events-none absolute right-1 h-3 w-3 opacity-70"
-      />
-    </span>
+    <Dropdown
+      className="relative inline-block"
+      triggerClassName={roleChipClass(cmsRole)}
+      label={label}
+      value={cmsRole}
+      disabled={disabled}
+      onChange={(value) => onChange(value as CmsRole)}
+      options={[
+        { value: 'editor', label: labels.editor, disabled: editorDisabled },
+        { value: 'admin', label: labels.admin },
+      ]}
+    />
   );
 }

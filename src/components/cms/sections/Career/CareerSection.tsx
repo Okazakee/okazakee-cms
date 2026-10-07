@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { careerActions } from '@/app/actions/cms/sections/careerActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
@@ -579,23 +580,25 @@ export default function CareerSection() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label
+              htmlFor="career-remote"
+              className="block text-sm font-medium text-text-main mb-1"
+            >
               {t('career.remoteTypeLabel')}
             </label>
-            <select
+            <Dropdown
+              id="career-remote"
               value={formData.remote}
-              onChange={(e) =>
-                setFormData((p) => ({
-                  ...p,
-                  remote: e.target.value as RemoteType,
-                }))
+              onChange={(value) =>
+                setFormData((p) => ({ ...p, remote: value as RemoteType }))
               }
-              className={inputClass}
-            >
-              <option value="full">{t('career.remoteFullOption')}</option>
-              <option value="hybrid">{t('career.remoteHybridOption')}</option>
-              <option value="onSite">{t('career.remoteOnSiteOption')}</option>
-            </select>
+              triggerClassName={inputClass}
+              options={[
+                { value: 'full', label: t('career.remoteFullOption') },
+                { value: 'hybrid', label: t('career.remoteHybridOption') },
+                { value: 'onSite', label: t('career.remoteOnSiteOption') },
+              ]}
+            />
           </div>
           <TranslationField
             label={t('career.locationEnLabel')}

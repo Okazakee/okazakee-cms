@@ -17,6 +17,7 @@ import {
 } from '@/app/actions/cms/sections/blogActions';
 import { CopyEditor } from '@/components/cms/sections/Copy/CopySections';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
@@ -540,23 +541,28 @@ export default function BlogSection() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label
+                htmlFor="blog-author"
+                className="block text-sm font-medium text-text-main mb-1"
+              >
                 Author
               </label>
-              <select
+              <Dropdown
+                id="blog-author"
                 value={formData.author_id}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, author_id: e.target.value }))
+                onChange={(value) =>
+                  setFormData((p) => ({ ...p, author_id: value }))
                 }
-                className={inputClass}
-              >
-                <option value="">Select</option>
-                {authors.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.display_name}
-                  </option>
-                ))}
-              </select>
+                placeholder="Select"
+                triggerClassName={inputClass}
+                options={[
+                  { label: 'Select', value: '' },
+                  ...authors.map((a) => ({
+                    value: a.id,
+                    label: a.display_name,
+                  })),
+                ]}
+              />
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">

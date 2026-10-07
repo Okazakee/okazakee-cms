@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
@@ -359,23 +360,22 @@ export default function HeroSection() {
         </h2>
 
         <div>
-          <label className="block text-sm font-medium text-text-main mb-1">
+          <label
+            htmlFor="hero-shape"
+            className="block text-sm font-medium text-text-main mb-1"
+          >
             {t('hero.shapeLabel')}
           </label>
-          <select
-            aria-label={t('hero.shapeLabel')}
-            className={inputClass}
-            onChange={(event) =>
-              setShape(normalizeHeroShape(event.target.value))
-            }
+          <Dropdown
+            id="hero-shape"
+            triggerClassName={inputClass}
+            onChange={(value) => setShape(normalizeHeroShape(value))}
             value={shape}
-          >
-            {heroShapes.map((preset) => (
-              <option key={preset} value={preset}>
-                {t(`hero.shapeOptions.${preset}`)}
-              </option>
-            ))}
-          </select>
+            options={heroShapes.map((preset) => ({
+              value: preset,
+              label: t(`hero.shapeOptions.${preset}`),
+            }))}
+          />
           <p className="mt-2 text-xs text-text-muted">{t('hero.shapeHint')}</p>
         </div>
 
@@ -390,24 +390,25 @@ export default function HeroSection() {
         </label>
 
         <div>
-          <label className="block text-sm font-medium text-text-main mb-1">
+          <label
+            htmlFor="hero-typewriter-target"
+            className="block text-sm font-medium text-text-main mb-1"
+          >
             {t('hero.typewriterTargetLabel')}
           </label>
-          <select
-            aria-label={t('hero.typewriterTargetLabel')}
-            className={inputClass}
+          <Dropdown
+            id="hero-typewriter-target"
+            triggerClassName={inputClass}
             disabled={!typewriter}
-            onChange={(event) =>
-              setTypewriterTarget(normalizeTypewriterTarget(event.target.value))
+            onChange={(value) =>
+              setTypewriterTarget(normalizeTypewriterTarget(value))
             }
             value={typewriterTarget}
-          >
-            {typewriterTargets.map((target) => (
-              <option key={target} value={target}>
-                {t(`hero.typewriterTargets.${target}`)}
-              </option>
-            ))}
-          </select>
+            options={typewriterTargets.map((target) => ({
+              value: target,
+              label: t(`hero.typewriterTargets.${target}`),
+            }))}
+          />
           <p className="mt-2 text-xs text-text-muted">
             {t('hero.typewriterHint')}
           </p>

@@ -295,18 +295,6 @@
   white-space: pre;
 }
 
-/* Request form select (canon §5.4): the mock pairs `appearance: none` with a
-   chevron drawn 8px from the right edge and a 16px line box, which the native
-   control cannot reproduce. */
-.request-select {
-  appearance: none;
-  line-height: 1rem;
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
-  background-position: calc(100% - 8px) 50%;
-  background-repeat: no-repeat;
-  background-size: 18px 18px;
-}
-
 /* Request form consent checkbox (canon §5.4): the mock pairs
    `appearance: none` with a 1px subtle border and the forms-plugin
    checkmark, so the native control is replaced. */

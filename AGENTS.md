@@ -39,7 +39,8 @@ src/
                                   # requests (project-request inbox)
   components/
     cms/sections/                 # Editor components per section
-    cms/shared/                   # Shared CMS UI (ErrorBanner, FileDropzone, ...)
+    cms/shared/                   # Shared CMS UI (ErrorBanner, FileDropzone,
+                                  # Dropdown, ...)
     common/cms/                   # PreviewModal, SidePanel, AccountSection, previews
     common/                       # Public-section components reused for previews
     layout/                       # ThemeToggle, MarkdownRenderer, ...

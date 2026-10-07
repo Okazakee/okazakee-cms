@@ -314,6 +314,13 @@ so a new section cannot drift into a private look:
   `w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-sm
   text-text-main focus:border-accent-violet focus:outline-none`. Borders are
   `border-subtle` until the field is interacted with, never `accent-violet` at rest.
+- **Choice controls** — every native `<select>` (author, remote type, hero shape and
+  typewriter target, button kind, role) renders through the shared `Dropdown`
+  (`@/components/cms/shared/Dropdown`) so a choice wears the field canon and reads
+  like its sibling inputs. The menu is portalled to `document.body`, so a section's
+  `overflow` can never clip it; the highlighted row is `accent-violet/10`, the
+  selected row `accent-violet-light` + a check, and `triggerClassName` replaces the
+  trigger chrome (the role pill keeps its coloured pill).
 - **Actions** — primary `flex items-center gap-1.5 rounded-lg bg-accent-violet-deep
   px-3 py-1.5 text-sm text-white hover:bg-accent-violet`; neutral `rounded-lg
   bg-surface-base px-3 py-1.5 text-sm text-text-main hover:bg-surface-raised`;

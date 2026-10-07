@@ -310,6 +310,7 @@ export default function UsersSection() {
             <RoleSelect
               cmsRole={newUserRole}
               labels={roleLabels}
+              label={t('users.roleLabel')}
               onChange={(r) => {
                 setNewUserRole(r);
                 setError(null);
@@ -562,6 +563,7 @@ export default function UsersSection() {
                   <RoleSelect
                     cmsRole={au.role}
                     labels={roleLabels}
+                    label={t('users.roleLabel')}
                     editorDisabled={isLastAdmin}
                     disabled={updatingRoleFor === au.id}
                     onChange={(nr) => {
