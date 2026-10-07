@@ -381,6 +381,17 @@ urgent it feels.
   `WEBSITE_REVALIDATION_URL`, `WEBSITE_REVALIDATION_SECRET`,
   `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_LOCALES`, `NEXT_PUBLIC_DEFAULT_LOCALE`.
   Full list in `.env.local.example`.
+- **Local values live in the Vercel project's Development environment**, pulled
+  with `vercel env pull` (it merges: keys the target defines are overwritten,
+  local-only keys are kept). `.env.development.local` — loaded before
+  `.env.local`, ignored by `next build`/`next start` — is the guard against
+  pulling another environment: `--environment=production` overwrites
+  `WEBSITE_REVALIDATION_URL` with the deployed origin and drops
+  `NEXT_PUBLIC_SUPABASE_DB_SCHEMA`, after which `src/config/shared.ts` falls back
+  to `public` and every local edit writes production content. With the deployed
+  revalidation origin, a local edit purges production's cache while the local
+  public site keeps serving the pre-edit render — the symptom is a CMS value
+  that appears not to be used at all.
 - **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
   (`src/utils/cms/devMigrations.ts`;
   `src/libs/cms/devMigrations/devCheck.ts`; registry

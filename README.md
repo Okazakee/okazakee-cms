@@ -103,8 +103,10 @@ CMS (this repo) ──writes──▶ Supabase ◀──reads── Public websi
 - **This repo** owns editing, auth flows, uploads, previews and revalidation
   events.
 - **The public repo** owns rendering and caching (Next Cache Components).
-  Revalidation uses `revalidateTag(tag, 'max')` there — never `updateTag()`
-  across applications (Server-Action-only).
+  Revalidation uses `revalidateTag(tag, { expire: 0 })` there — immediate
+  expiry for an external caller, so a committed edit is never followed by a
+  stale render. `updateTag()` is never used across applications
+  (Server-Action-only, unavailable to an incoming HTTP request).
 
 ## Getting Started
 
@@ -143,6 +145,38 @@ Public-site revalidation (production):
 | `WEBSITE_REVALIDATION_URL` | `https://<public>/api/internal/content-revalidate` |
 | `WEBSITE_REVALIDATION_SECRET` | Must equal the public site's `CONTENT_REVALIDATION_SECRET` |
 
+### Local development: the Development environment
+
+Local values live in the Vercel project's **Development** environment, so a
+checkout is configured with `vercel env pull` alone:
+
+| Project | Development values that drive the local loop |
+| --- | --- |
+| `okazakee-cms` | `WEBSITE_REVALIDATION_URL=http://localhost:3000/api/internal/content-revalidate`, `NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging` |
+| `okazakee-ws` | `CONTENT_REVALIDATION_SECRET` (the same value as the CMS's `WEBSITE_REVALIDATION_SECRET`), `NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging` |
+
+`vercel env pull` **merges**: keys the pulled environment defines are
+overwritten, keys that exist only locally are kept. The hazard is pulling the
+*wrong* environment — `vercel env pull --environment=production` overwrites
+`WEBSITE_REVALIDATION_URL` with the deployed origin and drops
+`NEXT_PUBLIC_SUPABASE_DB_SCHEMA`, so `src/config/shared.ts` falls back to
+`public` and local edits are written straight into production content.
+
+**`.env.development.local`** guards against that: Next.js loads it before
+`.env.local`, and `next build` / `next start` ignore it.
+
+```bash
+# .env.development.local
+NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging
+WEBSITE_REVALIDATION_URL=http://localhost:3000/api/internal/content-revalidate
+```
+
+`WEBSITE_REVALIDATION_URL` must name the public site you are actually looking
+at. With the deployed origin, a local edit signs its invalidation event for
+production, the local `okazakee-ws` cache is never purged, and the site keeps
+serving the pre-edit render — hero portrait shape, copy, posts — until its own
+cache window lapses, which looks exactly like "the CMS value is not used here".
+
 ### Supabase Setup
 
 **Tables:** `user_profiles`, `cms_allowed_users`, `blog_posts`,
@@ -180,7 +214,9 @@ NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging
 `src/config/shared.ts` reads that variable and **falls back to `public`** when it
 is unset — there is no safe default, so an `.env.local` copied from a Vercel
 preview env (which omits it) points at production. Both this app and
-`okazakee-ws` must set it for local work to stay off production.
+`okazakee-ws` must set it for local work to stay off production, and it belongs
+in `.env.development.local` so a `vercel env pull` cannot drop it (see
+[Local development overrides](#local-development-overrides-envdevelopmentlocal)).
 
 `dev_staging` must also be listed in the project's **exposed schemas**
 (Dashboard → Data API settings); otherwise PostgREST answers
