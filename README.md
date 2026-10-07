@@ -33,7 +33,7 @@ rendering and caching.
   blog/portfolio + account. Every mutation is authorized server-side; the UI
   never is the security boundary
 - **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Request
-  Form copy, Requests, Layout (header logos and anchors, résumé PDFs, footer
+  Form copy, Requests, Layout (header logos, résumé PDFs, footer
   identity), Website Copy, Privacy Policy, Users, Account — each with EN/IT
   translations and draft/publish state. *Requests* is
   read-only and has no intake path yet: the public form does not submit, so
@@ -63,8 +63,10 @@ rendering and caching.
 The **Layout** section (admin only) is the one owner of the page chrome and of
 the résumé files. It groups three independent editors:
 
-- **Header** — the dark/light logo pair and the six navigation anchors, both
-  columns of the single `site_settings` row.
+- **Header** — the dark/light logo pair, both columns of the single
+  `site_settings` row. The six nav buttons themselves are site-side: their
+  labels are frozen copy in the site repo and each links to its own section id,
+  so nothing about the nav is stored or editable here.
 - **Résumé** — the EN/IT résumé PDFs, which moved here from Contacts; Contacts
   now edits contact links only. Persistence is unchanged: the files still live
   in `hero_section.resume_en` / `resume_it` and are uploaded through
@@ -185,7 +187,7 @@ cache window lapses, which looks exactly like "the CMS value is not used here".
 **Storage bucket:** `website`.
 
 `site_settings` is a single row and holds everything the Layout section owns:
-the header logos, the navigation anchors and the footer identity. The
+the header logos and the footer identity. The
 `header`/`footer` namespaces are *not* in `i18n_translations` — that chrome is
 frozen in the website repository, so nothing here edits it any more.
 

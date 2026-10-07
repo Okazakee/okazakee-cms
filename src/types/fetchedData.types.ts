@@ -1,4 +1,3 @@
-import type { NavAnchorDraft } from '@/utils/cms/navAnchors';
 import type { PostButton as PortfolioPostButton } from '@/utils/cms/postButtons';
 
 export type HeroShape = 'pebble' | 'square' | 'rounded' | 'squircle';
@@ -29,17 +28,14 @@ export type HeroSettings = {
 
 /**
  * The single `site_settings` row as the CMS edits it. Every field is nullable:
- * a null logo means "keep the bundled asset" and a null anchor means "keep the
- * href the public site has always computed". A null footer field means "keep
- * the default the site already renders".
+ * a null logo means "keep the bundled asset" and a null footer field means
+ * "keep the default the site already renders".
  */
 export type SiteSettings = {
   /** Dark-theme logo URL; null renders the bundled asset. */
   header_logo_dark: string | null;
   /** Light-theme logo URL; null renders the bundled asset. */
   header_logo_light: string | null;
-  /** One anchor per nav item, index-aligned with `header.buttons.N`. */
-  nav_anchors: NavAnchorDraft[];
   /** Footer display name; null renders the site's default name. */
   footer_name: string | null;
   /**

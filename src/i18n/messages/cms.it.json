@@ -394,15 +394,12 @@
   },
   "layout": {
     "title": "Layout",
-    "subtitle": "Logo dell'intestazione, ancoraggi di navigazione, curriculum in PDF e identità del piè di pagina",
+    "subtitle": "Logo dell'intestazione, curriculum in PDF e identità del piè di pagina",
     "headerLogosTitle": "Logo Intestazione",
     "headerLogoDarkLabel": "Logo tema scuro",
     "headerLogoLightLabel": "Logo tema chiaro",
     "headerLogoStoredNote": "È pubblicato un logo personalizzato per questo tema. Rimuovendolo torna il logo predefinito del sito.",
     "headerLogoFallbackNote": "Nessun logo personalizzato: il sito mostra il suo logo predefinito per questo tema.",
-    "headerAnchorsLabel": "Ancoraggi di Navigazione",
-    "headerAnchorsNote": "Ogni link di navigazione punta a un ancoraggio nella home. Lascia un campo sul valore predefinito per mantenere il link attuale; svuota un ancoraggio personalizzato per ripristinarlo.",
-    "headerAnchorDefaultLabel": "Predefinito",
     "nav": {
       "home": "Home",
       "skills": "Competenze",
@@ -420,8 +417,7 @@
     "footerNameLabel": "Nome visualizzato",
     "footerVatNumberLabel": "Partita IVA",
     "footerDefaultsNote": "Entrambi i campi sono opzionali. Lascia vuoto un campo per mantenere il testo del sito: Okazakee per il nome, 02863310815 per la partita IVA.",
-    "errorFetch": "Impossibile caricare le impostazioni del layout",
-    "errorAnchors": "Impossibile salvare gli ancoraggi di navigazione"
+    "errorFetch": "Impossibile caricare le impostazioni del layout"
   },
   "privacy": {
     "title": "Editor Privacy Policy",

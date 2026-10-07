@@ -22,7 +22,7 @@ export const cacheTags = {
   posts: 'posts',
   resume: 'resume',
   heroSection: 'hero_section',
-  /** Header chrome: logos + nav anchors (the single `site_settings` row). */
+  /** Header chrome: the per-theme logos (the single `site_settings` row). */
   siteSettings: 'site-settings',
 } as const;
 

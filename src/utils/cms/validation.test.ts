@@ -4,6 +4,7 @@ import {
   isValidDate,
   isValidUrl,
   MAX_UPLOAD_SIZE_BYTES,
+  normalizeLogoUrl,
   sanitizeFilename,
   validateImageFile,
   validatePdfFile,
@@ -285,6 +286,21 @@ describe('isValidUrl', () => {
   it('rejects unparseable strings', () => {
     expect(isValidUrl('not a url')).toBe(false);
     expect(isValidUrl('example.com')).toBe(false);
+  });
+});
+
+describe('normalizeLogoUrl', () => {
+  it('keeps an absolute http(s) URL', () => {
+    expect(normalizeLogoUrl(' https://cdn.example.test/logo.webp ')).toBe(
+      'https://cdn.example.test/logo.webp'
+    );
+  });
+
+  it('treats blank and non-http values as unconfigured', () => {
+    expect(normalizeLogoUrl(null)).toBeNull();
+    expect(normalizeLogoUrl('  ')).toBeNull();
+    expect(normalizeLogoUrl('javascript:alert(1)')).toBeNull();
+    expect(normalizeLogoUrl('/local.png')).toBeNull();
   });
 });
 

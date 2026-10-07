@@ -13,12 +13,7 @@ import {
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import type { MutationResult } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
-import {
-  type NavAnchorDraft,
-  normalizeLogoUrl,
-  parseNavAnchorDrafts,
-  validateNavAnchors,
-} from '@/utils/cms/navAnchors';
+import { normalizeLogoUrl } from '@/utils/cms/validation';
 import { createClient } from '@/utils/supabase/server';
 
 /** The header logo variants; each theme resolves independently. */
@@ -28,13 +23,11 @@ type SiteSettingsOperation =
   | { type: 'GET' }
   | { type: 'UPLOAD_LOGO'; variant: LogoVariant; file: File }
   | { type: 'CLEAR_LOGO'; variant: LogoVariant }
-  | { type: 'UPDATE_ANCHORS'; anchors: NavAnchorDraft[] }
   | { type: 'UPDATE_FOOTER'; name: string; vatNumber: string };
 
 export type SiteSettingsRow = {
   header_logo_dark: string | null;
   header_logo_light: string | null;
-  nav_anchors: NavAnchorDraft[];
   /** Footer display name; null falls back to the site's default name. */
   footer_name: string | null;
   /**
@@ -55,7 +48,7 @@ const SETTINGS_ROW_ID = 1;
  * edit, because the committed row is the only evidence of the write.
  */
 const settingsColumns =
-  'header_logo_dark, header_logo_light, nav_anchors, footer_name, footer_vat_number';
+  'header_logo_dark, header_logo_light, footer_name, footer_vat_number';
 
 /** Blank (or non-text) footer input means "never configured". */
 function normalizeFooterText(value: unknown): string | null {
@@ -68,17 +61,14 @@ function toSettingsRow(data: unknown): SiteSettingsRow | null {
   const row = data as {
     header_logo_dark?: unknown;
     header_logo_light?: unknown;
-    nav_anchors?: unknown;
     footer_name?: unknown;
     footer_vat_number?: unknown;
   } | null;
   if (!row) return null;
 
-  const anchors = validateNavAnchors(row.nav_anchors ?? null);
   return {
     header_logo_dark: normalizeLogoUrl(row.header_logo_dark),
     header_logo_light: normalizeLogoUrl(row.header_logo_light),
-    nav_anchors: anchors.isValid ? anchors.anchors : [],
     footer_name: normalizeFooterText(row.footer_name),
     footer_vat_number: normalizeFooterText(row.footer_vat_number),
   };
@@ -109,8 +99,6 @@ export async function siteSettingsActions(
         return await uploadLogo(operation.variant, operation.file);
       case 'CLEAR_LOGO':
         return await clearLogo(operation.variant);
-      case 'UPDATE_ANCHORS':
-        return await updateAnchors(operation.anchors);
       case 'UPDATE_FOOTER':
         return await updateFooter(operation.name, operation.vatNumber);
       default:
@@ -248,52 +236,11 @@ async function clearLogo(variant: LogoVariant): Promise<SiteSettingsResult> {
 }
 
 /**
- * Writes the six anchors as one ordered jsonb array, index-aligned with
- * `header.buttons.N`. The whole row is upserted so an unrelated logo write is
- * never dropped by a partial update.
- */
-async function updateAnchors(
-  anchors: NavAnchorDraft[]
-): Promise<SiteSettingsResult> {
-  const validation = validateNavAnchors(anchors);
-  if (!validation.isValid) {
-    return { success: false, error: validation.error };
-  }
-
-  const admin = getAdminClient();
-  const previous = await readSettingsRow(admin);
-
-  const { data, error: commitError } = await admin
-    .from('site_settings')
-    .upsert({
-      ...previous,
-      id: SETTINGS_ROW_ID,
-      nav_anchors: validation.anchors,
-    })
-    .select(settingsColumns)
-    .single();
-
-  if (commitError || !data) {
-    return {
-      success: false,
-      error: commitError?.message ?? 'Failed to save the navigation anchors',
-    };
-  }
-
-  const revalidation = await invalidatePublicContent({
-    entity: 'settings',
-    operation: 'update',
-  });
-
-  return { success: true, data: toSettingsRow(data), revalidation };
-}
-
-/**
  * Writes the footer identity. Both values are text: the VAT number keeps its
  * leading zeros, and neither is parsed, so there is no country or checksum
  * rule to enforce. Blank input clears the field, which the site renders as its
  * own default. The whole row is upserted from the trusted read, so this never
- * drops an unrelated logo or anchor edit.
+ * drops an unrelated logo edit.
  */
 async function updateFooter(
   name: string,
@@ -348,7 +295,6 @@ async function readSettingsRow(
     toSettingsRow(data) ?? {
       header_logo_dark: null,
       header_logo_light: null,
-      nav_anchors: parseNavAnchorDrafts(null),
       footer_name: null,
       footer_vat_number: null,
     }

@@ -22,16 +22,10 @@ import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
 import type { SiteSettings } from '@/types/fetchedData.types';
-import {
-  type NavAnchorDraft,
-  type navItemIds,
-  parseNavAnchorDrafts,
-} from '@/utils/cms/navAnchors';
 
 const EMPTY_SETTINGS: SiteSettings = {
   header_logo_dark: null,
   header_logo_light: null,
-  nav_anchors: parseNavAnchorDrafts(null),
   footer_name: null,
   footer_vat_number: null,
 };
@@ -53,18 +47,18 @@ const footerFromSettings = (settings: SiteSettings): FooterDraft => ({
 });
 
 /**
- * Layout owns the chrome that frames the page: the per-theme logo, the anchor
- * each of the six fixed nav items points at, the résumé PDFs behind the hero
- * download button, and the footer identity (display name + VAT number).
+ * Layout owns the chrome that frames the page: the per-theme logo, the résumé
+ * PDFs behind the hero download button, and the footer identity (display name
+ * + VAT number).
  *
  * The header/footer chrome copy itself is frozen on the site and read from
  * local message files, so there is nothing to translate here — every field
  * below is data, not chrome wording.
  *
- * Each group (logos → anchors → footer → résumé) commits on its own and is
- * synchronised the moment it succeeds, so a later failure can never look like
- * the earlier writes were rolled back, and a retry never re-uploads a file
- * that already landed.
+ * Each group (logos → footer → résumé) commits on its own and is synchronised
+ * the moment it succeeds, so a later failure can never look like the earlier
+ * writes were rolled back, and a retry never re-uploads a file that already
+ * landed.
  */
 export function LayoutSection() {
   const t = useTranslations('cms');
@@ -75,12 +69,6 @@ export function LayoutSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState<SiteSettings>(EMPTY_SETTINGS);
   const settingsRef = useRef<SiteSettings>(settings);
-  const [anchors, setAnchors] = useState<NavAnchorDraft[]>(
-    EMPTY_SETTINGS.nav_anchors
-  );
-  const [savedAnchors, setSavedAnchors] = useState<NavAnchorDraft[]>(
-    EMPTY_SETTINGS.nav_anchors
-  );
   const [footer, setFooter] = useState<FooterDraft>(EMPTY_FOOTER);
   const [cleared, setCleared] = useState<Record<LogoVariant, boolean>>({
     dark: false,
@@ -108,14 +96,10 @@ export function LayoutSection() {
     setSettings(next);
   }, []);
 
-  const anchorsDirty = anchors.some(
-    (entry, index) => entry.anchor !== savedAnchors[index]?.anchor
-  );
   const isFooterDirty =
     footer.name !== (settings.footer_name ?? '') ||
     footer.vatNumber !== (settings.footer_vat_number ?? '');
   const isDirty =
-    anchorsDirty ||
     isFooterDirty ||
     cleared.dark ||
     cleared.light ||
@@ -135,8 +119,6 @@ export function LayoutSection() {
       if (!r.success) throw new Error(r.error || 'Failed to fetch');
       const server = (r.data as SiteSettings | null) ?? EMPTY_SETTINGS;
       commitSettings(server);
-      setAnchors(server.nav_anchors);
-      setSavedAnchors(server.nav_anchors);
       setFooter(footerFromSettings(server));
       setCleared({ dark: false, light: false });
     } catch (err) {
@@ -204,25 +186,7 @@ export function LayoutSection() {
         setCleared((previous) => ({ ...previous, [variant]: false }));
       }
 
-      // 2. Anchors.
-      if (anchorsDirty) {
-        const result = await siteSettingsActions({
-          type: 'UPDATE_ANCHORS',
-          anchors,
-        });
-        if (!result.success) {
-          failures.push(result.error || t('layout.errorAnchors'));
-        } else {
-          warning = revalidationWarning(result) ?? warning;
-          const committed = result.data as SiteSettings | undefined;
-          if (committed) commitSettings(committed);
-          const nextAnchors = committed?.nav_anchors ?? anchors;
-          setAnchors(nextAnchors);
-          setSavedAnchors(nextAnchors);
-        }
-      }
-
-      // 3. Footer identity.
+      // 2. Footer identity.
       if (isFooterDirty) {
         const result = await siteSettingsActions({
           type: 'UPDATE_FOOTER',
@@ -239,7 +203,7 @@ export function LayoutSection() {
         }
       }
 
-      // 4. Résumé PDFs. Only the supplied files are sent, so the untouched
+      // 3. Résumé PDFs. Only the supplied files are sent, so the untouched
       //    language keeps its stored URL.
       if (resumeEnUpload.file || resumeItUpload.file) {
         const result = await heroActions({
@@ -295,8 +259,6 @@ export function LayoutSection() {
       setBusy(false);
     }
   }, [
-    anchors,
-    anchorsDirty,
     cleared,
     commitSettings,
     darkUpload,
@@ -312,7 +274,6 @@ export function LayoutSection() {
 
   const revert = () => {
     setError(null);
-    setAnchors(savedAnchors);
     setFooter(footerFromSettings(settingsRef.current));
     setCleared({ dark: false, light: false });
     darkUpload.clearFile();
@@ -329,13 +290,6 @@ export function LayoutSection() {
       resumeItUpload.setFileFromUrl(heroSection.resume_it);
   };
   useSectionCallbacks('layout', publish, revert);
-
-  const setAnchor = (index: number, anchor: string) =>
-    setAnchors((previous) =>
-      previous.map((entry, position) =>
-        position === index ? { ...entry, anchor } : entry
-      )
-    );
 
   const logoDropzone = (
     variant: LogoVariant,
@@ -466,42 +420,6 @@ export function LayoutSection() {
             )}
           </div>
         )}
-      </section>
-
-      <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
-        <h2 className="mb-1 text-lg font-bold text-text-white">
-          {t('layout.headerAnchorsLabel')}
-        </h2>
-        <p className="mb-5 text-xs leading-relaxed text-text-dim">
-          {t('layout.headerAnchorsNote')}
-        </p>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {anchors.map((entry, index) => {
-            const id = entry.id as (typeof navItemIds)[number];
-            // An anchor equal to the item id is the un-arranged default, so the
-            // site renders exactly the href it always has.
-            const isDefault = entry.anchor === id;
-            return (
-              <label
-                className="block space-y-2 text-xs text-text-muted"
-                key={entry.id}
-              >
-                <span>{t(`layout.nav.${id}`)}</span>
-                <input
-                  className="min-h-11 w-full rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main focus:border-accent-violet focus:outline-none"
-                  onChange={(event) => setAnchor(index, event.target.value)}
-                  type="text"
-                  value={entry.anchor}
-                />
-                {isDefault && (
-                  <span className="block font-mono text-[11px] text-text-dim">
-                    {t('layout.headerAnchorDefaultLabel')}: #{id}
-                  </span>
-                )}
-              </label>
-            );
-          })}
-        </div>
       </section>
 
       <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">

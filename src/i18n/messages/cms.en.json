@@ -394,15 +394,12 @@
   },
   "layout": {
     "title": "Layout",
-    "subtitle": "Header logos, navigation anchors, résumé PDFs and footer identity",
+    "subtitle": "Header logos, résumé PDFs and footer identity",
     "headerLogosTitle": "Header Logo",
     "headerLogoDarkLabel": "Dark theme logo",
     "headerLogoLightLabel": "Light theme logo",
     "headerLogoStoredNote": "A custom logo is published for this theme. Removing it restores the built-in logo.",
     "headerLogoFallbackNote": "No custom logo: the website shows its built-in logo for this theme.",
-    "headerAnchorsLabel": "Navigation Anchors",
-    "headerAnchorsNote": "Each navigation link points at an anchor on the home page. Leave a field on its default to keep the link the website already builds; clear a custom anchor to restore it.",
-    "headerAnchorDefaultLabel": "Default",
     "nav": {
       "home": "Home",
       "skills": "Skills",
@@ -420,8 +417,7 @@
     "footerNameLabel": "Display name",
     "footerVatNumberLabel": "VAT number",
     "footerDefaultsNote": "Both fields are optional. Leave one empty to keep the website's own text: Okazakee for the name, 02863310815 for the VAT number.",
-    "errorFetch": "Failed to load the layout settings",
-    "errorAnchors": "Failed to save the navigation anchors"
+    "errorFetch": "Failed to load the layout settings"
   },
   "privacy": {
     "title": "Privacy Policy Editor",

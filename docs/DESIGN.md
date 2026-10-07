@@ -343,7 +343,7 @@ so a new section cannot drift into a private look:
   Publish All and the draft dot still reach it. Frozen copy (§8) is not editable here
   at all, and the header and footer have no copy editor for the same reason — both
   namespaces are frozen in the site — so everything an editor *may* change about the
-  chrome (logos, anchors, résumé PDFs, footer identity) is grouped in the single
+  chrome (logos, résumé PDFs, footer identity) is grouped in the single
   **Layout** section.
 - **Copy editors are addressed by their namespace key**, never by DOM position. A
   section that embeds a `CopyEditor` must give its own body control an `aria-label`,
@@ -355,7 +355,9 @@ so a new section cannot drift into a private look:
 ## 6. Page patterns
 
 - **Home**: hero → about → skills → career → portfolio → blog → contacts (+ request
-  form). Nav anchors map to these.
+  form). The six nav buttons are site-side: their labels are frozen copy in the
+  site repo and each links to its own section id, so nothing about the nav is
+  stored or editable here.
 - **List pages**: section header, search field, then cards. Search states (empty,
   rate-limited) still need designing.
 - **Post detail** (one route, both post types, blocks rendered conditionally):
@@ -407,8 +409,8 @@ Invented copy is a defect, not a placeholder.
 | post buttons | `portfolio_posts.buttons` — an ordered jsonb array of `{ kind, url, label? }`, `kind` ∈ `website` \| `source` \| `demo` \| `store` \| `fdroid` \| `ios` \| `custom`. **Array order is render order.** The editor owns the order and the URL only: the label and icon of a preset belong to the public site, so `label` is read only for `custom` and is required there. `url` must be an absolute http(s) URL. Blog posts have no buttons — the column is portfolio-only |
 | legacy link columns | `website` / `source_link` / `demo_link` / `store_link` / `fdroid_link` / `ios_store_link` stay in the table but are no longer written. They are the fallback: a row with null/empty `buttons` renders from them (website, source, demo, store, fdroid, ios), which is what makes the migration a no-op for existing content. Migration `20261004111000_backfill_post_buttons.sql` populates `buttons` from them; dropping the columns is a separate, later decision |
 | author | `user_profiles` via `author_id` (`display_name`, `avatar_url`) |
-| chrome configuration | `site_settings` — one row: `header_logo_dark` / `header_logo_light` (absolute URL, NULL = the bundled `title-ws*.png` asset, resolved per theme), `nav_anchors`, and the footer identity (`footer_name`, `footer_vat_number`). These are configuration, not copy, so they live in their own table rather than in the `i18n_translations` jsonb, and every one of them is edited from the single **Layout** section |
-| nav anchors | `site_settings.nav_anchors` — an ordered jsonb array of `{ id, anchor }` where `id` ∈ `home` \| `skills` \| `career` \| `portfolio` \| `blog` \| `contacts`. **Written index-aligned with `header.buttons.N`, read by `id`.** `header.buttons` is frozen in the site, so that alignment is now a cross-repo contract: the array order must match the label order in `okazakee-ws/src/i18n/messages/site.{en,it}.json`, in **both** locales. `anchor` is a fragment-safe element id with no leading `#`; blank/omitted falls back to the item id, which reproduces the href this header has always rendered. The destinations and the sections' `id=` attributes stay site-side — an editor cannot retarget a nav item at another page |
+| chrome configuration | `site_settings` — one row: `header_logo_dark` / `header_logo_light` (absolute URL, NULL = the bundled `title-ws*.png` asset, resolved per theme) and the footer identity (`footer_name`, `footer_vat_number`). These are configuration, not copy, so they live in their own table rather than in the `i18n_translations` jsonb, and every one of them is edited from the single **Layout** section |
+| navigation | site-side only: the six nav buttons' labels are frozen copy in `okazakee-ws/src/i18n/messages/site.{en,it}.json`, and each button links to its own section id. Nothing about the nav is stored or editable in the CMS — the legacy `site_settings.nav_anchors` jsonb column is left in place, unread and unwritten |
 | footer identity | `site_settings.footer_name` / `footer_vat_number` — nullable `TEXT` (the leading zero of an Italian VAT number is part of the identifier, so the value is never parsed and never numeric); NULL or blank stores NULL and renders the defaults the site already ships, `Okazakee` and `02863310815`. Added by `20261005150208_add_site_settings_footer_identity.sql` (renamed from `20261005145655_...`, identical statement bytes): explicitly `dev_staging.`-qualified, nullable columns with **no backfill**, so it is a no-op for the rendered footer and `public` is untouched. Dev authority lives in `dev_staging.cms_migration_audit` (`verified_existing` = schema effects + source hash audited, not original execution provenance). No automatic apply exists; future DB changes stay explicitly reviewed/manual and the 7 original public/unqualified historical sources must never be replayed against shared `public` |
 | resume | `hero_section.resume_en` / `resume_it` — the columns are unchanged, but the **Layout** section owns them: the editors moved here from Contacts, which now edits contact rows and its translations only |
 | project requests | `project_requests` (`locale`, `name`, `email`, `company`, `website`, `project_type`, `budget`, `timeline`, `request`, `consent`, `created_at`, `archived`, `archived_at`) — **personal data**: service_role only, no anon/authenticated grant, never in the public cache-tag vocabulary. Rows arrive from `okazakee-ws` `POST /api/requests`, which re-validates the payload server-side and writes through the service-role client; the CMS inbox is the only reader |

@@ -73,14 +73,6 @@ describe('siteSettingsActions GET', () => {
     // Unconfigured footer identity: the site renders its own default.
     expect(data.footer_name).toBeNull();
     expect(data.footer_vat_number).toBeNull();
-    expect(data.nav_anchors.map((entry) => entry.anchor)).toEqual([
-      'home',
-      'skills',
-      'career',
-      'portfolio',
-      'blog',
-      'contacts',
-    ]);
   });
 
   it('rejects a non-admin caller before touching the table', async () => {
@@ -238,90 +230,6 @@ describe('siteSettingsActions CLEAR_LOGO', () => {
   });
 });
 
-describe('siteSettingsActions UPDATE_ANCHORS', () => {
-  const anchors = [
-    { id: 'home', anchor: 'top' },
-    { id: 'skills', anchor: 'skills' },
-    { id: 'career', anchor: 'work-history' },
-    { id: 'portfolio', anchor: 'portfolio' },
-    { id: 'blog', anchor: 'writing' },
-    { id: 'contacts', anchor: 'contacts' },
-  ] as const;
-
-  it('stores the anchors index-aligned with header.buttons.N', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    const result = await siteSettingsActions({
-      type: 'UPDATE_ANCHORS',
-      anchors: [...anchors],
-    });
-
-    expect(result.success).toBe(true);
-    expect(storedRow()?.nav_anchors).toEqual([...anchors]);
-    expect(h.invalidate).toHaveBeenCalledWith({
-      entity: 'settings',
-      operation: 'update',
-    });
-  });
-
-  it('rejects an unusable anchor without writing', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    const result = await siteSettingsActions({
-      type: 'UPDATE_ANCHORS',
-      anchors: [{ id: 'blog', anchor: '/blog' }] as never,
-    });
-
-    expect(result.success).toBe(false);
-    expect(h.fake.state.log.some((entry) => entry.mode === 'upsert')).toBe(
-      false
-    );
-    expect(h.invalidate).not.toHaveBeenCalled();
-  });
-
-  it('does not drop a stored logo when only the anchors change', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile(),
-    });
-    const logo = storedRow()?.header_logo_dark;
-
-    await siteSettingsActions({
-      type: 'UPDATE_ANCHORS',
-      anchors: [...anchors],
-    });
-
-    expect(storedRow()?.header_logo_dark).toBe(logo);
-  });
-
-  it('restores the default hrefs when every anchor is cleared', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPDATE_ANCHORS',
-      anchors: [...anchors],
-    });
-
-    const result = await siteSettingsActions({
-      type: 'UPDATE_ANCHORS',
-      anchors: [
-        { id: 'home', anchor: '' },
-        { id: 'skills', anchor: '' },
-        { id: 'career', anchor: '' },
-        { id: 'portfolio', anchor: '' },
-        { id: 'blog', anchor: '' },
-        { id: 'contacts', anchor: '' },
-      ],
-    });
-
-    expect(result.success).toBe(true);
-    expect(
-      (result.data as SiteSettingsRow).nav_anchors.map((entry) => entry.anchor)
-    ).toEqual(['home', 'skills', 'career', 'portfolio', 'blog', 'contacts']);
-  });
-});
-
 describe('siteSettingsActions UPDATE_FOOTER', () => {
   it('stores the display name and the VAT number with its leading zero', async () => {
     h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
@@ -378,7 +286,7 @@ describe('siteSettingsActions UPDATE_FOOTER', () => {
     expect(data.footer_vat_number).toBeNull();
   });
 
-  it('keeps the identity through a logo write and an anchor write', async () => {
+  it('keeps the identity through logo writes', async () => {
     h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
     await siteSettingsActions({
       type: 'UPDATE_FOOTER',
@@ -395,18 +303,7 @@ describe('siteSettingsActions UPDATE_FOOTER', () => {
       type: 'CLEAR_LOGO',
       variant: 'light',
     });
-    const anchors = [
-      { id: 'home', anchor: 'top' },
-      { id: 'skills', anchor: 'skills' },
-      { id: 'career', anchor: 'work-history' },
-      { id: 'portfolio', anchor: 'portfolio' },
-      { id: 'blog', anchor: 'writing' },
-      { id: 'contacts', anchor: 'contacts' },
-    ] as const;
-    const result = await siteSettingsActions({
-      type: 'UPDATE_ANCHORS',
-      anchors: [...anchors],
-    });
+    const result = await siteSettingsActions({ type: 'GET' });
 
     expect(result.success).toBe(true);
     expect(storedRow()?.footer_name).toBe('Okazakee');
