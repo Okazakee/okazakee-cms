@@ -62,7 +62,10 @@ describe('HeroPreview', () => {
       aboutme: { title: 'About', paragraph: 'One.\n\nTwo.' },
     });
 
-    expect(markup).toContain('clip-pebble relative h-full w-full');
+    expect(markup).toContain(
+      'absolute inset-[2.15%] overflow-hidden clip-pebble'
+    );
+    expect(markup).toContain('bg-accent-violet clip-pebble');
     expect(markup).toContain('id="pebble-clip"');
     expect(roleLines(markup)).toEqual(['Fullstack <label>Developer</label>']);
     // A single role keeps the historic single line: no list spacing.
@@ -84,7 +87,9 @@ describe('HeroPreview', () => {
       { shape: 'squircle' }
     );
 
-    expect(markup).toContain('clip-squircle relative h-full w-full');
+    expect(markup).toContain(
+      'absolute inset-[2.15%] overflow-hidden clip-squircle'
+    );
     expect(markup).toContain('id="squircle-clip"');
   });
 

@@ -9,21 +9,26 @@ export const heroShapes = ['pebble', 'square', 'rounded', 'squircle'] as const;
 
 export const typewriterTargets = ['role1', 'role2', 'all'] as const;
 
-/** Wrapper classes for the clipped portrait, joined with the box utilities. */
+/**
+ * Corner/clip geometry of one preset. The SAME class drives the accent plate
+ * and the image mask, so the two outlines stay concentric and the ring between
+ * them keeps a constant width.
+ */
 const heroShapeClasses: Record<HeroShape, string> = {
   pebble: 'clip-pebble',
-  square: 'overflow-hidden',
-  rounded: 'overflow-hidden rounded-xl',
+  square: '',
+  // A share of the portrait box, so the radius scales with it and stays
+  // distinct from both `square` and `squircle`. A fixed `rounded-xl` (12px) is
+  // 4.6% of a 260px portrait and reads as a square.
+  rounded: 'rounded-[15%]',
   squircle: 'clip-squircle',
 };
 
-/** Accent plate behind the portrait; the pebble draws its own svg path. */
-const heroBackdropClasses: Record<HeroShape, string> = {
-  pebble: '',
-  square: '',
-  rounded: 'rounded-3xl',
-  squircle: 'clip-squircle',
-};
+/**
+ * Accent ring width, as a share of the portrait box (2.15% = 5.6px at the
+ * 260px desktop size). The mask is inset by it inside the plate.
+ */
+const heroRingInset = 'inset-[2.15%]';
 
 export function normalizeHeroShape(
   value: string | null | undefined
@@ -39,12 +44,13 @@ export function normalizeTypewriterTarget(
 
 /** Full class list of the element wrapping the portrait image. */
 export function heroPortraitClass(shape: HeroShape): string {
-  return `${heroShapeClasses[shape]} relative h-full w-full`.trim();
+  // `absolute` is load-bearing: the mask is positioned by its inset ring.
+  return `absolute ${heroRingInset} overflow-hidden ${heroShapeClasses[shape]}`.trim();
 }
 
 /** Full class list of the accent plate behind the portrait. */
 export function heroBackdropClass(shape: HeroShape): string {
-  return `absolute -inset-3 z-0 ${heroBackdropClasses[shape]}`.trim();
+  return `absolute inset-0 z-0 bg-accent-violet ${heroShapeClasses[shape]}`.trim();
 }
 
 /** Flat translation path of one `hero-section.top.roles` entry. */

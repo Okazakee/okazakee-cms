@@ -19,7 +19,7 @@ const PebbleClipPath = () => (
       <clipPath id="pebble-clip" clipPathUnits="objectBoundingBox">
         <path
           d="M 301.84,388.777 C 221.246,383.98 159.047,350.918 120.738,280.84 89.77,224.195 98.645,160.863 142.883,107.434 176.789,66.477 220.562,42.488 273.078,34.992 c 68.402,-9.765 123.5,20.813 155.106,80.125 21.683,40.692 29.902,84.567 29.117,130.129 -0.477,27.418 -5.43,54.246 -19.746,78.402 -19.985,33.723 -50.903,51.606 -88.25,59.106 -16.184,3.246 -32.817,4.23 -47.465,6.023"
-          transform="scale(0.0027) translate(-100,-30)"
+          transform="scale(0.0028174,0.0028123) translate(-102.41,-33.2)"
         />
       </clipPath>
     </defs>
@@ -82,29 +82,9 @@ export function HeroPreview({
         <div className="mx-auto max-w-5xl px-6">
           <div className="flex flex-col items-center xl:flex-row xl:justify-center xl:gap-16">
             <div className="relative mb-10 aspect-square w-[200px] shrink-0 md:mb-12 md:w-[240px] xl:mb-0 xl:w-[260px]">
-              {/* Accent plate, drawn behind the clipped image */}
-              {shape === 'pebble' ? (
-                <svg
-                  className="absolute inset-0 z-0"
-                  style={{
-                    transform: 'scale(1.15)',
-                    overflow: 'visible',
-                    pointerEvents: 'none',
-                  }}
-                  viewBox="0 0 500 500"
-                >
-                  <title>background svg</title>
-                  <path
-                    d="M301.84,388.777C221.246,383.98 159.047,350.918 120.738,280.84 89.77,224.195 98.645,160.863 142.883,107.434 176.789,66.477 220.562,42.488 273.078,34.992c68.402,-9.765 123.5,20.813 155.106,80.125 21.683,40.692 29.902,84.567 29.117,130.129 -0.477,27.418 -5.43,54.246 -19.746,78.402 -19.985,33.723 -50.903,51.606 -88.25,59.106 -16.184,3.246 -32.817,4.23 -47.465,6.023"
-                    fill="var(--c-accent-violet)"
-                    transform="scale(1.22) translate(-80, -10)"
-                  />
-                </svg>
-              ) : (
-                <div aria-hidden="true" className={heroBackdropClass(shape)}>
-                  <div className="h-full w-full bg-accent-violet" />
-                </div>
-              )}
+              {/* Accent plate, drawn behind the image mask in the same shape,
+                  so the ring between them stays a constant width */}
+              <div aria-hidden="true" className={heroBackdropClass(shape)} />
 
               <div className={heroPortraitClass(shape)}>
                 <Image

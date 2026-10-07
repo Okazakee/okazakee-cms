@@ -1,13 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   countHeroRoleEntries,
+  heroBackdropClass,
   heroPortraitClass,
   heroRolePath,
+  heroShapes,
   normalizeHeroShape,
   normalizeTypewriterTarget,
   resolveHeroRoles,
   squircleClipPath,
 } from '@/utils/heroDisplay';
+
+/** Geometry each preset must apply to BOTH the accent plate and the mask. */
+const presetGeometry = {
+  pebble: 'clip-pebble',
+  square: '',
+  rounded: 'rounded-[15%]',
+  squircle: 'clip-squircle',
+} as const;
 
 describe('portrait shape presets', () => {
   it('keeps every stored preset', () => {
@@ -22,13 +32,34 @@ describe('portrait shape presets', () => {
     expect(normalizeHeroShape('hexagon')).toBe('pebble');
   });
 
-  it('clips the pebble portrait exactly as the website always has', () => {
-    expect(heroPortraitClass('pebble')).toBe(
-      'clip-pebble relative h-full w-full'
-    );
-    expect(heroPortraitClass('squircle')).toBe(
-      'clip-squircle relative h-full w-full'
-    );
+  it('insets every preset by the same ring, inside a plate that fills the box', () => {
+    const ringInset = 'inset-[2.15%]';
+
+    for (const shape of heroShapes) {
+      const mask = heroPortraitClass(shape);
+      const plate = heroBackdropClass(shape);
+
+      expect(mask).toContain('absolute');
+      expect(mask).toContain(ringInset);
+      expect(mask).toContain('overflow-hidden');
+      expect(plate).toContain('inset-0');
+      expect(plate).toContain('bg-accent-violet');
+
+      // One geometry for both outlines keeps the ring a constant width.
+      const geometry = presetGeometry[shape];
+      if (geometry) {
+        expect(mask).toContain(geometry);
+        expect(plate).toContain(geometry);
+      }
+    }
+  });
+
+  it('scales the rounded radius and keeps the square preset unrounded', () => {
+    expect(heroPortraitClass('rounded')).toMatch(/rounded-\[\d+%\]/);
+    expect(heroPortraitClass('square')).not.toMatch(/rounded|clip-/);
+  });
+
+  it('samples the same squircle path the website clips with', () => {
     expect(squircleClipPath()).toBe(squircleClipPath());
     expect(squircleClipPath().startsWith('M ')).toBe(true);
   });

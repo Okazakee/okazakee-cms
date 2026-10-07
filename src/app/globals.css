@@ -51,15 +51,11 @@
 @utility clip-pebble {
   clip-path: url(#pebble-clip);
   -webkit-clip-path: url(#pebble-clip);
-  position: relative;
-  overflow: visible;
 }
 
 @utility clip-squircle {
   clip-path: url(#squircle-clip);
   -webkit-clip-path: url(#squircle-clip);
-  position: relative;
-  overflow: visible;
 }
 
 @layer base {
