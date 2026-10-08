@@ -24,6 +24,7 @@ import type {
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import { isValidHttpUrl } from '@/utils/cms/validation';
 import { createClient } from '@/utils/supabase/server';
 
 type ContactOperation =
@@ -75,13 +76,10 @@ function validateContactData(data: CreateContactData | UpdateContactData): {
 
   // Icon validation
   if ('icon' in data && data.icon !== undefined) {
-    if (!data.icon || data.icon.trim().length === 0) {
-      return { isValid: false, error: 'Icon name is required' };
-    }
-    if (data.icon.length > 50) {
+    if (!data.icon?.trim() || !isValidHttpUrl(data.icon)) {
       return {
         isValid: false,
-        error: 'Icon name must be less than 50 characters',
+        error: 'Icon must be a valid http(s) SVG image URL',
       };
     }
   }
@@ -100,7 +98,7 @@ function validateContactData(data: CreateContactData | UpdateContactData): {
   }
 
   // Background color validation
-  if (data.bg_color !== undefined && data.bg_color) {
+  if (data.bg_color !== undefined) {
     const hexColorPattern = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
     if (!hexColorPattern.test(data.bg_color)) {
       return {
@@ -282,6 +280,15 @@ async function batchPublishContacts(
     }
 
     for (const contact of operation.reorder) {
+      const validation = validateContactData({ position: contact.position });
+      if (!validation.isValid) {
+        markFailed(evidence, {
+          kind: 'reorder',
+          id: contact.id,
+          error: validation.error ?? 'Invalid position',
+        });
+        continue;
+      }
       const { data, error } = await admin
         .from('contacts')
         .update({ position: contact.position })
@@ -297,6 +304,12 @@ async function batchPublishContacts(
         });
       } else {
         markReordered(evidence, data?.id ?? contact.id);
+      }
+    }
+    if (batchSucceeded(evidence) && batchHadCommits(evidence)) {
+      const positionError = await compactContactPositions(admin);
+      if (positionError) {
+        markFailed(evidence, { kind: 'reorder', error: positionError });
       }
     }
 
@@ -340,7 +353,8 @@ async function getContactsData(
     const { data, error } = await supabase
       .from('contacts')
       .select('*')
-      .order('position', { ascending: true });
+      .order('position', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true });
 
     if (error) throw error;
 
@@ -372,12 +386,18 @@ async function createContact(
       .single();
 
     if (error) throw error;
+    const positionError = await compactContactPositions(admin);
 
     const revalidation = await invalidatePublicContent({
       entity: 'contacts',
       operation: 'create',
     });
-    return { success: true, data, revalidation };
+    return {
+      success: !positionError,
+      data,
+      revalidation,
+      error: positionError ?? undefined,
+    };
   } catch (error) {
     console.error('Error creating contact:', error);
     return {
@@ -416,12 +436,21 @@ async function updateContact(
       .select();
 
     if (error) throw error;
+    const positionError =
+      updateData.position === undefined
+        ? null
+        : await compactContactPositions(admin);
 
     const revalidation = await invalidatePublicContent({
       entity: 'contacts',
       operation: 'update',
     });
-    return { success: true, data, revalidation };
+    return {
+      success: !positionError,
+      data,
+      revalidation,
+      error: positionError ?? undefined,
+    };
   } catch (error) {
     console.error('Error updating contact:', error);
     return {
@@ -440,12 +469,17 @@ async function deleteContact(
     const { error } = await admin.from('contacts').delete().eq('id', contactId);
 
     if (error) throw error;
+    const positionError = await compactContactPositions(admin);
 
     const revalidation = await invalidatePublicContent({
       entity: 'contacts',
       operation: 'delete',
     });
-    return { success: true, revalidation };
+    return {
+      success: !positionError,
+      revalidation,
+      error: positionError ?? undefined,
+    };
   } catch (error) {
     console.error('Error deleting contact:', error);
     return {
@@ -462,6 +496,8 @@ async function reorderContacts(
   try {
     const admin = getAdminClient();
     for (const contact of contacts) {
+      const validation = validateContactData({ position: contact.position });
+      if (!validation.isValid) throw new Error(validation.error);
       const { error } = await admin
         .from('contacts')
         .update({ position: contact.position })
@@ -469,17 +505,48 @@ async function reorderContacts(
 
       if (error) throw error;
     }
+    const positionError = await compactContactPositions(admin);
 
     const revalidation = await invalidatePublicContent({
       entity: 'contacts',
       operation: 'update',
     });
-    return { success: true, revalidation };
+    return {
+      success: !positionError,
+      revalidation,
+      error: positionError ?? undefined,
+    };
   } catch (error) {
     console.error('Error reordering contacts:', error);
     return {
       success: false,
       error: 'Failed to reorder contacts',
     };
+  }
+}
+
+async function compactContactPositions(
+  admin: SupabaseClient
+): Promise<string | null> {
+  try {
+    const { data, error } = await admin
+      .from('contacts')
+      .select('id, position')
+      .order('position', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true });
+    if (error) return error.message;
+    for (const [position, row] of (data ?? []).entries()) {
+      if (row.position === position) continue;
+      const { error: updateError } = await admin
+        .from('contacts')
+        .update({ position })
+        .eq('id', row.id);
+      if (updateError) return updateError.message;
+    }
+    return null;
+  } catch (error) {
+    return error instanceof Error
+      ? error.message
+      : 'Failed to normalize contact positions';
   }
 }

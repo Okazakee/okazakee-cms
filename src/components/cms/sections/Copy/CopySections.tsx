@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
@@ -121,21 +122,12 @@ export function CopyEditor({
         ))}
       </div>
       <div className="mt-6 flex flex-wrap justify-end gap-3">
-        <button
-          type="button"
-          onClick={revert}
-          className="min-h-11 rounded-lg border border-border-subtle px-4 text-sm text-text-muted"
-        >
-          {t('common.revert')}
-        </button>
-        <button
-          type="button"
-          onClick={() => void publish().catch(() => {})}
-          disabled={!tr.isDirty}
-          className="min-h-11 rounded-lg bg-accent-violet-deep px-4 text-sm text-white disabled:opacity-50"
-        >
-          {busy ? t('common.publishing') : t('common.publish')}
-        </button>
+        <SectionActions
+          isDirty={tr.isDirty}
+          busy={busy || tr.isLoading}
+          onPublish={publish}
+          onRevert={revert}
+        />
       </div>
     </fieldset>
   );

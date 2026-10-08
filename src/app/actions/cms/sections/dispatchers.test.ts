@@ -230,6 +230,65 @@ describe('contacts BATCH_PUBLISH reorder split', () => {
     expect(data.reordered).toEqual([2]);
     expect(data.failed).toHaveLength(1);
   });
+  it('accepts extensionless SVG URLs and rejects named or unsafe icons', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, contacts: [] });
+    const result = await contactsActions({
+      type: 'BATCH_PUBLISH',
+      creates: [
+        'https://cdn.example.test/icon',
+        'Mail',
+        'javascript:alert(1)',
+        'data:image/svg+xml,<svg/>',
+      ].map((icon, position) => ({
+        tempId: String(position),
+        label: 'Contact',
+        icon,
+        link: 'mailto:hello@example.test',
+        bg_color: '#ffffff',
+        position,
+      })),
+      updates: [],
+      deletes: [],
+      reorder: [],
+    });
+    expect(result.success).toBe(false);
+    expect(result.data).toMatchObject({ created: ['0'] });
+    expect(h.fake.state.tables.contacts).toHaveLength(1);
+  });
+  it('interleaves a created contact and densely orders surviving contacts', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      contacts: [
+        { id: 1, position: 0 },
+        { id: 2, position: 1 },
+      ],
+    });
+    const result = await contactsActions({
+      type: 'BATCH_PUBLISH',
+      creates: [
+        {
+          tempId: 'new',
+          label: 'New',
+          icon: 'https://cdn.example.test/new-icon',
+          link: 'https://example.test',
+          bg_color: '#ffffff',
+          position: 0,
+        },
+      ],
+      updates: [],
+      deletes: [2],
+      reorder: [{ id: 1, position: 1 }],
+    });
+    expect(result.success).toBe(true);
+    const evidence = result.data as { createdIds: Record<string, number> };
+    expect(h.fake.state.tables.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: evidence.createdIds.new, position: 0 }),
+        expect.objectContaining({ id: 1, position: 1 }),
+      ])
+    );
+    expect(h.fake.state.tables.contacts).toHaveLength(2);
+  });
 });
 
 describe('skills BATCH_PUBLISH temp category mapping', () => {
@@ -254,8 +313,8 @@ describe('skills BATCH_PUBLISH temp category mapping', () => {
       deleteSkills: [],
       updateCategories: [],
       deleteCategories: [],
-      categoryOrder: [],
-      skillOrder: [],
+      categoryOrder: [{ id: 'cat-1', position: 0 }],
+      skillOrder: [{ id: 'skill:temp-1', position: 0 }],
     });
 
     expect(result.success).toBe(true);
@@ -267,6 +326,10 @@ describe('skills BATCH_PUBLISH temp category mapping', () => {
     expect(data.tempIdToRealId['cat-1']).toBe(1);
     expect(data.created).toEqual(['cat-1', 'skill:temp-1']);
     expect(data.createdIds['skill:temp-1']).toBe(1);
+    expect(data.tempIdToRealId['skill:temp-1']).toBe(1);
+    expect(result.data).toMatchObject({ reordered: [1, 'skill:1'] });
+    expect(h.fake.state.tables.skills_categories[0].position).toBe(0);
+    expect(h.fake.state.tables.skills[0].position).toBe(0);
     expect(h.fake.state.tables.skills[0]).not.toHaveProperty('tempId');
     expect(h.fake.state.tables.skills[0].category_id).toBe(1);
   });
@@ -326,10 +389,67 @@ describe('i18n CAS and delta merge', () => {
     i18n_translations: [
       {
         language: 'en',
-        translations: { hero: { title: 'Old', sub: 'keep' }, other: 1 },
+        translations: {
+          'hero-section': { title: 'Old', sub: 'keep' },
+          other: 1,
+        },
         privacy_policy: 'old',
       },
     ],
+  });
+
+  it.each([
+    'skills-section',
+    'career-section',
+    'posts-section',
+    'contacts-section',
+    'privacyPolicy',
+    'header',
+    'footer',
+    'errors',
+    '',
+  ])('rejects frozen namespace %s before writing', async (sectionKey) => {
+    h.fake = makeFake(seedTranslations());
+    for (const operation of [
+      {
+        type: 'UPDATE_SECTION' as const,
+        locale: 'en',
+        sectionKey,
+        sectionData: { title: 'Forbidden' },
+      },
+      {
+        type: 'UPDATE_SECTIONS' as const,
+        sectionKey,
+        sections: { en: { title: 'Forbidden' } },
+      },
+    ]) {
+      const result = await i18nActions(operation);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('owned by the public website');
+    }
+    expect(
+      h.fake.state.log.filter(
+        (entry) =>
+          entry.table === 'i18n_translations' && entry.mode === 'update'
+      )
+    ).toHaveLength(0);
+    expect(h.invalidate).not.toHaveBeenCalled();
+  });
+
+  it('keeps request form translations editable', async () => {
+    h.fake = makeFake(seedTranslations());
+    const result = await i18nActions({
+      type: 'UPDATE_SECTION',
+      locale: 'en',
+      sectionKey: 'request-form',
+      sectionData: { title: 'Project request' },
+    });
+    expect(result.success).toBe(true);
+    expect(h.fake.state.tables.i18n_translations[0].translations).toMatchObject(
+      {
+        'request-form': { title: 'Project request' },
+      }
+    );
   });
 
   it('merges a section delta without clobbering concurrent keys', async () => {
@@ -338,14 +458,14 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: { title: 'New' },
     });
 
     expect(result.success).toBe(true);
     const stored = h.fake.state.tables.i18n_translations[0]
       .translations as Record<string, Record<string, unknown>>;
-    expect(stored.hero).toEqual({ title: 'New', sub: 'keep' });
+    expect(stored['hero-section']).toEqual({ title: 'New', sub: 'keep' });
     expect(stored.other).toBe(1);
   });
 
@@ -363,7 +483,7 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: { title: 'Retried' },
     });
 
@@ -388,7 +508,7 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: { title: 'Never' },
     });
 
@@ -402,7 +522,7 @@ describe('i18n CAS and delta merge', () => {
       i18n_translations: [
         {
           language: 'en',
-          translations: { hero: { list: ['a', 'b'] } },
+          translations: { 'hero-section': { list: ['a', 'b'] } },
           privacy_policy: 'x',
         },
       ],
@@ -414,14 +534,14 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: malicious,
     });
 
     expect(result.success).toBe(true);
     const stored = h.fake.state.tables.i18n_translations[0]
       .translations as Record<string, unknown>;
-    const hero = stored.hero as Record<string, unknown>;
+    const hero = stored['hero-section'] as Record<string, unknown>;
     expect(hero.list).toEqual(['a', 'B']);
     expect(Object.hasOwn(hero, '__proto__')).toBe(false);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
@@ -432,7 +552,7 @@ describe('i18n CAS and delta merge', () => {
 
     const result = await i18nActions({
       type: 'UPDATE_SECTIONS',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sections: { en: { title: 'EN' }, it: { title: 'IT' } },
     });
 
@@ -525,7 +645,7 @@ describe('acknowledged partial commits survive exceptions', () => {
         {
           tempId: 'first',
           label: 'First',
-          icon: 'Mail',
+          icon: 'https://cdn.example.test/mail',
           link: 'mailto:first@example.test',
           bg_color: '#ffffff',
           position: 0,
@@ -533,7 +653,7 @@ describe('acknowledged partial commits survive exceptions', () => {
         {
           tempId: 'second',
           label: 'Second',
-          icon: 'Mail',
+          icon: 'https://cdn.example.test/mail',
           link: 'mailto:second@example.test',
           bg_color: '#ffffff',
           position: 1,

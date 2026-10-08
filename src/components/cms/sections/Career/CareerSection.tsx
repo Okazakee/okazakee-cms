@@ -2,7 +2,7 @@
 
 import { Calendar, Globe, MapPin, Plus, X } from 'lucide-react';
 import Image from 'next/image';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import { careerActions } from '@/app/actions/cms/sections/careerActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
@@ -24,7 +24,6 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { CareerEntry, RemoteType } from '@/types/fetchedData.types';
@@ -81,7 +80,7 @@ export default function CareerSection() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<CareerFormData>(emptyForm);
   const [isCurrentPosition, setIsCurrentPosition] = useState(false);
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const activeLocale = useLocale() === 'it' ? 'it' : 'en';
   const [formLocale, setFormLocale] = useState<'en' | 'it'>('en');
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
   const [newEntries, setNewEntries] = useState<
@@ -96,21 +95,8 @@ export default function CareerSection() {
     generateBlurhash: true,
   });
 
-  const {
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('career-section');
-
   const isDirty =
-    modifiedIds.size > 0 ||
-    newEntries.length > 0 ||
-    deletedIds.size > 0 ||
-    transDirty;
+    modifiedIds.size > 0 || newEntries.length > 0 || deletedIds.size > 0;
   useSectionDirty('career', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -370,11 +356,6 @@ export default function CareerSection() {
         setDeletedIds(new Set(retainedDeletes));
       }
 
-      if (transDirty) {
-        const tErrs = await saveTranslations();
-        errors.push(...tErrs);
-      }
-
       const revalidationMessage = revalidationWarning(batch);
       if (revalidationMessage)
         useCmsStore.getState().setWarning(revalidationMessage);
@@ -382,8 +363,7 @@ export default function CareerSection() {
       const remaining =
         retainedCreates.length +
         retainedUpdates.length +
-        retainedDeletes.length +
-        (transDirty && !batch.success ? 1 : 0);
+        retainedDeletes.length;
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -398,15 +378,7 @@ export default function CareerSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [
-    entries,
-    newEntries,
-    deletedIds,
-    modifiedIds,
-    transDirty,
-    saveTranslations,
-    fetchData,
-  ]);
+  }, [entries, newEntries, deletedIds, modifiedIds, fetchData]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
@@ -414,7 +386,6 @@ export default function CareerSection() {
     setModifiedIds(new Set());
     setNewEntries([]);
     setDeletedIds(new Set());
-    revertTranslations();
     setError(null);
   };
 
@@ -687,67 +658,6 @@ export default function CareerSection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('common.translations')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-        {transLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <TranslationField
-              label={t('career.translationTitleLabel')}
-              enValue={getField('en', 'title')}
-              itValue={getField('it', 'title')}
-              onChangeEn={(v) => setField('en', 'title', v)}
-              onChangeIt={(v) => setField('it', 'title', v)}
-              activeLocale={activeLocale}
-            />
-            <TranslationField
-              label={t('career.translationSubtitleLabel')}
-              enValue={getField('en', 'subtitle')}
-              itValue={getField('it', 'subtitle')}
-              onChangeEn={(v) => setField('en', 'subtitle', v)}
-              onChangeIt={(v) => setField('it', 'subtitle', v)}
-              type="textarea"
-              rows={3}
-              activeLocale={activeLocale}
-            />
-            {[
-              { key: 'month', label: t('career.monthLabel') },
-              { key: 'months', label: t('career.monthsLabel') },
-              { key: 'year', label: t('career.yearLabel') },
-              { key: 'years', label: t('career.yearsLabel') },
-              { key: 'present', label: t('career.presentLabel') },
-              { key: 'remote.full', label: t('career.remoteFullLabel') },
-              { key: 'remote.hybrid', label: t('career.remoteHybridLabel') },
-              { key: 'remote.onSite', label: t('career.remoteOnSiteLabel') },
-            ].map(({ key, label }) => (
-              <TranslationField
-                key={key}
-                label={label}
-                enValue={getField('en', key)}
-                itValue={getField('it', key)}
-                onChangeEn={(value) => setField('en', key, value)}
-                onChangeIt={(value) => setField('it', key, value)}
-                activeLocale={activeLocale}
-              />
-            ))}
-          </div>
-        )}
-      </div>
 
       {/* Entries */}
       <div className="flex items-center justify-between">

@@ -3,14 +3,14 @@ import logoLight from '@public/title-cms-lightmode.png';
 import {
   Briefcase,
   Contact,
-  FileText,
   ExternalLink,
+  FileText,
   Home,
   Inbox,
-  PanelTop,
   LogOut,
   MessageSquare,
   NotebookPen,
+  PanelTop,
   Settings,
   User2,
   Users,
@@ -18,9 +18,9 @@ import {
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { RoleChip } from '@/components/cms/shared/RoleChip';
 import LanguageToggle from '@/components/layout/LanguageToggle';
-import ThemeToggle from '@/components/layout/ThemeToggle';
 import {
   SIDEBAR_MOBILE_INDEX,
   SIDEBAR_MOBILE_LABEL,
@@ -35,6 +35,7 @@ import {
   SIDEBAR_ROW_LABEL,
   SIDEBAR_ROW_NEUTRAL,
 } from '@/components/layout/sidebarRowStyle';
+import ThemeToggle from '@/components/layout/ThemeToggle';
 import { useDialogFocus } from '@/hooks/cms/useDialogFocus';
 import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
@@ -121,6 +122,7 @@ const INBOX_ITEMS: MenuItem[] = [
 ];
 
 const SYSTEM_ITEMS: MenuItem[] = [
+  { id: 'resume', label: '', icon: FileText, adminOnly: true },
   {
     id: 'request-form',
     label: '',
@@ -143,6 +145,10 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
+  const [confirmAction, setConfirmAction] = useState<
+    'publishAll' | 'revertAll' | 'logout' | null
+  >(null);
+  const publishLock = useRef(false);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1023px)');
     const update = () => setIsMobile(media.matches);
@@ -150,7 +156,9 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
-  useDialogFocus(isMobile && isOpen, panelRef, () => onClose?.());
+  useDialogFocus(isMobile && isOpen && !confirmAction, panelRef, () =>
+    onClose?.()
+  );
 
   const {
     activeSection,
@@ -179,6 +187,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     layout: t('sidebar.nav.layout'),
     'privacy-policy': t('sidebar.nav.privacy-policy'),
     users: t('sidebar.nav.users'),
+    resume: t('sidebar.nav.resume'),
     account: t('sidebar.myAccount'),
   };
 
@@ -191,7 +200,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   };
 
   const handleLogout = async () => {
-    if (pendingCount > 0 && !window.confirm(t('sidebar.discardDrafts'))) return;
     setIsLoggingOut(true);
     setUser(null);
     setHeroSection(null);
@@ -286,10 +294,71 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
   mobileNav.push({ id: 'account', caption: null });
 
   const discardAllDirty = () => {
-    if (!window.confirm(t('sidebar.discardDrafts'))) return;
     for (const [key, callbacks] of Object.entries(sectionCallbacks)) {
       if (publishQueue[key]?.isDirty) callbacks.revert();
     }
+  };
+
+  /**
+   * Confirmed sidebar actions share one dialog, so Revert all, Publish all and
+   * Logout all use the in-app modal instead of the browser prompt.
+   */
+  const confirmCopy = {
+    publishAll: {
+      title: t('sidebar.publishAllConfirmTitle'),
+      message: t('sidebar.publishAllConfirmMessage'),
+      label: t('sidebar.publishAll'),
+      variant: 'primary' as const,
+    },
+    revertAll: {
+      title: t('sidebar.revertAllConfirmTitle'),
+      message: t('sidebar.discardDrafts'),
+      label: t('common.revert'),
+      variant: 'danger' as const,
+    },
+    logout: {
+      title: t('sidebar.logoutConfirmTitle'),
+      message: t('sidebar.discardDrafts'),
+      label: t('sidebar.logout'),
+      variant: 'danger' as const,
+    },
+  };
+
+  const handleConfirmAction = async () => {
+    const action = confirmAction;
+    if (!action) return;
+    const current = useCmsStore.getState();
+    if (action === 'publishAll') {
+      if (
+        publishLock.current ||
+        current.isPublishingAll ||
+        !Object.values(current.publishQueue).some((state) => state.isDirty)
+      ) {
+        setConfirmAction(null);
+        return;
+      }
+      publishLock.current = true;
+      setConfirmAction(null);
+      try {
+        await publishAll();
+      } catch (err) {
+        current.setError(
+          err instanceof Error ? err.message : t('common.saveFailed')
+        );
+      } finally {
+        publishLock.current = false;
+      }
+      return;
+    }
+    setConfirmAction(null);
+    if (action === 'revertAll') {
+      if (!Object.values(current.publishQueue).some((state) => state.isDirty)) {
+        return;
+      }
+      discardAllDirty();
+      return;
+    }
+    await handleLogout();
   };
 
   return (
@@ -335,7 +404,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
                 type="button"
                 disabled={isPublishingAll}
                 tabIndex={isOpen ? 0 : -1}
-                onClick={discardAllDirty}
+                onClick={() => setConfirmAction('revertAll')}
                 className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface-raised px-2 py-1 text-xs text-text-main transition-colors hover:border-border-hover disabled:opacity-50"
               >
                 {t('common.revert')}
@@ -344,7 +413,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
                 type="button"
                 disabled={isPublishingAll}
                 tabIndex={isOpen ? 0 : -1}
-                onClick={() => void publishAll()}
+                onClick={() => setConfirmAction('publishAll')}
                 className="min-h-11 flex-1 rounded-lg bg-accent-violet-deep px-2 py-1 text-xs text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
               >
                 {isPublishingAll
@@ -497,7 +566,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               <button
                 type="button"
                 disabled={isPublishingAll}
-                onClick={discardAllDirty}
+                onClick={() => setConfirmAction('revertAll')}
                 className="min-h-11 flex-1 rounded-lg border border-border-subtle bg-surface-raised px-2 py-1 text-xs text-text-main transition-colors hover:border-border-hover disabled:opacity-50"
               >
                 {t('common.revert')}
@@ -505,7 +574,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
               <button
                 type="button"
                 disabled={isPublishingAll}
-                onClick={() => void publishAll()}
+                onClick={() => setConfirmAction('publishAll')}
                 className="min-h-11 flex-1 rounded-lg bg-accent-violet-deep px-2 py-1 text-xs text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
               >
                 {isPublishingAll
@@ -570,7 +639,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
 
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() =>
+                pendingCount > 0
+                  ? setConfirmAction('logout')
+                  : void handleLogout()
+              }
               disabled={isLoggingOut}
               className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_DESTRUCTIVE} disabled:opacity-50`}
             >
@@ -585,6 +658,19 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        isOpen={confirmAction !== null}
+        title={confirmAction ? confirmCopy[confirmAction].title : ''}
+        message={confirmAction ? confirmCopy[confirmAction].message : ''}
+        confirmLabel={confirmAction ? confirmCopy[confirmAction].label : ''}
+        confirmVariant={
+          confirmAction ? confirmCopy[confirmAction].variant : 'primary'
+        }
+        busy={isLoggingOut || isPublishingAll}
+        confirmDisabled={confirmAction === 'publishAll' && pendingCount === 0}
+        onConfirm={() => void handleConfirmAction()}
+        onCancel={() => setConfirmAction(null)}
+      />
     </aside>
   );
 };

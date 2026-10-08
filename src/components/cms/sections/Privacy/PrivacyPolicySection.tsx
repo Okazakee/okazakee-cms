@@ -3,7 +3,6 @@
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
-import { CopyEditor } from '@/components/cms/sections/Copy/CopySections';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
@@ -134,12 +133,6 @@ export default function PrivacyPolicySection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-      <CopyEditor
-        namespace="privacyPolicy"
-        sectionKey="privacy-policy:copy"
-        fields={['description']}
-      />
-
       <div className="flex items-center justify-between gap-2">
         <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
       </div>

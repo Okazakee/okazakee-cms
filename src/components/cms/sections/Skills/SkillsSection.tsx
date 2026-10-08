@@ -9,15 +9,12 @@ import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { TranslationField } from '@/components/cms/shared/TranslationField';
 import { readBatchEvidence, reconcileDrafts } from '@/hooks/cms/batchDrafts';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Skill, SkillsCategory } from '@/types/fetchedData.types';
@@ -46,7 +43,6 @@ export default function SkillsSection() {
   const [renamingCategoryId, setRenamingCategoryId] = useState<number | null>(
     null
   );
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
   const [modifiedSkills, setModifiedSkills] = useState<Set<string>>(new Set());
   const [newSkills, setNewSkills] = useState<
@@ -65,16 +61,6 @@ export default function SkillsSection() {
   const [categoryOrderChanged, setCategoryOrderChanged] = useState(false);
   const [skillOrderChanged, setSkillOrderChanged] = useState(false);
 
-  const {
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('skills-section');
-
   const hasDataChanges =
     modifiedSkills.size > 0 ||
     newSkills.length > 0 ||
@@ -85,7 +71,7 @@ export default function SkillsSection() {
     categoryOrderChanged ||
     skillOrderChanged;
 
-  const isDirty = hasDataChanges || transDirty;
+  const isDirty = hasDataChanges;
 
   useSectionDirty('skills', isDirty);
 
@@ -367,11 +353,6 @@ export default function SkillsSection() {
         setSkillOrderChanged(retainedSkillOrder);
       }
 
-      if (transDirty) {
-        const tErrs = await saveTranslations();
-        errors.push(...tErrs);
-      }
-
       const revalidationMessage = revalidationWarning(batch);
       if (revalidationMessage)
         useCmsStore.getState().setWarning(revalidationMessage);
@@ -412,9 +393,6 @@ export default function SkillsSection() {
     modifiedSkills,
     categoryOrderChanged,
     skillOrderChanged,
-    transDirty,
-    saveTranslations,
-    t,
   ]);
 
   const handleRevert = () => {
@@ -428,7 +406,6 @@ export default function SkillsSection() {
     setDeletedCategories(new Set());
     setCategoryOrderChanged(false);
     setSkillOrderChanged(false);
-    revertTranslations();
     setError(null);
   };
 
@@ -580,10 +557,16 @@ export default function SkillsSection() {
     setCategories((prev) =>
       prev.map((c) =>
         c.id === catId
-          ? { ...c, skills: c.skills.filter((s) => s.id !== skillId) }
+          ? {
+              ...c,
+              skills: c.skills
+                .filter((s) => s.id !== skillId)
+                .map((skill, position) => ({ ...skill, position })),
+            }
           : c
       )
     );
+    setSkillOrderChanged(true);
   };
 
   const createCategory = () => {
@@ -638,7 +621,22 @@ export default function SkillsSection() {
     setModifiedSkills(
       (prev) => new Set([...prev].filter((key) => !key.startsWith(`${catId}-`)))
     );
-    setCategories((prev) => prev.filter((c) => c.id !== catId));
+    setDeletedSkills((prev) => {
+      const next = new Set(prev);
+      for (const skill of categories.find((cat) => cat.id === catId)?.skills ??
+        []) {
+        if (!newSkills.some((draft) => draft.skill.id === skill.id)) {
+          next.add(skill.id);
+        }
+      }
+      return next;
+    });
+    setCategories((prev) =>
+      prev
+        .filter((c) => c.id !== catId)
+        .map((category, position) => ({ ...category, position }))
+    );
+    setCategoryOrderChanged(true);
   };
 
   const moveCategory = (catId: number, dir: -1 | 1) => {
@@ -648,7 +646,9 @@ export default function SkillsSection() {
     if (newIdx < 0 || newIdx >= categories.length) return;
     const next = [...categories];
     [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
-    setCategories(next);
+    setCategories(
+      next.map((category, position) => ({ ...category, position }))
+    );
     setCategoryOrderChanged(true);
   };
 
@@ -705,47 +705,6 @@ export default function SkillsSection() {
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('common.translations')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-        {transLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <TranslationField
-              label={t('skills.translationTitleLabel')}
-              enValue={getField('en', 'title')}
-              itValue={getField('it', 'title')}
-              onChangeEn={(v) => setField('en', 'title', v)}
-              onChangeIt={(v) => setField('it', 'title', v)}
-              activeLocale={activeLocale}
-            />
-            <TranslationField
-              label={t('skills.translationSubtitleLabel')}
-              enValue={getField('en', 'subtitle')}
-              itValue={getField('it', 'subtitle')}
-              onChangeEn={(v) => setField('en', 'subtitle', v)}
-              onChangeIt={(v) => setField('it', 'subtitle', v)}
-              type="textarea"
-              rows={3}
-              activeLocale={activeLocale}
-            />
-          </div>
-        )}
-      </div>
 
       {/* Category Management */}
       <div className="bg-surface-card rounded-xl p-4 md:p-6">

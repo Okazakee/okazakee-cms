@@ -266,6 +266,7 @@ async function batchPublishSkills(
       if (error) {
         markFailed(evidence, { kind: 'create', tempId, error: error.message });
       } else {
+        tempIdToRealId[tempId] = data.id as number;
         markCreated(evidence, tempId, data.id);
       }
     }
@@ -531,13 +532,17 @@ async function batchPublishSkills(
 }
 async function getSkills(supabase: SupabaseClient): Promise<SkillsResult> {
   try {
-    const { data, error } = await supabase.from('skills_categories').select(`
-      *,
-      skills (
-        *,
-        category_id
-      )
-    `);
+    const { data, error } = await supabase
+      .from('skills_categories')
+      .select('*, skills(*)')
+      .order('position', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true })
+      .order('position', {
+        referencedTable: 'skills',
+        ascending: true,
+        nullsFirst: false,
+      })
+      .order('id', { referencedTable: 'skills', ascending: true });
 
     if (error) throw error;
 

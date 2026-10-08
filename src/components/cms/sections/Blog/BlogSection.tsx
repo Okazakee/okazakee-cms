@@ -1,20 +1,12 @@
 'use client';
 
-import {
-  Calendar,
-  Edit3,
-  FileText,
-  Info,
-  Plus,
-  Trash2,
-} from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { Calendar, Edit3, FileText, Info, Plus, Trash2 } from 'lucide-react';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type Author,
   blogActions,
 } from '@/app/actions/cms/sections/blogActions';
-import { CopyEditor } from '@/components/cms/sections/Copy/CopySections';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { Dropdown } from '@/components/cms/shared/Dropdown';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
@@ -34,7 +26,6 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { BlogPost } from '@/types/fetchedData.types';
@@ -84,7 +75,7 @@ export default function BlogSection() {
   const [mode, setMode] = useState<FormMode>('list');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<BlogFormData>(emptyForm);
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const activeLocale = useLocale() === 'it' ? 'it' : 'en';
   const [formLocale, setFormLocale] = useState<'en' | 'it'>('en');
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
   const [newPosts, setNewPosts] = useState<
@@ -99,22 +90,8 @@ export default function BlogSection() {
     generateBlurhash: true,
   });
 
-  const {
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    canEditTranslations,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('posts-section');
-
   const isDirty =
-    modifiedIds.size > 0 ||
-    newPosts.length > 0 ||
-    deletedIds.size > 0 ||
-    transDirty;
+    modifiedIds.size > 0 || newPosts.length > 0 || deletedIds.size > 0;
   useSectionDirty('blog', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -356,11 +333,6 @@ export default function BlogSection() {
         setDeletedIds(new Set(retainedDeletes));
       }
 
-      if (transDirty) {
-        const te = await saveTranslations();
-        errors.push(...te);
-      }
-
       const revalidationMessage = revalidationWarning(batch);
       if (revalidationMessage)
         useCmsStore.getState().setWarning(revalidationMessage);
@@ -368,8 +340,7 @@ export default function BlogSection() {
       const remaining =
         retainedCreates.length +
         retainedUpdates.length +
-        retainedDeletes.length +
-        (transDirty && !batch.success ? 1 : 0);
+        retainedDeletes.length;
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -384,16 +355,7 @@ export default function BlogSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [
-    posts,
-    newPosts,
-    deletedIds,
-    modifiedIds,
-    transDirty,
-    saveTranslations,
-    fetchData,
-    user,
-  ]);
+  }, [posts, newPosts, deletedIds, modifiedIds, fetchData, user]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
@@ -401,7 +363,6 @@ export default function BlogSection() {
     setModifiedIds(new Set());
     setNewPosts([]);
     setDeletedIds(new Set());
-    revertTranslations();
     setError(null);
   };
 
@@ -437,12 +398,6 @@ export default function BlogSection() {
           </div>
         </div>
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
-        <CopyEditor
-          namespace="posts-section"
-          sectionKey="blog:copy"
-          fields={['title2', 'subtitle2']}
-        />
-
         {/* Content */}
         <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
           <h3 className="text-lg font-bold text-accent-violet">
@@ -634,56 +589,6 @@ export default function BlogSection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {canEditTranslations && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-              {t('common.translations')}
-            </h2>
-            <LocaleToggle
-              activeLocale={activeLocale}
-              onChange={setActiveLocale}
-            />
-          </div>
-          {transLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <TranslationField
-                label={t('blog.translationTitleLabel')}
-                enValue={getField('en', 'title2')}
-                itValue={getField('it', 'title2')}
-                onChangeEn={(v) => setField('en', 'title2', v)}
-                onChangeIt={(v) => setField('it', 'title2', v)}
-                activeLocale={activeLocale}
-              />
-              <TranslationField
-                label={t('blog.translationSubtitleLabel')}
-                enValue={getField('en', 'subtitle2')}
-                itValue={getField('it', 'subtitle2')}
-                onChangeEn={(v) => setField('en', 'subtitle2', v)}
-                onChangeIt={(v) => setField('it', 'subtitle2', v)}
-                type="textarea"
-                rows={3}
-                activeLocale={activeLocale}
-              />
-              <TranslationField
-                label={t('blog.searchbarPlaceholderLabel')}
-                enValue={getField('en', 'searchbar')}
-                itValue={getField('it', 'searchbar')}
-                onChangeEn={(v) => setField('en', 'searchbar', v)}
-                onChangeIt={(v) => setField('it', 'searchbar', v)}
-                activeLocale={activeLocale}
-              />
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-text-main ">

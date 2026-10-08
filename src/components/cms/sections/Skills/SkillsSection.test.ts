@@ -26,18 +26,6 @@ vi.mock('@/hooks/cms/useSectionCallbacks', () => ({
   useSectionCallbacks: () => {},
 }));
 vi.mock('@/hooks/cms/useSectionDirty', () => ({ useSectionDirty: () => {} }));
-vi.mock('@/hooks/cms/useSectionTranslations', () => ({
-  useSectionTranslations: () => ({
-    translations: { en: {}, it: {} },
-    isDirty: false,
-    isLoading: false,
-    error: null,
-    getField: (locale: string, path: string) => `${locale}:${path}`,
-    setField: () => {},
-    saveTranslations: async () => [],
-    revertTranslations: () => {},
-  }),
-}));
 vi.mock('next/image', async () => {
   const React = await import('react');
   return {
@@ -178,6 +166,9 @@ async function publish() {
   const publishButton = buttonByText('Publish');
   expect(publishButton.disabled).toBe(false);
   await click(publishButton);
+  await click(
+    buttonByText('Publish', document.querySelector('[role="dialog"]')!)
+  );
 }
 
 function batchPayload(): BatchPayload {
@@ -249,6 +240,55 @@ describe('skills reorder dispatch', () => {
           link: 'https://www.typescriptlang.org/',
         },
       },
+    ]);
+  });
+
+  it('publishes category swaps and retries failed skill ordering without losing drafts', async () => {
+    h.skills.mockImplementation(async ({ type }) =>
+      type === 'GET'
+        ? { success: true, data: structuredClone(initialCategories) }
+        : {
+            ...committedBatch,
+            success: false,
+            error: 'Skill order failed',
+            data: {
+              ...committedBatch.data,
+              reordered: [2, 1, 'skill:11'],
+              failed: [{ kind: 'reorder', id: 'skill:10', error: 'db down' }],
+            },
+          }
+    );
+    await mount(createElement(SkillsSection));
+    const tools = [...document.querySelectorAll('h2')]
+      .find((heading) => heading.textContent === 'Tools')
+      ?.closest('div.rounded-xl');
+    if (!tools) throw new Error('Missing tools category');
+    await click(buttonByTitle('Move up', tools));
+    await click(buttonByTitle('Move up', skillCard('Rust')));
+    await publish();
+    expect(batchPayload().categoryOrder).toEqual([
+      { id: 2, position: 0 },
+      { id: 1, position: 1 },
+    ]);
+    await publish();
+    const batches = h.skills.mock.calls
+      .map(([operation]) => operation)
+      .filter((operation) => operation.type === 'BATCH_PUBLISH');
+    expect(batches[1].categoryOrder).toEqual([]);
+    expect(batches[1].skillOrder).toEqual([
+      { id: 20, position: 0 },
+      { id: 11, position: 0 },
+      { id: 10, position: 1 },
+    ]);
+  });
+
+  it('redensifies surviving skills after a pending delete', async () => {
+    await mount(createElement(SkillsSection));
+    await click(buttonByTitle('Delete', skillCard('TypeScript')));
+    await publish();
+    expect(batchPayload().skillOrder).toEqual([
+      { id: 11, position: 0 },
+      { id: 20, position: 0 },
     ]);
   });
 });

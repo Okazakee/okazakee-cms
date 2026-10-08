@@ -11,11 +11,13 @@ import {
 import {
   prepareImageUpload,
   removePublicFileIfDifferent,
+  removePublicFileIfPresent,
   removeStorageObjectBestEffort,
   requireAuth,
   uploadImmutablePreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import { supabaseSchema } from '@/config/shared';
 import type {
   MutationResult,
   RevalidationStatus,
@@ -575,31 +577,34 @@ async function removeUser(
     : never,
   id: number
 ): Promise<UsersResult> {
+  const bucket = getCmsStorageBucket();
   // Prevent removing the last admin
-  const { data: user } = await getCmsAdminClient()
+  const { data: user, error: lookupError } = await getCmsAdminClient()
     .from('cms_allowed_users')
     .select('role, email, github_user_id, github_username')
     .eq('id', id)
     .single();
+  if (lookupError && lookupError.code !== 'PGRST116') throw lookupError;
 
   if (!user) {
     return { success: false, error: 'User not found' };
   }
 
   if (user.role === 'admin') {
-    const { data: admins } = await getCmsAdminClient()
+    const { data: admins, error: adminsError } = await getCmsAdminClient()
       .from('cms_allowed_users')
       .select('id')
       .eq('role', 'admin');
+    if (adminsError) throw adminsError;
 
-    if (admins && admins.length === 1) {
+    if (!admins || admins.length <= 1) {
       return { success: false, error: 'Cannot remove the last admin' };
     }
   }
 
   // Find and delete user profile
   const adminClient = getCmsAdminClient();
-  let profileId: string | null = null;
+  let profile: { id: string; avatar_url: string | null } | null = null;
 
   // Check if this is a dummy user (email format: dummy-{uuid}@dummy.local)
   const isDummyUser =
@@ -607,71 +612,87 @@ async function removeUser(
 
   // Try to find profile by email (works for both dummy and regular users)
   if (user.email) {
-    const { data: profileByEmail } = await adminClient
+    const { data, error } = await adminClient
       .from('user_profiles')
-      .select('id')
+      .select('id, avatar_url')
       .eq('email', user.email.toLowerCase())
-      .single();
-    if (profileByEmail) profileId = profileByEmail.id;
+      .maybeSingle();
+    if (error) throw error;
+    profile = data;
   }
 
   // Try immutable GitHub ID before the legacy display handle.
-  if (!profileId && user.github_user_id) {
-    const { data: profileByGithubId } = await adminClient
+  if (!profile && user.github_user_id) {
+    const { data, error } = await adminClient
       .from('user_profiles')
-      .select('id')
+      .select('id, avatar_url')
       .eq('github_user_id', user.github_user_id)
-      .single();
-    if (profileByGithubId) profileId = profileByGithubId.id;
+      .maybeSingle();
+    if (error) throw error;
+    profile = data;
   }
 
   // Legacy display handle last (dual-allowed transition only).
-  if (!profileId && user.github_username) {
-    const { data: profileByGithub } = await adminClient
+  if (!profile && !user.github_user_id && user.github_username) {
+    const { data, error } = await adminClient
       .from('user_profiles')
-      .select('id')
+      .select('id, avatar_url')
       .eq('github_username', user.github_username)
-      .single();
-    if (profileByGithub) profileId = profileByGithub.id;
+      .maybeSingle();
+    if (error) throw error;
+    profile = data;
   }
 
   // Delete from cms_allowed_users
-  const { error } = await getCmsAdminClient()
+  const { data: deletedAllowedUser, error } = await adminClient
     .from('cms_allowed_users')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .select('id')
+    .single();
 
   if (error) throw error;
+  if (!deletedAllowedUser) throw new Error('User removal returned no row');
 
   // Delete from user_profiles if found (using admin client to bypass RLS)
-  if (profileId) {
-    const { error: deleteProfileError } = await adminClient
-      .from('user_profiles')
-      .delete()
-      .eq('id', profileId);
+  if (profile) {
+    const { data: deletedProfile, error: deleteProfileError } =
+      await adminClient
+        .from('user_profiles')
+        .delete()
+        .eq('id', profile.id)
+        .select('id, avatar_url')
+        .single();
 
-    if (deleteProfileError) {
-      console.error('Error deleting user profile:', deleteProfileError);
-      // Don't throw - profile deletion is not critical if it fails
+    if (deleteProfileError || !deletedProfile) {
+      throw new Error('Access revoked, but failed to remove the user profile');
     }
 
-    // For dummy users, also delete the auth user
-    if (isDummyUser) {
-      try {
-        await adminClient.auth.admin.deleteUser(profileId);
-      } catch (deleteAuthError) {
-        console.error('Error deleting dummy auth user:', deleteAuthError);
-        // Don't throw - auth user deletion is not critical if it fails
+    // Exact configured-bucket cleanup only after returned-row DB evidence.
+    await removePublicFileIfPresent(
+      adminClient,
+      deletedProfile.avatar_url,
+      bucket
+    );
+
+    // Auth is shared across schemas; staging must never cascade public rows.
+    if (isDummyUser && supabaseSchema === 'public') {
+      const { error: deleteAuthError } =
+        await adminClient.auth.admin.deleteUser(profile.id);
+      if (deleteAuthError) {
+        throw new Error(
+          'Profile removed, but failed to remove dummy auth user'
+        );
       }
     }
   }
 
   let revalidation: RevalidationStatus | undefined;
-  if (profileId) {
+  if (profile) {
     revalidation = await invalidatePublicContent({
       entity: 'author',
       operation: 'update',
-      id: profileId,
+      id: profile.id,
     });
   }
 

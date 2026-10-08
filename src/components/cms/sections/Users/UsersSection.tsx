@@ -21,6 +21,7 @@ import {
   uploadUserAvatar,
   usersActions,
 } from '@/app/actions/cms/sections/usersActions';
+import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { RoleSelect } from '@/components/cms/shared/RoleChip';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
@@ -63,6 +64,9 @@ export default function UsersSection() {
   const [savingNameFor, setSavingNameFor] = useState<string | null>(null);
   const [updatingRoleFor, setUpdatingRoleFor] = useState<number | null>(null);
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const [removeTarget, setRemoveTarget] = useState<AllowedUser | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const removalLock = useRef(false);
 
   const isAdmin = user?.role === 'admin';
 
@@ -143,13 +147,24 @@ export default function UsersSection() {
     }
   };
 
-  const handleRemoveUser = async (id: number) => {
+  const handleRemoveUser = async () => {
+    if (!removeTarget || removalLock.current || !isAdmin) return;
+    removalLock.current = true;
+    setRemoving(true);
+    setError(null);
     try {
-      const r = await usersActions({ type: 'REMOVE', id });
+      const r = await usersActions({ type: 'REMOVE', id: removeTarget.id });
       if (!r.success) throw new Error(r.error);
+      setRemoveTarget(null);
       await fetchUsers();
+      const warning = revalidationWarning(r);
+      if (warning) setError(warning);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('users.errorRemoveUser'));
+      setRemoveTarget(null);
+    } finally {
+      removalLock.current = false;
+      setRemoving(false);
     }
   };
 
@@ -378,8 +393,7 @@ export default function UsersSection() {
           // only surface the handles the heading is not already showing.
           const showEmail = !!au.email && displayName !== au.email;
           const showGithub =
-            !!au.github_username &&
-            displayName !== `@${au.github_username}`;
+            !!au.github_username && displayName !== `@${au.github_username}`;
 
           const avatar = au.profile?.avatar_url ? (
             <Image
@@ -450,7 +464,9 @@ export default function UsersSection() {
                 ) : (
                   <span
                     className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                      au.github_username ? 'bg-surface-raised' : 'bg-blue-600/20'
+                      au.github_username
+                        ? 'bg-surface-raised'
+                        : 'bg-blue-600/20'
                     }`}
                   >
                     {au.github_username ? (
@@ -565,7 +581,7 @@ export default function UsersSection() {
                     labels={roleLabels}
                     label={t('users.roleLabel')}
                     editorDisabled={isLastAdmin}
-                    disabled={updatingRoleFor === au.id}
+                    disabled={updatingRoleFor === au.id || removing}
                     onChange={(nr) => {
                       if (isLastAdmin && nr === 'editor') {
                         setError(t('users.cannotDemoteLastAdmin'));
@@ -576,7 +592,15 @@ export default function UsersSection() {
                   />
                   <button
                     type="button"
-                    onClick={() => handleRemoveUser(au.id)}
+                    onClick={() => setRemoveTarget(au)}
+                    disabled={
+                      removing ||
+                      updatingRoleFor !== null ||
+                      uploadingAvatarFor !== null ||
+                      savingNameFor !== null ||
+                      isSubmitting
+                    }
+                    aria-label={t('users.removeUser')}
                     className="rounded-md p-2 text-text-dim transition-colors hover:text-red-400"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -587,6 +611,20 @@ export default function UsersSection() {
           );
         })
       )}
+      <ConfirmDialog
+        isOpen={removeTarget !== null}
+        title={t('users.removeConfirmTitle')}
+        message={t('users.removeConfirmMessage', {
+          identity:
+            removeTarget?.profile?.display_name ||
+            removeTarget?.email ||
+            removeTarget?.github_username ||
+            String(removeTarget?.id ?? ''),
+        })}
+        busy={removing}
+        onConfirm={() => void handleRemoveUser()}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 }

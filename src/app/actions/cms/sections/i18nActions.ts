@@ -145,6 +145,18 @@ export async function i18nActions(
     };
   }
 
+  if (
+    (operation.type === 'UPDATE_SECTION' ||
+      operation.type === 'UPDATE_SECTIONS') &&
+    operation.sectionKey !== 'hero-section' &&
+    operation.sectionKey !== 'request-form'
+  ) {
+    return {
+      success: false,
+      error: 'This translation namespace is owned by the public website',
+    };
+  }
+
   try {
     switch (operation.type) {
       case 'GET':

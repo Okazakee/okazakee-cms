@@ -8,11 +8,8 @@ import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { IconPicker } from '@/components/cms/shared/IconPicker';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { TranslationField } from '@/components/cms/shared/TranslationField';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
@@ -21,10 +18,10 @@ import {
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
+import { isValidHttpUrl } from '@/utils/cms/validation';
 
 export default function ContactsSection() {
   const t = useTranslations('cms');
@@ -43,28 +40,16 @@ export default function ContactsSection() {
   const [isAdding, setIsAdding] = useState(false);
   const [newForm, setNewForm] = useState({
     label: '',
-    icon: 'Link',
+    icon: '',
     link: '',
     bg_color: '#000000',
   });
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
-
-  const {
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('contacts-section');
 
   const isDirty =
     modifiedIds.size > 0 ||
     newContacts.length > 0 ||
     deletedIds.size > 0 ||
-    orderChanged ||
-    transDirty;
+    orderChanged;
   useSectionDirty('contacts', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -81,7 +66,14 @@ export default function ContactsSection() {
         if (!current()) return;
         if (!r.success) throw new Error(r.error || 'Failed');
         const server = r.data as Contact[];
-        setContacts(drafts ? mergeServerWithDrafts(server, drafts) : server);
+        const merged = drafts ? mergeServerWithDrafts(server, drafts) : server;
+        setContacts(
+          merged.sort(
+            (a, b) =>
+              (a.position ?? Number.MAX_SAFE_INTEGER) -
+                (b.position ?? Number.MAX_SAFE_INTEGER) || a.id - b.id
+          )
+        );
       } catch (err) {
         if (current())
           setError(err instanceof Error ? err.message : 'Failed to fetch');
@@ -108,7 +100,7 @@ export default function ContactsSection() {
     };
     setContacts((prev) => [...prev, temp]);
     setNewContacts((prev) => [...prev, temp]);
-    setNewForm({ label: '', icon: 'Link', link: '', bg_color: '#000000' });
+    setNewForm({ label: '', icon: '', link: '', bg_color: '#000000' });
     setIsAdding(false);
   };
 
@@ -137,6 +129,7 @@ export default function ContactsSection() {
       return next;
     });
     setContacts((prev) => prev.filter((c) => c.id !== id));
+    setOrderChanged(true);
   };
 
   const move = (id: number, dir: -1 | 1) => {
@@ -232,12 +225,12 @@ export default function ContactsSection() {
         errors.push(...reconcile.failureMessages);
 
         // Keep the reorder flag until every sent position committed.
-        if (orderChanged) {
-          const reordered = new Set(evidence.reordered.map(String));
-          retainedOrder = reorderIds.some(
-            (item) => !reordered.has(String(item.id))
-          );
-        }
+        const reordered = new Set(evidence.reordered.map(String));
+        retainedOrder =
+          reorderIds.some((item) => !reordered.has(String(item.id))) ||
+          retainedCreates.length > 0 ||
+          retainedDeletes.length > 0 ||
+          evidence.failed.some((failure) => failure.kind === 'reorder');
 
         const retainedCreateSet = new Set(retainedCreates);
         const retainedModifiedSet = new Set(retainedUpdates.map(String));
@@ -246,8 +239,13 @@ export default function ContactsSection() {
         );
         const draftModified = new Map(
           contacts
-            .filter((c) => retainedModifiedSet.has(String(c.id)))
-            .map((c) => [c.id, c])
+            .filter(
+              (c) => retainedModifiedSet.has(String(c.id)) || retainedOrder
+            )
+            .map((c): [number, Contact] => {
+              const id = Number(evidence.createdIds[String(c.id)] ?? c.id);
+              return [id, { ...c, id, position: positions.get(c.id) ?? 0 }];
+            })
         );
         await fetchData({
           creates: draftCreates,
@@ -261,11 +259,6 @@ export default function ContactsSection() {
         setModifiedIds(new Set(retainedUpdates));
         setDeletedIds(new Set(retainedDeletes));
         setOrderChanged(retainedOrder);
-      }
-
-      if (transDirty) {
-        const tErrs = await saveTranslations();
-        errors.push(...tErrs);
       }
 
       const batchWarning = revalidationWarning(batch);
@@ -296,8 +289,6 @@ export default function ContactsSection() {
     deletedIds,
     modifiedIds,
     orderChanged,
-    transDirty,
-    saveTranslations,
     fetchData,
     t,
   ]);
@@ -309,7 +300,6 @@ export default function ContactsSection() {
     setNewContacts([]);
     setDeletedIds(new Set());
     setOrderChanged(false);
-    revertTranslations();
     setError(null);
   };
 
@@ -344,47 +334,6 @@ export default function ContactsSection() {
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('common.translations')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-        {transLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <TranslationField
-              label={t('contacts.translationTitleLabel')}
-              enValue={getField('en', 'title')}
-              itValue={getField('it', 'title')}
-              onChangeEn={(v) => setField('en', 'title', v)}
-              onChangeIt={(v) => setField('it', 'title', v)}
-              activeLocale={activeLocale}
-            />
-            <TranslationField
-              label={t('contacts.translationSubtitleLabel')}
-              enValue={getField('en', 'subtitle')}
-              itValue={getField('it', 'subtitle')}
-              onChangeEn={(v) => setField('en', 'subtitle', v)}
-              onChangeIt={(v) => setField('it', 'subtitle', v)}
-              type="textarea"
-              rows={3}
-              activeLocale={activeLocale}
-            />
-          </div>
-        )}
-      </div>
-
       {/* Contact Links */}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-text-main ">
@@ -406,12 +355,25 @@ export default function ContactsSection() {
         <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-3">
           <div>
             <label className="block text-sm font-medium text-text-main mb-1">
-              {t('contacts.iconNameLabel')}
+              {t('contacts.iconUrlLabel')}
             </label>
-            <IconPicker
+            <input
+              type="url"
               value={newForm.icon}
-              onChange={(v) => setNewForm((p) => ({ ...p, icon: v }))}
+              onChange={(e) =>
+                setNewForm((p) => ({ ...p, icon: e.target.value }))
+              }
+              className={inputClass}
+              placeholder={t('contacts.iconUrlPlaceholder')}
             />
+            {newForm.icon.trim() && isValidHttpUrl(newForm.icon) && (
+              // biome-ignore lint/performance/noImgElement: SVG URLs are supplied by editors.
+              <img
+                src={newForm.icon.trim()}
+                alt=""
+                className="mt-2 h-8 w-8 object-contain"
+              />
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-text-main mb-1">
@@ -479,7 +441,7 @@ export default function ContactsSection() {
                 setIsAdding(false);
                 setNewForm({
                   label: '',
-                  icon: 'Link',
+                  icon: '',
                   link: '',
                   bg_color: '#000000',
                 });
@@ -513,7 +475,14 @@ export default function ContactsSection() {
                   className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-sm"
                   style={{ backgroundColor: c.bg_color }}
                 >
-                  {c.label.charAt(0)}
+                  {c.icon.trim() && isValidHttpUrl(c.icon) && (
+                    // biome-ignore lint/performance/noImgElement: SVG URLs are supplied by editors.
+                    <img
+                      src={c.icon.trim()}
+                      alt=""
+                      className="h-6 w-6 object-contain"
+                    />
+                  )}
                 </div>
                 <input
                   type="text"
@@ -549,9 +518,15 @@ export default function ContactsSection() {
                     className="w-10 h-10 rounded cursor-pointer border-0 flex-shrink-0"
                   />
                   <div className="w-full sm:w-44">
-                    <IconPicker
+                    <input
+                      type="url"
+                      aria-label={t('contacts.iconUrlLabel')}
                       value={c.icon}
-                      onChange={(v) => handleChange(c.id, 'icon', v)}
+                      onChange={(e) =>
+                        handleChange(c.id, 'icon', e.target.value)
+                      }
+                      className={inputClass}
+                      placeholder={t('contacts.iconUrlPlaceholder')}
                     />
                   </div>
                 </div>
