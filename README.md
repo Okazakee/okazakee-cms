@@ -236,7 +236,7 @@ its own footer defaults (`Okazakee` / `02863310815`).
 
 Link once per machine, then verify (`src/utils/cms/devMigrations.ts`;
 `src/libs/cms/devMigrations/devCheck.ts`; registry
-`src/libs/cms/devMigrations/registry.json`, 9 `{version,name,sourceFile}`
+`src/libs/cms/devMigrations/registry.json`, 10 `{version,name,sourceFile}`
 entries):
 
 ```bash
@@ -268,20 +268,23 @@ ends `dev check: N pass / 0 fail / M info`. Drift fails with exit 1, e.g.
 hint) — plus the shared-auth NOT-certified note.
 
 Owner knows the development state is good when the check reports `0 fail`
-with all 9 `H-<version>` records matching: source bytes immutable, ledger
+with all 10 `H-<version>` records matching: source bytes immutable, ledger
 hash matches, live `dev_staging` effects match. `verified_existing` means
 the 93-check audit proved that source's schema effects plus its byte hash —
 it does not prove original execution provenance, and it certifies nothing
 about `public`, shared auth, or pre-existing history.
 
 Migration authority is split. The native `supabase_migrations` history is
-mixed-scope (13 total: 11 historical + `150208` dev-footer + `234758`
-dev-only bootstrap; the existing 12 records unchanged; the 7 original
-public/unqualified sources remain unrecorded globally) and does NOT certify
-content effects. Authority for dev lives in
-`dev_staging.cms_migration_audit`: 9 rows — 8 `verified_existing` (effects +
-source hash audited) plus `20261006233000` `applied` (the dev-only GitHub
-subject catch-up that keeps the clone level with the deployed callers).
+mixed-scope (15 total: 11 historical + `150208` dev-footer + `234758`
+dev-only ledger bootstrap + `20261006040745` storage hardening +
+`20261006082930` unified-identity privacy; ledger-only content changes add
+no row; the 7 original public/unqualified sources remain unrecorded
+globally) and does NOT certify content effects. Authority for dev lives in
+`dev_staging.cms_migration_audit`: 10 rows — 8 `verified_existing` (effects +
+source hash audited) plus two `applied` rows: `20261006233000` (the dev-only
+GitHub subject catch-up that keeps the clone level with the deployed
+callers) and `20261008122200` (the dev-only skills-section content reseed,
+applied through reviewed SQL).
 Source bytes are immutable: a changed registered file
 fails verification, never re-applies. The ledger bootstrap
 (`20261005234758_create_cms_migration_audit_ledger.sql`) is dev-only DDL

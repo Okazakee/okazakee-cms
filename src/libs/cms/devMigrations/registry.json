@@ -43,5 +43,10 @@
     "name": "add_identity_github_subject_dev_staging",
     "sourceFile": "supabase/migrations/20261006233000_add_identity_github_subject_dev_staging.sql",
     "version": "20261006233000"
+  },
+  {
+    "name": "reseed_skills_section_dev_staging",
+    "sourceFile": "supabase/migrations/20261008122200_reseed_skills_section_dev_staging.sql",
+    "version": "20261008122200"
   }
 ]

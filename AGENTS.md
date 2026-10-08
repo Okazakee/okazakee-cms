@@ -395,15 +395,17 @@ urgent it feels.
 - **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
   (`src/utils/cms/devMigrations.ts`;
   `src/libs/cms/devMigrations/devCheck.ts`; registry
-  `src/libs/cms/devMigrations/registry.json`, 9 `{version,name,sourceFile}`
+  `src/libs/cms/devMigrations/registry.json`, 10 `{version,name,sourceFile}`
   entries) plus login rate limiting / content tables and the dev-only
-  `dev_staging.cms_migration_audit` ledger (9 rows: 8 `verified_existing`
-  + `20261006233000` `applied`, the dev-only GitHub subject catch-up =
-  effects + source hash audited, not original execution provenance; native
-  history 13: 11 historical + `150208` dev-footer + `234758` dev-only
-  bootstrap, existing 12 unchanged; 7 original public/unqualified sources
-  remain unrecorded globally and must never be replayed against shared
-  `public`). Link once (`supabase login`,
+  `dev_staging.cms_migration_audit` ledger (10 rows: 8 `verified_existing`
+  + two `applied` — `20261006233000`, the dev-only GitHub subject catch-up,
+  and `20261008122200`, the dev-only skills-section content reseed = effects
+  + source hash audited, not original execution provenance; native
+  history 15: 11 historical + `150208` dev-footer + `234758` dev-only
+  bootstrap + `20261006040745` storage hardening + `20261006082930`
+  unified-identity privacy, ledger-only content changes add no native row;
+  7 original public/unqualified sources remain unrecorded globally and must
+  never be replayed against shared `public`). Link once (`supabase login`,
   `supabase link --project-ref <ref>`); green ends
   `dev check: N pass / 0 fail / M info`, drift `FAIL`s with exit 1.
   `--scope` must equal `dev_staging`. That is the only DB command — no
@@ -412,7 +414,7 @@ urgent it feels.
   explicitly reviewed/manual. NEVER `supabase db push`, `migration repair`,
   or `search_path`-fallback apply — `public` is off-limits. Source bytes
   immutable. Owner knows dev state is good when the check reports 0 fail
-  with all 8 records matching; `public`, shared auth, and pre-existing
+  with all 10 records matching; `public`, shared auth, and pre-existing
   history are not certified.
 - **Deployment:** Vercel with Next.js framework preset. Build output: `.next/`.
 
