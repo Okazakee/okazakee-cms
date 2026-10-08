@@ -10,6 +10,8 @@ interface ImageProcessingOptions {
   maxWidth?: number;
   maxHeight?: number;
   quality?: number;
+  /** See ProcessImageOptions: `inside` keeps the source aspect ratio. */
+  fit?: 'cover' | 'inside';
 }
 
 interface UseFileUploadOptions {
@@ -122,6 +124,7 @@ export function useFileUpload({
             maxWidth: imageProcessing.maxWidth ?? 1920,
             maxHeight: imageProcessing.maxHeight ?? 1080,
             quality: imageProcessing.quality ?? 0.85,
+            fit: imageProcessing.fit ?? 'cover',
           });
 
           if (processed.success && processed.file) {

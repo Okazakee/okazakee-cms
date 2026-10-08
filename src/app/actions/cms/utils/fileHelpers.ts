@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { encode as blurkitEncode } from 'blurkit/node';
+import { getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { FALLBACK_BLURHASH, isValidBlurhash } from '@/utils/blurhashUtils';
 // Pure validation helpers live in @/utils/cms/validation (unit-tested).
@@ -15,7 +16,6 @@ import {
   validateImageFile,
   validatePdfFile,
 } from '@/utils/cms/validation';
-import { getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
 import { createClient } from '@/utils/supabase/server';
 import {
@@ -187,6 +187,13 @@ type ProcessImageOptions = {
   maxWidth?: number;
   maxHeight?: number;
   quality?: number;
+  /**
+   * How the requested box is filled. `cover` (default) crops to the exact
+   * bounds, which suits portrait/thumbnail targets; `inside` fits the whole
+   * image within the bounds and keeps its aspect ratio for wide assets such as
+   * header logos.
+   */
+  fit?: 'cover' | 'inside';
 };
 
 type ProcessImageResult = {
@@ -265,7 +272,14 @@ export async function processImage(
 
     let pipeline = sharp(inputBuffer, { animated });
 
-    if (maxWidth && maxHeight) {
+    if (maxWidth && maxHeight && options?.fit === 'inside') {
+      // Contain: fit the whole image inside the bounds and never enlarge it,
+      // so a wide logo is not centre-cropped into a fixed box.
+      pipeline = pipeline.resize(maxWidth, maxHeight, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    } else if (maxWidth && maxHeight) {
       pipeline = pipeline.resize(maxWidth, maxHeight, {
         fit: 'cover',
         position: 'center',

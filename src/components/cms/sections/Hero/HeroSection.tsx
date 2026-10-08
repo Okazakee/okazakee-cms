@@ -18,14 +18,12 @@ import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
-import type { HeroShape, TypewriterTarget } from '@/types/fetchedData.types';
+import type { HeroShape } from '@/types/fetchedData.types';
 import {
   countHeroRoleEntries,
   heroRolePath,
   heroShapes,
   normalizeHeroShape,
-  normalizeTypewriterTarget,
-  typewriterTargets,
 } from '@/utils/heroDisplay';
 
 const locales = ['en', 'it'] as const;
@@ -43,9 +41,6 @@ export default function HeroSection() {
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
   const [shape, setShape] = useState<HeroShape>('pebble');
-  const [typewriter, setTypewriter] = useState(false);
-  const [typewriterTarget, setTypewriterTarget] =
-    useState<TypewriterTarget>('role1');
 
   const imgUpload = useFileUpload({
     accept: 'image/*',
@@ -71,10 +66,6 @@ export default function HeroSection() {
     if (!heroSection || initRef.current) return;
     initRef.current = true;
     setShape(normalizeHeroShape(heroSection.shape));
-    setTypewriter(heroSection.typewriter === true);
-    setTypewriterTarget(
-      normalizeTypewriterTarget(heroSection.typewriter_target)
-    );
     if (heroSection.mainImage) {
       imgUpload.setFileFromUrl(heroSection.mainImage);
     }
@@ -85,11 +76,7 @@ export default function HeroSection() {
     countHeroRoleEntries(translations.en),
     countHeroRoleEntries(translations.it)
   );
-  const displayDirty =
-    shape !== normalizeHeroShape(heroSection?.shape) ||
-    typewriter !== (heroSection?.typewriter === true) ||
-    typewriterTarget !==
-      normalizeTypewriterTarget(heroSection?.typewriter_target);
+  const displayDirty = shape !== normalizeHeroShape(heroSection?.shape);
   const isDirty = imgUpload.file !== null || transDirty || displayDirty;
 
   useSectionDirty('hero', isDirty);
@@ -139,11 +126,6 @@ export default function HeroSection() {
           files: {
             mainImage: imgUpload.file,
           },
-          currentData: {
-            mainImage: heroSection?.mainImage || '',
-            resume_en: heroSection?.resume_en || '',
-            resume_it: heroSection?.resume_it || '',
-          },
           blurhashURL: imgUpload.blurhash ?? undefined,
         });
 
@@ -159,16 +141,18 @@ export default function HeroSection() {
         const data = result.data as {
           propic?: string;
           blurhashURL?: string;
-          resume_en?: string;
-          resume_it?: string;
         };
 
         setHeroSection(
-          mergeHeroSettings(heroSection, {
-            mainImage: data.propic || heroSection?.mainImage || null,
-            blurhashURL: data.blurhashURL || heroSection?.blurhashURL || null,
-            resume_en: data.resume_en || heroSection?.resume_en || null,
-            resume_it: data.resume_it || heroSection?.resume_it || null,
+          mergeHeroSettings(useCmsStore.getState().heroSection, {
+            mainImage:
+              data.propic ??
+              useCmsStore.getState().heroSection?.mainImage ??
+              null,
+            blurhashURL:
+              data.blurhashURL ??
+              useCmsStore.getState().heroSection?.blurhashURL ??
+              null,
           })
         );
 
@@ -183,7 +167,7 @@ export default function HeroSection() {
       if (displayDirty) {
         const result = await heroActions({
           type: 'UPDATE_DISPLAY',
-          data: { shape, typewriter, typewriter_target: typewriterTarget },
+          data: { shape },
         });
 
         if (!result.success) {
@@ -197,11 +181,7 @@ export default function HeroSection() {
           revalidationWarning(result) ?? revalidationMessage;
 
         setHeroSection(
-          mergeHeroSettings(heroSection, {
-            shape,
-            typewriter,
-            typewriter_target: typewriterTarget,
-          })
+          mergeHeroSettings(useCmsStore.getState().heroSection, { shape })
         );
       }
 
@@ -229,8 +209,6 @@ export default function HeroSection() {
     setHeroSection,
     shape,
     t,
-    typewriter,
-    typewriterTarget,
   ]);
 
   const handleRevert = useCallback(() => {
@@ -238,10 +216,6 @@ export default function HeroSection() {
     imgUpload.clearFile();
     revertTranslations();
     setShape(normalizeHeroShape(heroSection?.shape));
-    setTypewriter(heroSection?.typewriter === true);
-    setTypewriterTarget(
-      normalizeTypewriterTarget(heroSection?.typewriter_target)
-    );
     if (heroSection?.mainImage) {
       imgUpload.setFileFromUrl(heroSection.mainImage);
     }
@@ -349,10 +323,10 @@ export default function HeroSection() {
         </div>
       </div>
 
-      {/* Portrait shape and animation */}
+      {/* Portrait shape */}
       <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
         <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-          {t('hero.displaySection')}
+          {t('hero.portraitSection')}
         </h2>
 
         <div>
@@ -374,48 +348,13 @@ export default function HeroSection() {
           />
           <p className="mt-2 text-xs text-text-muted">{t('hero.shapeHint')}</p>
         </div>
-
-        <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">
-          <input
-            checked={typewriter}
-            className="w-4 h-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
-            onChange={(event) => setTypewriter(event.target.checked)}
-            type="checkbox"
-          />
-          {t('hero.typewriterLabel')}
-        </label>
-
-        <div>
-          <label
-            htmlFor="hero-typewriter-target"
-            className="block text-sm font-medium text-text-main mb-1"
-          >
-            {t('hero.typewriterTargetLabel')}
-          </label>
-          <Dropdown
-            id="hero-typewriter-target"
-            triggerClassName={inputClass}
-            disabled={!typewriter}
-            onChange={(value) =>
-              setTypewriterTarget(normalizeTypewriterTarget(value))
-            }
-            value={typewriterTarget}
-            options={typewriterTargets.map((target) => ({
-              value: target,
-              label: t(`hero.typewriterTargets.${target}`),
-            }))}
-          />
-          <p className="mt-2 text-xs text-text-muted">
-            {t('hero.typewriterHint')}
-          </p>
-        </div>
       </div>
 
-      {/* Translations */}
+      {/* Identity and content */}
       <div className="bg-surface-card rounded-xl p-4 md:p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('hero.translationsSection')}
+            {t('hero.identitySection')}
           </h2>
           <LocaleToggle
             activeLocale={activeLocale}
@@ -441,71 +380,53 @@ export default function HeroSection() {
               activeLocale={activeLocale}
             />
 
-            {roleCount === 0 ? (
-              <TranslationField
-                label={t('hero.roleLabel')}
-                enValue={getField('en', 'top.role')}
-                itValue={getField('it', 'top.role')}
-                onChangeEn={(v) => setField('en', 'top.role', v)}
-                onChangeIt={(v) => setField('it', 'top.role', v)}
-                activeLocale={activeLocale}
-              />
-            ) : (
-              <div className="space-y-3">
-                {Array.from({ length: roleCount }, (_, index) => (
-                  <div
-                    className="flex items-end gap-2"
-                    key={heroRolePath(index)}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <TranslationField
-                        label={`${t('hero.roleLabel')} ${index + 1}`}
-                        enValue={getField('en', heroRolePath(index))}
-                        itValue={getField('it', heroRolePath(index))}
-                        onChangeEn={(v) =>
-                          setField('en', heroRolePath(index), v)
-                        }
-                        onChangeIt={(v) =>
-                          setField('it', heroRolePath(index), v)
-                        }
-                        activeLocale={activeLocale}
-                      />
-                    </div>
-                    <div className="flex items-center gap-1 pb-1">
-                      <button
-                        aria-label={`${t('common.moveUp')}: ${index + 1}`}
-                        className={`${iconButtonClass} hover:text-accent-violet`}
-                        disabled={index === 0}
-                        onClick={() => moveRole(index, -1)}
-                        title={t('common.moveUp')}
-                        type="button"
-                      >
-                        <ArrowUp className="w-4 h-4" />
-                      </button>
-                      <button
-                        aria-label={`${t('common.moveDown')}: ${index + 1}`}
-                        className={`${iconButtonClass} hover:text-accent-violet`}
-                        disabled={index === roleCount - 1}
-                        onClick={() => moveRole(index, 1)}
-                        title={t('common.moveDown')}
-                        type="button"
-                      >
-                        <ArrowDown className="w-4 h-4" />
-                      </button>
-                      <button
-                        aria-label={`${t('hero.removeRole')}: ${index + 1}`}
-                        className={`${iconButtonClass} hover:text-red-400`}
-                        onClick={() => removeRole(index)}
-                        title={t('hero.removeRole')}
-                        type="button"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+            <div className="space-y-3">
+              {Array.from({ length: roleCount }, (_, index) => (
+                <div className="flex items-end gap-2" key={heroRolePath(index)}>
+                  <div className="min-w-0 flex-1">
+                    <TranslationField
+                      label={`${t('hero.roleLabel')} ${index + 1}`}
+                      enValue={getField('en', heroRolePath(index))}
+                      itValue={getField('it', heroRolePath(index))}
+                      onChangeEn={(v) => setField('en', heroRolePath(index), v)}
+                      onChangeIt={(v) => setField('it', heroRolePath(index), v)}
+                      activeLocale={activeLocale}
+                    />
                   </div>
-                ))}
-              </div>
-            )}
+                  <div className="flex items-center gap-1 pb-1">
+                    <button
+                      aria-label={`${t('common.moveUp')}: ${index + 1}`}
+                      className={`${iconButtonClass} hover:text-accent-violet`}
+                      disabled={index === 0}
+                      onClick={() => moveRole(index, -1)}
+                      title={t('common.moveUp')}
+                      type="button"
+                    >
+                      <ArrowUp className="w-4 h-4" />
+                    </button>
+                    <button
+                      aria-label={`${t('common.moveDown')}: ${index + 1}`}
+                      className={`${iconButtonClass} hover:text-accent-violet`}
+                      disabled={index === roleCount - 1}
+                      onClick={() => moveRole(index, 1)}
+                      title={t('common.moveDown')}
+                      type="button"
+                    >
+                      <ArrowDown className="w-4 h-4" />
+                    </button>
+                    <button
+                      aria-label={`${t('hero.removeRole')}: ${index + 1}`}
+                      className={`${iconButtonClass} hover:text-red-400`}
+                      onClick={() => removeRole(index)}
+                      title={t('hero.removeRole')}
+                      type="button"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
 
             <p className="text-xs text-text-muted">{t('hero.rolesHint')}</p>
             <button

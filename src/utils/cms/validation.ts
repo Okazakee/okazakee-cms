@@ -208,13 +208,6 @@ export function isValidHttpUrl(urlString: string): boolean {
   }
 }
 
-/** Absolute http(s) URL, or null so the reader falls back to the bundled asset. */
-export function normalizeLogoUrl(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  return trimmed && isValidHttpUrl(trimmed) ? trimmed : null;
-}
-
 /**
  * URL validator for contact links: http/https/mailto/tel only.
  */

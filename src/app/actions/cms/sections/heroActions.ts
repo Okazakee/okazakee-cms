@@ -13,13 +13,11 @@ import {
   validatePdfFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import type { MutationResult } from '@/libs/cms/mutationResult';
-import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
-import type { HeroShape, TypewriterTarget } from '@/types/fetchedData.types';
-import {
-  normalizeHeroShape,
-  normalizeTypewriterTarget,
-} from '@/utils/heroDisplay';
+import { cacheTags } from '@/libs/content/cacheTags';
+import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { HeroShape } from '@/types/fetchedData.types';
+import { normalizeHeroShape } from '@/utils/heroDisplay';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
@@ -45,12 +43,8 @@ type HeroAssetUpdateData = {
   resume_it?: string;
 };
 
-/** Portrait preset and typewriter configuration; unknown values degrade. */
-type HeroDisplayData = {
-  shape?: string;
-  typewriter?: boolean;
-  typewriter_target?: string;
-};
+/** Portrait preset; unknown values degrade to the default. */
+type HeroDisplayData = { shape?: string };
 
 type HeroFileData = {
   propic?: File;
@@ -122,7 +116,7 @@ async function getHeroData(supabase: SupabaseClient): Promise<HeroResult> {
   try {
     const { data: heroSection } = await supabase
       .from('hero_section')
-      .select('id, propic, blurhashURL, shape, typewriter, typewriter_target')
+      .select('id, propic, blurhashURL, shape')
       .single();
     const { data: resumeData } = await supabase
       .from('hero_section')
@@ -158,24 +152,9 @@ async function updateHeroDisplay(
 ): Promise<HeroResult> {
   try {
     const admin = getAdminClient();
-    const patch: {
-      shape?: HeroShape;
-      typewriter?: boolean;
-      typewriter_target?: TypewriterTarget;
-    } = {};
-
-    // Unknown presets/targets degrade to the documented defaults instead of
-    // being written verbatim.
+    const patch: { shape?: HeroShape } = {};
     if (updateData.shape !== undefined) {
       patch.shape = normalizeHeroShape(updateData.shape);
-    }
-    if (updateData.typewriter !== undefined) {
-      patch.typewriter = updateData.typewriter === true;
-    }
-    if (updateData.typewriter_target !== undefined) {
-      patch.typewriter_target = normalizeTypewriterTarget(
-        updateData.typewriter_target
-      );
     }
 
     if (Object.keys(patch).length === 0) {
@@ -188,7 +167,7 @@ async function updateHeroDisplay(
       .from('hero_section')
       .update(patch)
       .eq('id', 1)
-      .select('shape, typewriter, typewriter_target')
+      .select('shape')
       .single();
 
     if (error) throw error;
@@ -446,8 +425,12 @@ async function updateWithFiles(
   }
 
   const revalidation = await invalidatePublicContent({
-    entity: 'hero',
+    entity: propicFile ? 'hero' : 'resume',
     operation: 'asset-update',
+    extraTags:
+      propicFile && (files.resume_en || files.resume_it)
+        ? [cacheTags.resume, cacheTags.heroSection]
+        : undefined,
   });
 
   return { success: true, data: updates, revalidation };

@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SiteSettingsRow } from '@/app/actions/cms/sections/siteSettingsActions';
 import {
@@ -13,342 +14,338 @@ const h = vi.hoisted(() => ({
 vi.mock('@/libs/cms/supabase/admin', () => ({
   getCmsAdminClient: () => h.fake.client,
 }));
-
 vi.mock('@/utils/supabase/server', () => ({
   createClient: async () => h.fake.client,
 }));
-
 vi.mock('@/libs/public-site/revalidation', () => ({
   invalidatePublicContent: h.invalidate,
 }));
 
-vi.mock('blurkit/node', () => ({
-  encode: vi.fn(async () => ({ hash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' })),
-}));
-
 import { siteSettingsActions } from '@/app/actions/cms/sections/siteSettingsActions';
 
-// The fake Supabase user's email must match the allowlist row it is checked
-// against, so both fixtures share that address and differ only by role.
-const ADMIN = [{ email: 'admin@example.com', role: 'admin' }];
-const EDITOR = [{ email: 'admin@example.com', role: 'editor' }];
+const admin = [{ email: 'admin@example.com', role: 'admin' }];
+const editor = [{ email: 'admin@example.com', role: 'editor' }];
+const nullLogos = { header_logo_dark: null, header_logo_light: null };
+const oldPath = 'header/dark/previous.webp';
+const oldUrl = `https://fake.supabase.co/storage/v1/object/public/website-dev/${oldPath}`;
 
-function webpFile(name = 'logo.webp'): File {
-  return new File(
-    [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
-    name,
-    { type: 'image/webp' }
-  );
-}
-
-function makeFake(
-  tables: Record<string, Array<Record<string, unknown>>>,
-  extra: Partial<Parameters<typeof createFakeSupabase>[0]> = {}
-) {
-  return createFakeSupabase({ tables, ...extra });
-}
-
-function storedRow() {
-  return h.fake.state.tables.site_settings?.[0];
+async function logoFile() {
+  const bytes = await sharp({
+    create: { width: 32, height: 16, channels: 4, background: '#ff00ff' },
+  })
+    .png()
+    .toBuffer();
+  return new File([new Uint8Array(bytes)], 'logo.png', { type: 'image/png' });
 }
 
 beforeEach(() => {
   h.invalidate.mockClear();
-  // Storage hardening: bucket + origin resolve from env per call (dev pairing
-  // -> website-dev, matching the fake public URL origin).
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://fake.supabase.co');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://fake.supabase.co');
 });
 
-describe('siteSettingsActions GET', () => {
-  it('reads "never configured" defaults when no row exists yet', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    const result = await siteSettingsActions({ type: 'GET' });
-
-    expect(result.success).toBe(true);
-    const data = result.data as SiteSettingsRow;
-    expect(data.header_logo_dark).toBeNull();
-    expect(data.header_logo_light).toBeNull();
-    // Unconfigured footer identity: the site renders its own default.
-    expect(data.footer_name).toBeNull();
-    expect(data.footer_vat_number).toBeNull();
-  });
-
-  it('rejects a non-admin caller before touching the table', async () => {
-    h.fake = makeFake({ cms_allowed_users: EDITOR, site_settings: [] });
-
-    const result = await siteSettingsActions({ type: 'GET' });
-
-    expect(result.success).toBe(false);
-    // Only the allowlist lookup: the settings table is never reached.
-    expect(
-      h.fake.state.log.some((entry) => entry.table === 'site_settings')
-    ).toBe(false);
-  });
-});
-
-describe('siteSettingsActions UPLOAD_LOGO', () => {
-  it('commits the row and returns it as evidence of the write', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    const result = await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile(),
+describe('siteSettingsActions', () => {
+  it('reads a null VAT when the singleton does not exist', async () => {
+    h.fake = createFakeSupabase({
+      tables: { cms_allowed_users: admin, site_settings: [] },
     });
-
+    const result = await siteSettingsActions({ type: 'GET' });
     expect(result.success).toBe(true);
-    const data = result.data as SiteSettingsRow;
-    expect(data.header_logo_dark).toMatch(/^https:\/\/fake\.supabase\.co\//);
-    expect(data.header_logo_light).toBeNull();
-    expect(storedRow()?.header_logo_dark).toBe(data.header_logo_dark);
+    expect(result.data).toEqual({ ...nullLogos, footer_vat_number: null });
+  });
+
+  it('commits and returns textual VAT evidence with leading zeroes', async () => {
+    h.fake = createFakeSupabase({
+      tables: { cms_allowed_users: admin, site_settings: [] },
+    });
+    const result = await siteSettingsActions({
+      type: 'UPDATE_VAT',
+      vatNumber: ' 00123456789 ',
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      ...nullLogos,
+      footer_vat_number: '00123456789',
+    });
+    expect(h.fake.state.tables.site_settings?.[0]?.footer_vat_number).toBe(
+      '00123456789'
+    );
     expect(result.revalidation).toBe('sent');
-    expect(h.invalidate).toHaveBeenCalledWith({
-      entity: 'settings',
-      operation: 'asset-update',
-    });
-  });
-
-  it('resolves the two variants independently', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'light',
-      file: webpFile('light.webp'),
-    });
-
-    const data = storedRow();
-    expect(data?.header_logo_light).toBeTruthy();
-    expect(data?.header_logo_dark).toBeNull();
-  });
-
-  it('rejects a non-image without uploading or writing anything', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    const result = await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: new File([new Uint8Array([1])], 'note.txt', {
-        type: 'text/plain',
-      }),
-    });
-
-    expect(result.success).toBe(false);
-    expect(h.fake.state.uploads).toEqual([]);
-    expect(
-      h.fake.state.log.some((entry) => entry.table === 'site_settings')
-    ).toBe(false);
-    expect(h.invalidate).not.toHaveBeenCalled();
-  });
-
-  it('removes the staged object when the DB commit fails', async () => {
-    h.fake = makeFake(
-      { cms_allowed_users: ADMIN, site_settings: [] },
-      {
-        failNext: {
-          table: 'site_settings',
-          mode: 'upsert',
-          message: 'db down',
-        },
-      }
-    );
-
-    const result = await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile(),
-    });
-
-    expect(result.success).toBe(false);
-    expect(h.fake.state.uploads).toHaveLength(1);
-    expect(h.fake.state.removed).toEqual(h.fake.state.uploads);
-    expect(h.invalidate).not.toHaveBeenCalled();
-  });
-
-  it('removes the previous object only after the replacement is committed', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile('first.webp'),
-    });
-    const first = storedRow()?.header_logo_dark as string;
-
-    const order = h.fake.state.log.map((entry) => entry.mode);
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile('second.webp'),
-    });
-
-    expect(order).toContain('upsert');
-    expect(storedRow()?.header_logo_dark).not.toBe(first);
-    const firstPath = decodeURIComponent(
-      new URL(first).pathname.split('/website-dev/')[1]
-    );
-    expect(h.fake.state.removed).toContain(firstPath);
-  });
-});
-
-describe('siteSettingsActions CLEAR_LOGO', () => {
-  it('commits the null before removing the stored object', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile(),
-    });
-    const stored = storedRow()?.header_logo_dark as string;
-
-    const result = await siteSettingsActions({
-      type: 'CLEAR_LOGO',
-      variant: 'dark',
-    });
-
-    expect(result.success).toBe(true);
-    expect((result.data as SiteSettingsRow).header_logo_dark).toBeNull();
-    expect(storedRow()?.header_logo_dark).toBeNull();
-    expect(h.fake.state.removed).toContain(
-      decodeURIComponent(new URL(stored).pathname.split('/website-dev/')[1])
-    );
-  });
-
-  it('leaves the other variant untouched', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'light',
-      file: webpFile(),
-    });
-    const light = storedRow()?.header_logo_light as string;
-
-    await siteSettingsActions({ type: 'CLEAR_LOGO', variant: 'dark' });
-
-    expect(storedRow()?.header_logo_light).toBe(light);
-  });
-});
-
-describe('siteSettingsActions UPDATE_FOOTER', () => {
-  it('stores the display name and the VAT number with its leading zero', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-
-    const result = await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: 'Okazakee',
-      vatNumber: '02863310815',
-    });
-
-    expect(result.success).toBe(true);
-    expect(storedRow()?.footer_name).toBe('Okazakee');
-    expect(storedRow()?.footer_vat_number).toBe('02863310815');
     expect(h.invalidate).toHaveBeenCalledWith({
       entity: 'settings',
       operation: 'update',
     });
-  });
-
-  it('reads the stored identity back through GET', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: 'Okazakee',
-      vatNumber: '02863310815',
-    });
-
-    const result = await siteSettingsActions({ type: 'GET' });
-
-    const data = result.data as SiteSettingsRow;
-    expect(data.footer_name).toBe('Okazakee');
-    expect(data.footer_vat_number).toBe('02863310815');
-  });
-
-  it('clears a field the editor blanked, so the site falls back to its default', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: 'Okazakee',
-      vatNumber: '02863310815',
-    });
-
-    const result = await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: '   ',
-      vatNumber: '',
-    });
-
-    expect(result.success).toBe(true);
-    expect(storedRow()?.footer_name).toBeNull();
-    expect(storedRow()?.footer_vat_number).toBeNull();
-    const data = result.data as SiteSettingsRow;
-    expect(data.footer_name).toBeNull();
-    expect(data.footer_vat_number).toBeNull();
-  });
-
-  it('keeps the identity through logo writes', async () => {
-    h.fake = makeFake({ cms_allowed_users: ADMIN, site_settings: [] });
-    await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: 'Okazakee',
-      vatNumber: '02863310815',
-    });
-
-    await siteSettingsActions({
-      type: 'UPLOAD_LOGO',
-      variant: 'dark',
-      file: webpFile(),
-    });
-    await siteSettingsActions({
-      type: 'CLEAR_LOGO',
-      variant: 'light',
-    });
-    const result = await siteSettingsActions({ type: 'GET' });
-
-    expect(result.success).toBe(true);
-    expect(storedRow()?.footer_name).toBe('Okazakee');
-    expect(storedRow()?.footer_vat_number).toBe('02863310815');
-    const data = result.data as SiteSettingsRow;
-    expect(data.footer_name).toBe('Okazakee');
-    expect(data.footer_vat_number).toBe('02863310815');
-  });
-
-  it('does not claim a save the database refused', async () => {
-    h.fake = makeFake(
-      { cms_allowed_users: ADMIN, site_settings: [] },
-      {
-        failNext: {
-          table: 'site_settings',
-          mode: 'upsert',
-          message: 'db down',
-        },
-      }
+    const read = await siteSettingsActions({ type: 'GET' });
+    expect((read.data as SiteSettingsRow).footer_vat_number).toBe(
+      '00123456789'
     );
+    expect(h.fake.state.uploads).toEqual([]);
+    expect(h.fake.state.removed).toEqual([]);
+  });
 
-    const result = await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: 'Okazakee',
-      vatNumber: '02863310815',
+  it('commits null for a blank VAT so the site restores its default', async () => {
+    h.fake = createFakeSupabase({
+      tables: {
+        cms_allowed_users: admin,
+        site_settings: [{ id: 1, footer_vat_number: '00123456789' }],
+      },
     });
+    const result = await siteSettingsActions({
+      type: 'UPDATE_VAT',
+      vatNumber: '   ',
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ ...nullLogos, footer_vat_number: null });
+    expect(
+      h.fake.state.tables.site_settings?.[0]?.footer_vat_number
+    ).toBeNull();
+  });
 
+  it('does not claim a rejected database write or invalidate it', async () => {
+    h.fake = createFakeSupabase({
+      tables: { cms_allowed_users: admin, site_settings: [] },
+      failNext: { table: 'site_settings', mode: 'upsert', message: 'db down' },
+    });
+    const result = await siteSettingsActions({
+      type: 'UPDATE_VAT',
+      vatNumber: '00123456789',
+    });
     expect(result.success).toBe(false);
     expect(result.error).toContain('db down');
     expect(h.invalidate).not.toHaveBeenCalled();
   });
 
-  it('rejects a non-admin caller before touching the table', async () => {
-    h.fake = makeFake({ cms_allowed_users: EDITOR, site_settings: [] });
-
-    const result = await siteSettingsActions({
-      type: 'UPDATE_FOOTER',
-      name: 'Okazakee',
-      vatNumber: '02863310815',
+  it.each(['GET', 'UPDATE_VAT'] as const)(
+    'rejects an editor before accessing settings for %s',
+    async (type) => {
+      h.fake = createFakeSupabase({
+        tables: { cms_allowed_users: editor, site_settings: [] },
+      });
+      const result = await siteSettingsActions(
+        type === 'GET' ? { type } : { type, vatNumber: '00123456789' }
+      );
+      expect(result.success).toBe(false);
+      expect(
+        h.fake.state.log.some((entry) => entry.table === 'site_settings')
+      ).toBe(false);
+      expect(h.invalidate).not.toHaveBeenCalled();
+    }
+  );
+  it('rejects invalid images without uploading or modifying settings', async () => {
+    h.fake = createFakeSupabase({
+      tables: { cms_allowed_users: admin, site_settings: [] },
     });
-
+    const result = await siteSettingsActions({
+      type: 'UPLOAD_LOGO',
+      variant: 'dark',
+      file: new File(['bad'], 'file.txt', { type: 'text/plain' }),
+    });
     expect(result.success).toBe(false);
-    expect(
-      h.fake.state.log.some((entry) => entry.table === 'site_settings')
-    ).toBe(false);
+    expect(h.fake.state.uploads).toEqual([]);
+    expect(h.fake.state.tables.site_settings).toEqual([]);
+  });
+
+  it.each(['dark', 'light'] as const)(
+    'rejects editor image mutations for %s',
+    async (variant) => {
+      h.fake = createFakeSupabase({
+        tables: { cms_allowed_users: editor, site_settings: [] },
+      });
+      expect(
+        (
+          await siteSettingsActions({
+            type: 'UPLOAD_LOGO',
+            variant,
+            file: await logoFile(),
+          })
+        ).success
+      ).toBe(false);
+      expect(
+        (await siteSettingsActions({ type: 'CLEAR_LOGO', variant })).success
+      ).toBe(false);
+      expect(h.fake.state.uploads).toEqual([]);
+      expect(
+        h.fake.state.log.some((entry) => entry.table === 'site_settings')
+      ).toBe(false);
+    }
+  );
+
+  it.each([false, true])(
+    'rolls back staged replacement on DB failure (throws=%s)',
+    async (throws) => {
+      h.fake = createFakeSupabase({
+        tables: {
+          cms_allowed_users: admin,
+          site_settings: [
+            {
+              id: 1,
+              header_logo_dark: oldUrl,
+              header_logo_light: 'light',
+              footer_vat_number: '001',
+            },
+          ],
+        },
+        failNext: {
+          table: 'site_settings',
+          mode: 'upsert',
+          message: 'db down',
+          throws,
+        },
+      });
+      h.fake.state.objects[`website-dev/${oldPath}`] = 'old';
+      const result = await siteSettingsActions({
+        type: 'UPLOAD_LOGO',
+        variant: 'dark',
+        file: await logoFile(),
+      });
+      expect(result.success).toBe(false);
+      expect(h.fake.state.removed).toEqual(h.fake.state.uploads);
+      expect(h.fake.state.objects[`website-dev/${oldPath}`]).toBe('old');
+      expect(h.fake.state.tables.site_settings[0].header_logo_dark).toBe(
+        oldUrl
+      );
+      expect(h.invalidate).not.toHaveBeenCalled();
+    }
+  );
+
+  it('commits immutable variants independently and preserves VAT on replacement', async () => {
+    h.fake = createFakeSupabase({
+      tables: {
+        cms_allowed_users: admin,
+        site_settings: [
+          {
+            id: 1,
+            header_logo_dark: oldUrl,
+            header_logo_light: null,
+            footer_vat_number: '001',
+          },
+        ],
+      },
+    });
+    h.fake.state.objects[`website-dev/${oldPath}`] = 'old';
+    const originalStorage = h.fake.client.storage.from.bind(
+      h.fake.client.storage
+    );
+    const remove = vi.spyOn(h.fake.client.storage, 'from');
+    remove.mockImplementation((bucket) => {
+      const storage = originalStorage(bucket);
+      const originalRemove = storage.remove.bind(storage);
+      vi.spyOn(storage, 'remove').mockImplementation(async (paths) => {
+        expect(h.fake.state.tables.site_settings[0].header_logo_dark).not.toBe(
+          oldUrl
+        );
+        return originalRemove(paths);
+      });
+      return storage;
+    });
+    const dark = await siteSettingsActions({
+      type: 'UPLOAD_LOGO',
+      variant: 'dark',
+      file: await logoFile(),
+    });
+    expect(dark.success).toBe(true);
+    expect(h.fake.state.uploads[0]).toMatch(
+      /^header\/dark\/.+-header-dark\.webp$/
+    );
+    expect(h.fake.state.removed).toEqual([oldPath]);
+    const darkUrl = (dark.data as SiteSettingsRow).header_logo_dark;
+    const light = await siteSettingsActions({
+      type: 'UPLOAD_LOGO',
+      variant: 'light',
+      file: await logoFile(),
+    });
+    expect(light.data).toMatchObject({
+      header_logo_dark: darkUrl,
+      footer_vat_number: '001',
+    });
+    expect(h.fake.state.uploads[1]).toMatch(
+      /^header\/light\/.+-header-light\.webp$/
+    );
+    const vat = await siteSettingsActions({
+      type: 'UPDATE_VAT',
+      vatNumber: '002',
+    });
+    expect(vat.data).toMatchObject({
+      header_logo_dark: darkUrl,
+      header_logo_light: (light.data as SiteSettingsRow).header_logo_light,
+      footer_vat_number: '002',
+    });
+    remove.mockRestore();
+  });
+
+  it.each([
+    [oldUrl, [oldPath]],
+    ['https://external.example/logo.png', []],
+    [
+      'https://fake.supabase.co/storage/v1/object/public/website/header/dark/x.webp',
+      [],
+    ],
+    [
+      'https://forged.example/storage/v1/object/public/website-dev/header/dark/x.webp',
+      [],
+    ],
+  ])('clears the database before safe cleanup for %s', async (url, removed) => {
+    h.fake = createFakeSupabase({
+      tables: {
+        cms_allowed_users: admin,
+        site_settings: [
+          {
+            id: 1,
+            header_logo_dark: url,
+            header_logo_light: 'light',
+            footer_vat_number: '001',
+          },
+        ],
+      },
+    });
+    const originalStorage = h.fake.client.storage.from.bind(
+      h.fake.client.storage
+    );
+    const storageSpy = vi.spyOn(h.fake.client.storage, 'from');
+    storageSpy.mockImplementation((bucket) => {
+      const storage = originalStorage(bucket);
+      const originalRemove = storage.remove.bind(storage);
+      vi.spyOn(storage, 'remove').mockImplementation(async (paths) => {
+        expect(
+          h.fake.state.tables.site_settings[0].header_logo_dark
+        ).toBeNull();
+        return originalRemove(paths);
+      });
+      return storage;
+    });
+    const result = await siteSettingsActions({
+      type: 'CLEAR_LOGO',
+      variant: 'dark',
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      header_logo_dark: null,
+      header_logo_light: 'light',
+      footer_vat_number: '001',
+    });
+    expect(h.fake.state.removed).toEqual(removed);
+    storageSpy.mockRestore();
+  });
+  it('retains the owned object when clearing fails to commit', async () => {
+    h.fake = createFakeSupabase({
+      tables: {
+        cms_allowed_users: admin,
+        site_settings: [
+          {
+            id: 1,
+            header_logo_dark: oldUrl,
+          },
+        ],
+      },
+      failNext: { table: 'site_settings', mode: 'upsert', message: 'db down' },
+    });
+    const result = await siteSettingsActions({
+      type: 'CLEAR_LOGO',
+      variant: 'dark',
+    });
+    expect(result.success).toBe(false);
+    expect(h.fake.state.tables.site_settings[0].header_logo_dark).toBe(oldUrl);
+    expect(h.fake.state.removed).toEqual([]);
     expect(h.invalidate).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,6 @@ import {
   countHeroRoleEntries,
   heroRolePath,
   normalizeHeroShape,
-  normalizeTypewriterTarget,
 } from '@/utils/heroDisplay';
 
 describe('shape presets', () => {
@@ -26,23 +25,14 @@ describe('roles editor entries', () => {
     expect(heroRolePath(2)).toBe('top.roles.2');
   });
 
-  it('counts one past the highest filled index and skips holes', () => {
+  it('counts empty draft slots so adding another role preserves the first', () => {
     expect(countHeroRoleEntries({})).toBe(0);
-    expect(countHeroRoleEntries({ 'top.role': 'Dev' })).toBe(0);
     expect(countHeroRoleEntries({ 'top.roles.0': 'Dev' })).toBe(1);
     expect(
       countHeroRoleEntries({ 'top.roles.0': 'Dev', 'top.roles.1': '' })
-    ).toBe(1);
+    ).toBe(2);
     expect(
       countHeroRoleEntries({ 'top.roles.2': 'Third', 'top.roles.1': 'Second' })
     ).toBe(3);
-  });
-});
-
-describe('typewriter target', () => {
-  it('falls back to the first role for an absent or unknown target', () => {
-    expect(normalizeTypewriterTarget(null)).toBe('role1');
-    expect(normalizeTypewriterTarget('role9')).toBe('role1');
-    expect(normalizeTypewriterTarget('all')).toBe('all');
   });
 });

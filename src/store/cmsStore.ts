@@ -18,10 +18,7 @@ export interface PublishFailure {
   error: string;
 }
 
-/**
- * Hero store updates always carry every column, so a section that only owns
- * one of them (résumés in Layout, display in Hero) never drops the rest.
- */
+/** Hero and Resume updates preserve the other editor's committed fields. */
 export function mergeHeroSettings(
   current: HeroSettings | null,
   patch: Partial<HeroSettings>
@@ -32,8 +29,6 @@ export function mergeHeroSettings(
     resume_en: current?.resume_en ?? null,
     resume_it: current?.resume_it ?? null,
     shape: current?.shape ?? null,
-    typewriter: current?.typewriter === true,
-    typewriter_target: current?.typewriter_target ?? null,
     ...patch,
   };
 }

@@ -13,6 +13,7 @@ import { LayoutSection } from '@/components/cms/sections/Layout/LayoutSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
 import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
 import RequestsSection from '@/components/cms/sections/Requests/RequestsSection';
+import { ResumeSection } from '@/components/cms/sections/Resume/ResumeSection';
 import SkillsSection from '@/components/cms/sections/Skills/SkillsSection';
 import UsersSection from '@/components/cms/sections/Users/UsersSection';
 import AccountSection from '@/components/common/cms/AccountSection';
@@ -31,7 +32,13 @@ const pageSections = [
   'contacts',
 ];
 const inboxSections = ['requests'];
-const systemSections = ['request-form', 'privacy-policy', 'users', 'account'];
+const systemSections = [
+  'resume',
+  'request-form',
+  'privacy-policy',
+  'users',
+  'account',
+];
 const adminSections = [...pageSections, ...inboxSections, ...systemSections];
 const editorSections = ['portfolio', 'blog', 'account'];
 
@@ -41,6 +48,8 @@ function Editor({ section }: { section: string }) {
       return <LayoutSection />;
     case 'hero':
       return <HeroSection />;
+    case 'resume':
+      return <ResumeSection />;
     case 'skills':
       return <SkillsSection />;
     case 'career':

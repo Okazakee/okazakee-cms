@@ -2,16 +2,12 @@ import type { PostButton as PortfolioPostButton } from '@/utils/cms/postButtons'
 
 export type HeroShape = 'pebble' | 'square' | 'rounded' | 'squircle';
 
-export type TypewriterTarget = 'role1' | 'role2' | 'all';
-
 export type HeroSection = {
   id: number;
   propic: string;
   blurhashURL: string;
   /** Portrait preset; null before the column existed — renders as `pebble`. */
   shape: string | null;
-  typewriter: boolean;
-  typewriter_target: string | null;
 };
 
 /** The `hero_section` row fields the CMS edits (boot data + live drafts). */
@@ -22,25 +18,17 @@ export type HeroSettings = {
   resume_it: string | null;
   /** Portrait preset; null before the column existed — renders as `pebble`. */
   shape: string | null;
-  typewriter: boolean;
-  typewriter_target: string | null;
 };
 
-/**
- * The single `site_settings` row as the CMS edits it. Every field is nullable:
- * a null logo means "keep the bundled asset" and a null footer field means
- * "keep the default the site already renders".
- */
+/** Singleton Layout settings: theme-specific header images and textual VAT. */
 export type SiteSettings = {
-  /** Dark-theme logo URL; null renders the bundled asset. */
+  /** Custom dark-theme header image; null renders the bundled image. */
   header_logo_dark: string | null;
-  /** Light-theme logo URL; null renders the bundled asset. */
+  /** Custom light-theme header image; null renders the bundled image. */
   header_logo_light: string | null;
-  /** Footer display name; null renders the site's default name. */
-  footer_name: string | null;
   /**
    * Footer VAT number, held as text so a leading zero survives. Displayed and
-   * copied verbatim; null renders the site's default number.
+   * copied verbatim; null hides it on the website — no local default exists.
    */
   footer_vat_number: string | null;
 };

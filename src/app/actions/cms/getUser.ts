@@ -135,9 +135,7 @@ export async function getCmsBootData(): Promise<CMSBootData> {
 
     const heroResult = await supabase
       .from('hero_section')
-      .select(
-        'propic, blurhashURL, resume_en, resume_it, shape, typewriter, typewriter_target'
-      )
+      .select('propic, blurhashURL, resume_en, resume_it, shape')
       .maybeSingle();
 
     if (heroResult.error) throw heroResult.error;
@@ -151,8 +149,6 @@ export async function getCmsBootData(): Promise<CMSBootData> {
         resume_en: heroResult.data?.resume_en || null,
         resume_it: heroResult.data?.resume_it || null,
         shape: heroResult.data?.shape || null,
-        typewriter: heroResult.data?.typewriter === true,
-        typewriter_target: heroResult.data?.typewriter_target || null,
       },
     };
   } catch (error) {
