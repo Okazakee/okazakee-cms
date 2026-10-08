@@ -40,8 +40,8 @@ values
 
 insert into public.contacts (label, icon, link, bg_color, position)
 values
-  ('GitHub', 'github', 'https://github.com/example', '#111111', 0),
-  ('Email', 'mail', 'mailto:fixture@isolated.test', '#222222', 1);
+  ('GitHub', 'http://127.0.0.1:54321/storage/v1/object/public/website-dev/content-controls/contact-github.svg', 'https://github.com/example', '#111111', 0),
+  ('Email', 'http://127.0.0.1:54321/storage/v1/object/public/website-dev/content-controls/contact-mail-plus.svg', 'mailto:fixture@isolated.test', '#222222', 1);
 
 insert into public.skills_categories (id, name, position)
 values
@@ -101,32 +101,28 @@ values
   ('admin@isolated.test', 'fixture-admin', 'admin'),
   ('editor@isolated.test', 'fixture-editor', 'editor');
 
--- Match the public-copy namespaces the website still reads, with deterministic
--- non-production labels. Header and footer chrome is deliberately absent: it is
--- frozen in the site repo (src/i18n/messages/site.{en,it}.json) and is no longer
--- stored in i18n_translations.
-update public.i18n_translations set translations = translations || '{
-  "hero-section": {"top":{"name":"Fixture author","role":"Software developer"},"aboutme":{"title":"About me","paragraph":"Building deterministic tools"}},
-  "skills-section": {"title":"Skills","subtitle":"Tools for the work"},
-  "career-section": {"title":"Career","subtitle":"Experience and learning","month":"month","months":"months","year":"year","years":"years","present":"Present","remote":{"full":"Remote","hybrid":"Hybrid","onSite":"On site"}},
-  "portfolio-section": {"title":"Portfolio","description":"Selected projects"},
-  "blog-section": {"title":"Blog","description":"Notes and ideas"},
-  "contacts-section": {"title":"Contacts","subtitle":"Get in touch","resume":"Download resume"},
-  "posts-section": {"title1":"Portfolio","subtitle1":"Selected projects","title2":"Blog","subtitle2":"Notes and ideas","button":"Read more","no-posts":"No posts yet","source":"Source","demo":"Demo","store":"Google Play","fdroid":"F-Droid","ios":"App Store","preCopy":"Copy link","ratelimit":"Please try again later","searchbar":"Search posts"},
-  "privacyPolicy": {"description":"How this fixture handles data"},
-  "errors": {"code":"404","notFoundLabel":"Not found","notFoundTitle":"Page missing","notFoundText":"This page does not exist","goBack":"Go back","home":"Home","errorLabel":"Error","errorTitle":"Something went wrong","errorText":"Please try again","retry":"Retry","postErrorTitle":"Post unavailable","postErrorText":"Please try again later","postNotFoundText":"This post does not exist"},
-  "request-form": {"eyebrow":"Project requests","title":"Have a project in mind?","subtitle":"Tell me about it","website":"Website","websitePlaceholder":"https://example.test","name":"Name","namePlaceholder":"Your name","email":"Email","emailPlaceholder":"you@example.test","company":"Company","companyPlaceholder":"Your company","type":"Project type","typeOptions":["Select type","Website","App"],"budget":"Budget","budgetOptions":["Select budget","Under 1000","1000 to 5000"],"timeline":"Timeline","timelineOptions":["Select timeline","This month","Flexible"],"request":"Request","requestPlaceholder":"Describe your project","consent":"I accept the privacy policy","submit":"Send request","comingSoon":"Coming soon"}
+-- Only editorial content remains in the database. Structural section copy
+-- comes from the website's local EN/IT i18n files.
+update public.i18n_translations set translations = '{
+  "hero-section": {
+    "top": {"name":"Fixture author","roles":["Software developer"]},
+    "aboutme": {"paragraph":"Building deterministic tools"}
+  },
+  "request-form": {
+    "eyebrow":"Project requests","title":"Have a project in mind?",
+    "subtitle":"Tell me about it","website":"Website",
+    "websitePlaceholder":"https://example.test","name":"Name",
+    "namePlaceholder":"Your name","email":"Email",
+    "emailPlaceholder":"you@example.test","company":"Company",
+    "companyPlaceholder":"Your company","type":"Project type",
+    "typeOptions":["Select type","Website","App"],"budget":"Budget",
+    "budgetOptions":["Select budget","Under 1000","1000 to 5000"],
+    "timeline":"Timeline","timelineOptions":["Select timeline","This month","Flexible"],
+    "request":"Request","requestPlaceholder":"Describe your project",
+    "consent":"I accept the privacy policy","submit":"Send request",
+    "comingSoon":"Coming soon"
+  }
 }'::jsonb;
-
-update public.i18n_translations set translations = translations || '{
-  "skills-section": {"title":"Competenze","subtitle":"Strumenti per il lavoro"},
-  "career-section": {"title":"Carriera","subtitle":"Esperienza e formazione","month":"mese","months":"mesi","year":"anno","years":"anni","present":"Presente","remote":{"full":"Remoto","hybrid":"Ibrido","onSite":"In sede"}},
-  "portfolio-section": {"title":"Portfolio","description":"Progetti selezionati"},
-  "blog-section": {"title":"Blog","description":"Note e idee"},
-  "contacts-section": {"title":"Contatti","subtitle":"Restiamo in contatto","resume":"Scarica curriculum"},
-  "posts-section": {"title1":"Portfolio","subtitle1":"Progetti selezionati","title2":"Blog","subtitle2":"Note e idee","button":"Leggi di più","no-posts":"Ancora nessun post","source":"Codice","demo":"Demo","store":"Google Play","fdroid":"F-Droid","ios":"App Store","preCopy":"Copia link","ratelimit":"Riprova più tardi","searchbar":"Cerca articoli"},
-  "request-form": {"eyebrow":"Richieste di progetto","title":"Hai un progetto in mente?","subtitle":"Raccontami la tua idea","website":"Sito web","websitePlaceholder":"https://example.test","name":"Nome","namePlaceholder":"Il tuo nome","email":"Email","emailPlaceholder":"tu@example.test","company":"Azienda","companyPlaceholder":"La tua azienda","type":"Tipo di progetto","typeOptions":["Scegli tipo","Sito web","App"],"budget":"Budget","budgetOptions":["Scegli budget","Meno di 1000","1000 a 5000"],"timeline":"Tempistiche","timelineOptions":["Scegli tempistiche","Questo mese","Flessibile"],"request":"Richiesta","requestPlaceholder":"Descrivi il progetto","consent":"Accetto la privacy policy","submit":"Invia richiesta","comingSoon":"Prossimamente"}
-}'::jsonb where language = 'it';
 
 -- Explicit category IDs must not collide with the first created category.
 select setval(pg_get_serial_sequence('public.skills_categories', 'id'), (select max(id) from public.skills_categories));

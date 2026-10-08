@@ -48,5 +48,15 @@
     "name": "reseed_skills_section_dev_staging",
     "sourceFile": "supabase/migrations/20261008122200_reseed_skills_section_dev_staging.sql",
     "version": "20261008122200"
+  },
+  {
+    "name": "cms_content_controls_dev_staging",
+    "sourceFile": "supabase/migrations/20261008135608_cms_content_controls_dev_staging.sql",
+    "version": "20261008135608"
+  },
+  {
+    "name": "restore_header_images_dev_staging",
+    "sourceFile": "supabase/migrations/20261008145842_restore_header_images_dev_staging.sql",
+    "version": "20261008145842"
   }
 ]

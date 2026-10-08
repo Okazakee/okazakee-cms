@@ -32,18 +32,19 @@ rendering and caching.
 - **Role-based access** — admin: all sections + user management; editor:
   blog/portfolio + account. Every mutation is authorized server-side; the UI
   never is the security boundary
-- **Sections** — Hero, Skills, Career, Blog, Portfolio, Contacts, Request
-  Form copy, Requests, Layout (header logos, résumé PDFs, footer
-  identity), Website Copy, Privacy Policy, Users, Account — each with EN/IT
-  translations and draft/publish state. *Requests* is
-  read-only and has no intake path yet: the public form does not submit, so
-  the section renders an explicit "not connected" notice until one does.
-  *Request Form copy* is not published to the site either — the public form
-  owns those strings until it moves to CMS translations. *Layout* replaces the
-  old Header and Footer sections and is described under [Layout](#layout).
+- **Sections** — Hero identity/content and portrait; Skills categories and
+  ordered entries; Career, Blog and Portfolio entries; ordered Contacts with
+  SVG icon URLs; Layout (theme header images + VAT). System groups Resume PDFs, Request Form
+  copy, Privacy Policy and Users. Structural section headings, career
+  vocabulary and the privacy subtitle live in the website's local EN/IT files.
+  Localized entry fields and privacy-policy bodies remain CMS-owned.
+- **Publishing** — individual Publish and Publish All require confirmation.
+  Publish All confirms once and preserves drafts that fail to commit.
 - **Uploads** — images (client-side WebP preprocessing, server fallback via
-  Sharp, SVG rejected) and PDF resumes, stored in the shared `website`
-  bucket with format-aware extensions/MIME. Animated WebP skips the
+  Sharp, SVG rejected by image upload validators) and PDF resumes. Production
+  uses `website`; staging uses the isolated `website-dev` bucket. Contacts
+  render editor-supplied SVG URLs rather than uploading SVG through Sharp.
+  Animated WebP skips the
   canvas step and is resized frame-by-frame by Sharp, so animated profile
   pictures keep every frame. BlurHash placeholders are generated with
   [blurkit](https://github.com/Okazakee/blurkit): Sharp handles server-side
@@ -58,40 +59,42 @@ rendering and caching.
   HTTP event to the public site's `/api/internal/content-revalidate`
   (HMAC-SHA256, replay window, hard-coded tag allowlist)
 
-## Layout
+## Layout and System Resume
 
-The **Layout** section (admin only) is the one owner of the page chrome and of
-the résumé files. It groups three independent editors:
+**Layout** (admin only) owns the two theme header images and the footer VAT
+number: `site_settings.header_logo_dark`, `header_logo_light` and
+`footer_vat_number`. Each header image is optional and independent — a null one
+renders that theme's bundled website image, so clearing one theme never affects
+the other. Uploads keep their aspect ratio (bounded, never cropped), use
+immutable `header/dark/` and `header/light/` objects in the CMS's selected
+bucket, and only take effect after a confirmed Publish; the replaced object is
+deleted after the database commit. VAT is nullable `TEXT`: leading zeroes
+survive storage, display and copying, and blank input stores `NULL`, which
+renders no VAT number on the website — the CMS is the single source, with no
+local fallback value. Navigation and the footer name
+`Okazakee` are website-owned.
 
-- **Header** — the dark/light logo pair, both columns of the single
-  `site_settings` row. The six nav buttons themselves are site-side: their
-  labels are frozen copy in the site repo and each links to its own section id,
-  so nothing about the nav is stored or editable here.
-- **Résumé** — the EN/IT résumé PDFs, which moved here from Contacts; Contacts
-  now edits contact links only. Persistence is unchanged: the files still live
-  in `hero_section.resume_en` / `resume_it` and are uploaded through
-  `heroActions` (`UPDATE_WITH_FILES`), with the same 10 MB PDF validation and
-  storage ordering.
-- **Footer identity** — the display name and VAT number
-  (`site_settings.footer_name` / `footer_vat_number`).
+**System → Resume** manages the EN/IT PDFs in `hero_section.resume_en` and
+`resume_it`. It uses `heroActions` (`UPDATE_WITH_FILES`) with the existing
+10 MB PDF validation and immutable upload → database commit → old-file cleanup
+ordering. Publishing a PDF invalidates `resume` and `hero_section`; a combined
+portrait/PDF change also invalidates `hero`.
 
-The settings commit and the résumé upload are separate commits, so one failing
-never rolls back — or re-uploads — the other.
+**Hero → Identity & content** edits localized names, ordered roles and the
+about paragraph. One nonblank role types once and stops; multiple roles cycle
+in order. Blank entries stay editable but do not enter the animation. Portrait
+shape remains editable; there are no animation or role-target switches.
 
-**Header and footer copy is frozen, not editable.** Nav labels, theme and
-language controls, the credit, source, back-to-top and privacy-policy labels are
-structural chrome: they live in
-`okazakee-ws/src/i18n/messages/site.{en,it}.json` and are merged over the
-database by `okazakee-ws/src/i18n/siteCopy.ts`, so no stale row can override
-them. The Header and Footer translation editors were removed for that reason;
-the Layout section edits only the two footer identity fields
-and needs no database row at all.
+Structural Skills, Career, Portfolio, Blog and Contacts copy, along with the
+privacy subtitle, lives in `okazakee-ws/src/i18n/messages/site.{en,it}.json`.
+The local-over-database merge prevents old rows from overriding those strings.
+Category names, entries, links/icons, exact positions and policy bodies remain
+editorial data.
 
-Only the two footer identity fields are editable content. Both are nullable and
-a blank value is stored as `NULL`, which is what tells the website to keep
-rendering its own defaults: the name `Okazakee` and the VAT number
-`02863310815`. `footer_vat_number` is `TEXT` so the Italian leading zero
-survives, and the value is displayed and copied verbatim — never parsed.
+User removal requires an identity-specific confirmation. Profile deletion
+commits before cleanup of its exact owned avatar URL; external avatars and
+wrong-bucket URLs are untouched. Non-public schemas never delete shared Auth
+identities.
 
 ## Architecture
 
@@ -184,12 +187,11 @@ cache window lapses, which looks exactly like "the CMS value is not used here".
 **Tables:** `user_profiles`, `cms_allowed_users`, `blog_posts`,
 `portfolio_posts`, `skills`, `skills_categories`, `career_entries`,
 `contacts`, `hero_section`, `site_settings`, `i18n_translations`.
-**Storage bucket:** `website`.
+**Storage buckets:** `website` in production, `website-dev` otherwise.
 
-`site_settings` is a single row and holds everything the Layout section owns:
-the header logos and the footer identity. The
-`header`/`footer` namespaces are *not* in `i18n_translations` — that chrome is
-frozen in the website repository, so nothing here edits it any more.
+`site_settings` is one row: the two theme header image URLs and the textual
+VAT number. Header/footer chrome and fixed section copy are not editable
+translation namespaces.
 
 **Auth redirect URLs** (Supabase Auth → URL Configuration) must include
 exactly these canonical paths — the CMS serves root paths, no `/cms` or
@@ -228,15 +230,18 @@ in `.env.development.local` so a `vercel env pull` cannot drop it (see
 
 Never run a blind `supabase db push`, `migration repair`, or
 `search_path`-fallback apply: `public` holds production content and is
-off-limits for dev work. The footer identity columns
-(`20261005150208_...`, renamed from `20261005145655_...` with identical
-statement bytes) are explicitly `dev_staging.`-qualified, nullable with no
-backfill — `public` is untouched, which is why production keeps rendering
-its own footer defaults (`Okazakee` / `02863310815`).
+off-limits for dev work. The reviewed content cutover
+`20261008135608_cms_content_controls_dev_staging.sql` is explicitly
+`dev_staging.`-qualified: it migrates singular roles, removes obsolete
+animation/logo/name columns and site-owned copy, converts contact SVG URLs
+and backfills dense positions. The follow-up
+`20261008145842_restore_header_images_dev_staging.sql` re-adds the two
+nullable header-image columns that Layout owns. Neither implies a production
+schema change.
 
 Link once per machine, then verify (`src/utils/cms/devMigrations.ts`;
 `src/libs/cms/devMigrations/devCheck.ts`; registry
-`src/libs/cms/devMigrations/registry.json`, 10 `{version,name,sourceFile}`
+`src/libs/cms/devMigrations/registry.json`, 12 `{version,name,sourceFile}`
 entries):
 
 ```bash
@@ -268,23 +273,20 @@ ends `dev check: N pass / 0 fail / M info`. Drift fails with exit 1, e.g.
 hint) — plus the shared-auth NOT-certified note.
 
 Owner knows the development state is good when the check reports `0 fail`
-with all 10 `H-<version>` records matching: source bytes immutable, ledger
+with all 12 `H-<version>` records matching: source bytes immutable, ledger
 hash matches, live `dev_staging` effects match. `verified_existing` means
 the 93-check audit proved that source's schema effects plus its byte hash —
 it does not prove original execution provenance, and it certifies nothing
 about `public`, shared auth, or pre-existing history.
 
-Migration authority is split. The native `supabase_migrations` history is
-mixed-scope (15 total: 11 historical + `150208` dev-footer + `234758`
-dev-only ledger bootstrap + `20261006040745` storage hardening +
-`20261006082930` unified-identity privacy; ledger-only content changes add
-no row; the 7 original public/unqualified sources remain unrecorded
-globally) and does NOT certify content effects. Authority for dev lives in
-`dev_staging.cms_migration_audit`: 10 rows — 8 `verified_existing` (effects +
-source hash audited) plus two `applied` rows: `20261006233000` (the dev-only
-GitHub subject catch-up that keeps the clone level with the deployed
-callers) and `20261008122200` (the dev-only skills-section content reseed,
-applied through reviewed SQL).
+Native `supabase_migrations` history is mixed-scope and does not certify
+content effects. Dev authority lives in `dev_staging.cms_migration_audit`:
+12 records — eight `verified_existing` and four `applied`. The applied
+records are the immutable GitHub-subject catch-up (`20261006233000`), Skills
+reseed (`20261008122200`), the CMS content-controls cutover
+(`20261008135608`) and the dev-only header-image restoration
+(`20261008145842`). Live catalog/data checks reflect that latest cutover;
+historical source files are never rewritten or replayed against `public`.
 Source bytes are immutable: a changed registered file
 fails verification, never re-applies. The ledger bootstrap
 (`20261005234758_create_cms_migration_audit_ledger.sql`) is dev-only DDL
@@ -295,7 +297,7 @@ certification.
 Two things are *not*
 
 - **Storage** — buckets are project-level. Use a separate bucket
-  (`SUPABASE_BUCKET=website-dev`) so a test upload cannot land in the live one.
+  (`website-dev`, selected by `getCmsStorageBucket`) so a test upload cannot land in the live one.
 - **Auth** — `auth.users` is shared, so a signed-in browser session carries over
   between schemas; `cms_allowed_users` does not, and must be seeded per schema.
 
@@ -311,13 +313,15 @@ Two things are *not*
   identity from the last successful session.
 - **User management (admin only):** add passkey-provisioned users (email
   identifier — no invite email is sent), GitHub OAuth users and dummy
-  authors; change roles; remove users. The last admin cannot be demoted or
-  removed.
+  authors; change roles; remove users through a confirmation modal. The last
+  admin cannot be demoted or removed. Owned avatars are cleaned after the
+  profile delete commits.
 - **"Delete my account"** revokes CMS access: removes the allowlist row and
   the `user_profiles` row, then signs out. It does not delete the Supabase
   Auth identity or historical author attribution.
 - **Dummy authors** (`dummy-<uuid>@dummy.local`) are auth users for post
-  attribution; removing them also deletes the auth identity.
+  attribution. Their Auth identity is deleted only when removing them from
+  the `public` schema; staging removal cannot cascade production rows.
 
 ## Routes
 

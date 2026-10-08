@@ -25,6 +25,8 @@ const isolated =
 const config = isolated
   ? {
       ...base,
+      // Dependencies are symlinked from the checkout, outside the /tmp app.
+      turbopack: { ...base.turbopack, root: __ISOLATED_ROOT__ },
       images: {
         ...base.images,
         // Loopback Storage only; gated by the isolated-test flag above.
@@ -69,7 +71,14 @@ export async function prepareOverlay(ctx) {
     path.join(repoRoot, 'next.config.ts'),
     path.join(target, 'next.config.base.ts')
   );
-  await writeFile(path.join(target, 'next.config.ts'), OVERLAY_CONFIG, 'utf8');
+  await writeFile(
+    path.join(target, 'next.config.ts'),
+    OVERLAY_CONFIG.replace(
+      '__ISOLATED_ROOT__',
+      JSON.stringify(path.parse(repoRoot).root)
+    ),
+    'utf8'
+  );
 
   for (const file of [
     'tsconfig.json',

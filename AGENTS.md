@@ -117,6 +117,21 @@ src/
   invalidation goes through `invalidatePublicContent` (signed event, never
   throws, status returned).
 
+- CMS ownership: Hero name, ordered localized roles, about paragraph and
+  portrait shape; ordered Skills categories/entries; Career/Portfolio/Blog
+  entries; ordered Contacts with SVG URLs; privacy-policy bodies. Structural
+  headings/vocabulary and the privacy subtitle are website-local i18n.
+- System → Resume owns EN/IT PDFs and invalidates
+  `resume` / `hero_section` after publication. Layout owns the two optional
+  theme header images (`site_settings.header_logo_dark` / `header_logo_light`,
+  aspect-preserving uploads that fall back to that theme's bundled site image
+  when null) plus the textual VAT. No animation-target or footer-name editor
+  remains.
+- Individual Publish and Publish All require confirmation; registered callbacks
+  remain raw so Publish All confirms once. User removal confirms identity,
+  commits profile deletion before owned-avatar cleanup, and never deletes
+  shared Auth identities from non-public schemas.
+
 ## 5. Commands and Workflows
 
 - Install: `bun install`
@@ -395,27 +410,20 @@ urgent it feels.
 - **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
   (`src/utils/cms/devMigrations.ts`;
   `src/libs/cms/devMigrations/devCheck.ts`; registry
-  `src/libs/cms/devMigrations/registry.json`, 10 `{version,name,sourceFile}`
-  entries) plus login rate limiting / content tables and the dev-only
-  `dev_staging.cms_migration_audit` ledger (10 rows: 8 `verified_existing`
-  + two `applied` — `20261006233000`, the dev-only GitHub subject catch-up,
-  and `20261008122200`, the dev-only skills-section content reseed = effects
-  + source hash audited, not original execution provenance; native
-  history 15: 11 historical + `150208` dev-footer + `234758` dev-only
-  bootstrap + `20261006040745` storage hardening + `20261006082930`
-  unified-identity privacy, ledger-only content changes add no native row;
-  7 original public/unqualified sources remain unrecorded globally and must
-  never be replayed against shared `public`). Link once (`supabase login`,
-  `supabase link --project-ref <ref>`); green ends
-  `dev check: N pass / 0 fail / M info`, drift `FAIL`s with exit 1.
-  `--scope` must equal `dev_staging`. That is the only DB command — no
-  apply command exists; the CLI accepts `check` only and rejects
-  unknown/`apply` actions without DB writes. Future DB changes stay
-  explicitly reviewed/manual. NEVER `supabase db push`, `migration repair`,
-  or `search_path`-fallback apply — `public` is off-limits. Source bytes
-  immutable. Owner knows dev state is good when the check reports 0 fail
-  with all 10 records matching; `public`, shared auth, and pre-existing
-  history are not certified.
+  `src/libs/cms/devMigrations/registry.json`, 12 `{version,name,sourceFile}`
+  entries) plus content tables and the dev-only `dev_staging.cms_migration_audit`
+  ledger (eight `verified_existing`, four `applied`: GitHub subjects, Skills
+  reseed, the `20261008135608` content-controls cutover and the
+  `20261008145842` header-image restoration). Source hashes
+  certify immutable bytes; live effect checks reflect the latest cutover.
+  Native Supabase history is mixed-scope, not proof of content state.
+  Historical public/unqualified sources must never be replayed against
+  shared `public`. Link once (`supabase login`, `supabase link --project-ref
+  <ref>`); green ends `dev check: N pass / 0 fail / M info`. `--scope` must
+  equal `dev_staging`; the CLI exposes only a read-only `check` command.
+  Future changes remain explicitly reviewed/manual: never `supabase db push`,
+  `migration repair`, or search-path fallback apply. `public`, shared Auth
+  and pre-existing global history are not certified.
 - **Deployment:** Vercel with Next.js framework preset. Build output: `.next/`.
 
 ## 15. Red Lines

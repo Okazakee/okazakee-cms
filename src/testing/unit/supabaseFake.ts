@@ -76,6 +76,11 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: unknown }> {
   private singleMode: 'single' | 'maybeSingle' | null = null;
   private returning = false;
   private columns = '*';
+  private orders: Array<{
+    column: string;
+    ascending: boolean;
+    nullsFirst: boolean;
+  }> = [];
 
   constructor(
     private state: FakeSupabaseState,
@@ -126,7 +131,21 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: unknown }> {
     return this;
   }
 
-  order(): this {
+  order(
+    column: string,
+    options: {
+      ascending?: boolean;
+      nullsFirst?: boolean;
+      referencedTable?: string;
+    } = {}
+  ): this {
+    if (!options.referencedTable) {
+      this.orders.push({
+        column,
+        ascending: options.ascending ?? true,
+        nullsFirst: options.nullsFirst ?? false,
+      });
+    }
     return this;
   }
 
@@ -223,6 +242,25 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: unknown }> {
         else kept.push(row);
       }
       this.state.tables[this.table] = kept;
+    }
+
+    if (this.orders.length > 0) {
+      result.sort((a, b) => {
+        for (const order of this.orders) {
+          const left = a[order.column];
+          const right = b[order.column];
+          if (left == null && right == null) continue;
+          if (left == null) return order.nullsFirst ? -1 : 1;
+          if (right == null) return order.nullsFirst ? 1 : -1;
+          const comparison =
+            typeof left === 'number' && typeof right === 'number'
+              ? left - right
+              : String(left).localeCompare(String(right));
+          if (comparison !== 0)
+            return order.ascending ? comparison : -comparison;
+        }
+        return 0;
+      });
     }
 
     if (!this.columns.includes('*')) {

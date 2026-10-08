@@ -47,28 +47,22 @@ export const POLICIES_QUERY = `select n.nspname as table_schema, c.relname as ta
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
 export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq') order by c.relname`;
-export const FROZEN_TOP_KEYS = ['errors', 'header', 'footer'] as const;
-export const FROZEN_POSTS_CHROME_KEYS = [
-  'website',
-  'source',
-  'ios',
-  'store',
-  'fdroid',
-  'demo',
-  'button',
-  'copyButton',
-  'preCopy',
-  'no-posts',
-  'ratelimit',
-  'searchbar',
+export const FROZEN_TOP_KEYS = [
+  'errors',
+  'header',
+  'footer',
+  'skills-section',
+  'career-section',
+  'posts-section',
+  'contacts-section',
+  'privacyPolicy',
 ] as const;
-export const RETAINED_POSTS_KEYS = [
-  'title1',
-  'subtitle1',
-  'title2',
-  'subtitle2',
-] as const;
-export const DATA_INVARIANTS_QUERY = `select (select count(*)::int from dev_staging.portfolio_posts where buttons is null) as buttons_null, (select count(*)::int from dev_staging.portfolio_posts where buttons = '[]'::jsonb) as buttons_empty, (select count(*)::int from dev_staging.i18n_translations) as i18n_rows, (select count(*)::int from dev_staging.i18n_translations where translations ?| array['errors', 'header', 'footer']) as i18n_frozen_top, (select count(*)::int from dev_staging.i18n_translations where (translations->'posts-section') ?| array['website', 'source', 'ios', 'store', 'fdroid', 'demo', 'button', 'copyButton', 'preCopy', 'no-posts', 'ratelimit', 'searchbar']) as i18n_posts_chrome, (select count(*)::int from dev_staging.i18n_translations where (translations->'privacyPolicy') ? 'title') as i18n_privacy_title, (select count(*)::int from dev_staging.i18n_translations where not (coalesce(translations->'posts-section', '{}'::jsonb) ?& array['title1', 'subtitle1', 'title2', 'subtitle2'])) as i18n_posts_retained_missing, (select count(*)::int from dev_staging.i18n_translations where not (coalesce(translations->'privacyPolicy', '{}'::jsonb) ? 'description')) as i18n_privacy_retained_missing, (select count(*)::int from dev_staging.site_settings) as site_settings_rows, (select count(*)::int from dev_staging.site_settings where footer_name is null and footer_vat_number is null) as site_settings_footer_null_rows`;
+export const DATA_INVARIANTS_QUERY = `select
+  (select count(*)::int from dev_staging.portfolio_posts where buttons is null) as buttons_null,
+  (select count(*)::int from dev_staging.portfolio_posts where buttons = '[]'::jsonb) as buttons_empty,
+  (select count(*)::int from dev_staging.i18n_translations where translations ?| array['errors','header','footer','skills-section','career-section','posts-section','contacts-section','privacyPolicy']) as i18n_frozen_top,
+  (select count(*)::int from dev_staging.i18n_translations where (translations #> '{hero-section,top}') ? 'role') as hero_legacy_roles,
+  (select count(*)::int from dev_staging.site_settings) as site_settings_rows`;
 
 export const GRANT_MATRIX = {
   site_settings: {
@@ -117,11 +111,7 @@ export const EXPECTED_COLS: Record<
     { name: 'link', type: 'text', nullable: true, def: null },
     { name: 'position', type: 'integer', nullable: true, def: null },
   ],
-  hero_section: [
-    { name: 'shape', type: 'text', nullable: true, def: null },
-    { name: 'typewriter', type: 'boolean', nullable: false, def: 'false' },
-    { name: 'typewriter_target', type: 'text', nullable: true, def: null },
-  ],
+  hero_section: [{ name: 'shape', type: 'text', nullable: true, def: null }],
   portfolio_posts: [
     { name: 'buttons', type: 'jsonb', nullable: true, def: null },
   ],
@@ -136,8 +126,6 @@ export const EXPECTED_COLS: Record<
     { name: 'created_at', type: 'timestamptz', nullable: false, def: 'now()' },
     { name: 'header_logo_dark', type: 'text', nullable: true, def: null },
     { name: 'header_logo_light', type: 'text', nullable: true, def: null },
-    { name: 'nav_anchors', type: 'jsonb', nullable: true, def: null },
-    { name: 'footer_name', type: 'text', nullable: true, def: null },
     { name: 'footer_vat_number', type: 'text', nullable: true, def: null },
   ],
   project_requests: [
@@ -491,19 +479,6 @@ async function checkColumns(
       );
     }
   }
-  // Footer COMMENT literals: exact, case-sensitive (Okazakee + 02863310815).
-  const site = byTable.get('site_settings') ?? [];
-  const fn = site.find((c) => c.name === 'footer_name')?.comment ?? '';
-  const fv = site.find((c) => c.name === 'footer_vat_number')?.comment ?? '';
-  const commentsOk = fn.includes('(Okazakee)') && fv.includes('(02863310815)');
-  finding(
-    findings,
-    'F-comments',
-    commentsOk ? 'PASS' : 'FAIL',
-    commentsOk
-      ? 'footer COMMENT text verbatim (Okazakee/02863310815), case-sensitive'
-      : 'footer COMMENT literals differ or missing (exact match required)'
-  );
 }
 
 async function checkConstraintsIndexes(
@@ -761,14 +736,9 @@ async function checkDataInvariants(
   const rows = (await queryJson(DATA_INVARIANTS_QUERY)) as Array<{
     buttons_null: number;
     buttons_empty: number;
-    i18n_rows: number;
     i18n_frozen_top: number;
-    i18n_posts_chrome: number;
-    i18n_privacy_title: number;
-    i18n_posts_retained_missing: number;
-    i18n_privacy_retained_missing: number;
+    hero_legacy_roles: number;
     site_settings_rows: number;
-    site_settings_footer_null_rows: number;
   }>;
   const r = rows[0];
   if (!r) {
@@ -789,33 +759,22 @@ async function checkDataInvariants(
       ? `portfolio_posts buttons NULL=0 (empty=${r.buttons_empty}): backfill fully applied`
       : `portfolio_posts buttons NULL=${r.buttons_null} (empty=${r.buttons_empty}): backfill incomplete or regressed`
   );
-  const frozenAbsent =
-    r.i18n_frozen_top === 0 &&
-    r.i18n_posts_chrome === 0 &&
-    r.i18n_privacy_title === 0;
-  const retainedPresent =
-    r.i18n_posts_retained_missing === 0 &&
-    r.i18n_privacy_retained_missing === 0;
   finding(
     findings,
     'D-freeze',
-    frozenAbsent ? 'PASS' : 'FAIL',
-    frozenAbsent
-      ? 'frozen namespaces, post chrome and privacy title are absent'
-      : `frozen copy remains: namespaces=${r.i18n_frozen_top}, post chrome=${r.i18n_posts_chrome}, privacy title=${r.i18n_privacy_title}`
+    r.i18n_frozen_top === 0 ? 'PASS' : 'FAIL',
+    `site-owned namespaces remaining in dev content: ${r.i18n_frozen_top}`
   );
   finding(
     findings,
-    'D-retained',
-    retainedPresent ? 'PASS' : 'FAIL',
-    retainedPresent
-      ? 'editable post headings and privacy description are retained'
-      : `editable copy missing: post headings=${r.i18n_posts_retained_missing}, privacy description=${r.i18n_privacy_retained_missing}`
+    'D-hero-roles',
+    r.hero_legacy_roles === 0 ? 'PASS' : 'FAIL',
+    `legacy singular hero role rows remaining: ${r.hero_legacy_roles}`
   );
   finding(
     findings,
     'F-data',
     'INFO',
-    `footer identity is editable: ${r.site_settings_rows} configured or unconfigured rows are allowed; no-backfill is historical, not a NULL-only constraint`
+    `VAT is editable: ${r.site_settings_rows} configured or unconfigured rows are allowed`
   );
 }
