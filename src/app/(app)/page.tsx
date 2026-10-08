@@ -23,7 +23,6 @@ import { useCmsStore } from '@/store/cmsStore';
 
 // Page order: the sidebar reads top-to-bottom like the public page does.
 const pageSections = [
-  'layout',
   'hero',
   'skills',
   'career',
@@ -33,6 +32,7 @@ const pageSections = [
 ];
 const inboxSections = ['requests'];
 const systemSections = [
+  'layout',
   'resume',
   'request-form',
   'privacy-policy',
@@ -109,9 +109,15 @@ export default function CMSPage() {
         store.setUser(boot.user);
         store.setHeroSection(boot.heroSection);
         store.setSidePanelSections(sections);
-        const initial = sections.includes(store.activeSection || '')
-          ? (store.activeSection as string)
-          : sections[0];
+        const saved =
+          typeof window !== 'undefined'
+            ? window.localStorage.getItem('cms_active_section')
+            : null;
+        // Prefer the store value (in-session switches survive boot when the
+        // effect re-runs), then the saved value, then the first section.
+        const candidates = [store.activeSection, saved];
+        const initial =
+          candidates.find((s) => s && sections.includes(s)) ?? sections[0];
         store.setActiveSection(initial);
         setVisited([initial]);
         setBooting(false);

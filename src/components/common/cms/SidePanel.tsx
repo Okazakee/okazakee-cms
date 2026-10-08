@@ -108,7 +108,6 @@ interface MenuItem {
 // The sidebar mirrors the public page top to bottom, then the inbox, then
 // everything that is not page content.
 const PAGE_ITEMS: MenuItem[] = [
-  { id: 'layout', label: '', icon: PanelTop, adminOnly: true },
   { id: 'hero', label: '', icon: Home, adminOnly: true },
   { id: 'skills', label: '', icon: Zap, adminOnly: true },
   { id: 'career', label: '', icon: User2, adminOnly: true },
@@ -122,6 +121,7 @@ const INBOX_ITEMS: MenuItem[] = [
 ];
 
 const SYSTEM_ITEMS: MenuItem[] = [
+  { id: 'layout', label: '', icon: PanelTop, adminOnly: true },
   { id: 'resume', label: '', icon: FileText, adminOnly: true },
   {
     id: 'request-form',
@@ -135,7 +135,7 @@ const SYSTEM_ITEMS: MenuItem[] = [
 ];
 
 const MENU_GROUPS: Array<{ caption: string; items: MenuItem[] }> = [
-  { caption: 'page', items: PAGE_ITEMS },
+  { caption: 'pages', items: PAGE_ITEMS },
   { caption: 'inbox', items: INBOX_ITEMS },
   { caption: 'system', items: SYSTEM_ITEMS },
 ];

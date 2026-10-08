@@ -52,7 +52,7 @@
       "settings": "Settings"
     },
     "navGroup": {
-      "page": "Page",
+      "pages": "Pages",
       "inbox": "Inbox",
       "system": "System"
     },
