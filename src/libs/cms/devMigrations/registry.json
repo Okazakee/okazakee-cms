@@ -58,5 +58,10 @@
     "name": "restore_header_images_dev_staging",
     "sourceFile": "supabase/migrations/20261008145842_restore_header_images_dev_staging.sql",
     "version": "20261008145842"
+  },
+  {
+    "name": "cms_allowed_users_sequence_usage",
+    "sourceFile": "supabase/migrations/20261008213304_cms_allowed_users_sequence_usage.sql",
+    "version": "20261008213304"
   }
 ]

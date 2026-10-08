@@ -147,7 +147,7 @@ function skillCard(title: string) {
   const heading = [...document.querySelectorAll('h3')].find(
     (candidate) => candidate.textContent === title
   );
-  const card = heading?.closest('div.rounded-lg');
+  const card = heading?.closest('article');
   if (!card) throw new Error(`Missing skill card: ${title}`);
   return card;
 }
@@ -225,7 +225,7 @@ describe('skills reorder dispatch', () => {
     );
     if (!linkInput) throw new Error('Missing skill link field');
     await fill(linkInput, 'https://www.typescriptlang.org/');
-    await click(buttonByText('Done', card));
+    await click(buttonByText(cmsEn.editor.applyDraft, card));
     await publish();
 
     const payload = batchPayload();
@@ -261,7 +261,7 @@ describe('skills reorder dispatch', () => {
     await mount(createElement(SkillsSection));
     const tools = [...document.querySelectorAll('h2')]
       .find((heading) => heading.textContent === 'Tools')
-      ?.closest('div.rounded-xl');
+      ?.closest('section');
     if (!tools) throw new Error('Missing tools category');
     await click(buttonByTitle('Move up', tools));
     await click(buttonByTitle('Move up', skillCard('Rust')));

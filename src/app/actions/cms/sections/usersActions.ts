@@ -18,9 +18,10 @@ import {
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import { supabaseSchema } from '@/config/shared';
-import type {
-  MutationResult,
-  RevalidationStatus,
+import {
+  errorMessage,
+  type MutationResult,
+  type RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
@@ -164,8 +165,7 @@ export async function usersActions(
     console.error('Users action error:', error);
     return {
       success: false,
-      error:
-        error instanceof Error ? error.message : 'An unknown error occurred',
+      error: errorMessage(error, 'An unknown error occurred'),
     };
   }
 }

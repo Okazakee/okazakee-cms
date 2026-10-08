@@ -107,6 +107,19 @@ export default function CMSPage() {
           boot.user.role === 'admin' ? adminSections : editorSections;
         const store = useCmsStore.getState();
         store.setUser(boot.user);
+        // Remember the identity for the login screen ("Welcome back" +
+        // avatar) when the next visit arrives with a dead session.
+        try {
+          window.localStorage.setItem(
+            'cms_last_user',
+            JSON.stringify({
+              displayName: boot.user.displayName,
+              avatarUrl: boot.user.avatarUrl,
+            })
+          );
+        } catch {
+          // Private mode / storage full: purely cosmetic, ignore.
+        }
         store.setHeroSection(boot.heroSection);
         store.setSidePanelSections(sections);
         const saved =

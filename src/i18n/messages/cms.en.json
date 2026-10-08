@@ -2,11 +2,32 @@
   "copy": {
     "requestTitle": "Request form",
     "requestDescription": "Not published to the website yet. These labels are owned by the public request form component until it moves to CMS translations. Editing here has no effect on the live site.",
+    "requestForm": {
+      "eyebrowLabel": "Eyebrow",
+      "titleLabel": "Title",
+      "subtitleLabel": "Subtitle",
+      "namePlaceholderLabel": "Name placeholder",
+      "emailPlaceholderLabel": "Email placeholder",
+      "companyPlaceholderLabel": "Company placeholder",
+      "websitePlaceholderLabel": "Website placeholder",
+      "typeLabel": "Project type label",
+      "typeOptionsLabel": "Project type options",
+      "budgetLabel": "Budget label",
+      "budgetOptionsLabel": "Budget options",
+      "timelineLabel": "Timeline label",
+      "timelineOptionsLabel": "Timeline options",
+      "requestLabel": "Request label",
+      "requestPlaceholderLabel": "Request placeholder",
+      "consentLabel": "Consent text",
+      "submitLabel": "Submit button",
+      "comingSoonLabel": "Coming soon notice"
+    },
     "namespaces": {
       "request-form": "Request form"
     }
   },
   "requests": {
+    "details": "Details",
     "title": "Project requests",
     "subtitle": "Requests people send through the public form. Personal data: admin only, never cached publicly.",
     "loading": "Loading requests…",
@@ -70,6 +91,7 @@
     "delete": "Delete",
     "edit": "Edit",
     "close": "Close",
+    "dismissError": "Dismiss error",
     "loading": "Loading...",
     "applying": "Applying Changes...",
     "saving": "Saving...",
@@ -204,6 +226,9 @@
     "errorCategoryName": "Category name is required"
   },
   "career": {
+    "skillsLabel": "Skills",
+    "skillsHint": "Comma-separated list of skills",
+    "logoGroupTitle": "Company logo",
     "title": "Career Section",
     "subtitle": "Manage your career history",
     "careerEntriesTitle": "Career Entries",
@@ -237,6 +262,12 @@
     "errorFetch": "Failed to fetch career data"
   },
   "portfolio": {
+    "tagsLabel": "Tags",
+    "dateLabel": "Date",
+    "authorLabel": "Author",
+    "authorPlaceholder": "Select an author",
+    "hiddenLabel": "Hidden",
+    "viewsLabel": "{count, plural, one {# view} other {# views}}",
     "title": "Portfolio Section",
     "subtitle": "Manage your portfolio posts",
     "createNewPost": "Create New Portfolio Post",
@@ -281,6 +312,12 @@
     "noPortfolioPosts": "No portfolio posts found. Create your first portfolio post!"
   },
   "blog": {
+    "tagsLabel": "Tags",
+    "dateLabel": "Date",
+    "authorLabel": "Author",
+    "authorPlaceholder": "Select an author",
+    "hiddenLabel": "Hidden",
+    "viewsLabel": "{count, plural, one {# view} other {# views}}",
     "title": "Blog Section",
     "subtitle": "Manage your blog posts",
     "createNewPost": "Create New Blog Post",
@@ -389,7 +426,32 @@
     "passkeysLoadError": "Failed to load passkeys",
     "passkeysRegisterError": "Failed to register passkey",
     "passkeysDeleteError": "Failed to delete passkey",
-    "passkeyAlreadyRegistered": "This passkey is already registered."
+    "passkeyAlreadyRegistered": "This passkey is already registered.",
+    "changePhoto": "Change photo",
+    "uploadHint": "PNG, JPG, WebP, GIF, or AVIF — up to 10MB",
+    "editDisplayName": "Edit display name",
+    "savedName": "Display name saved",
+    "savedAvatar": "Profile picture updated",
+    "savedPasskeyAdded": "Passkey added",
+    "savedPasskeyDeleted": "Passkey removed",
+    "passkeyDeleteConfirmTitle": "Delete passkey?"
+  },
+  "login": {
+    "title": "Okazakee CMS",
+    "welcomeBack": "Welcome back,",
+    "subtitle": "Sign in with an approved account to manage the site.",
+    "wordmarkAlt": "Okazakee CMS",
+    "rememberedAs": "Last signed in as",
+    "forgetRemembered": "Forget remembered account",
+    "rememberedHint": "This only removes the reminder on this device. It does not sign you out or switch GitHub accounts.",
+    "continueWithGitHub": "Continue with GitHub",
+    "usePasskey": "Sign in with passkey",
+    "errorPasskeyNotFound": "No passkey found on this device. Sign in with GitHub, then add one from the Account tab.",
+    "errorPasskeyCancelled": "Passkey sign-in was cancelled. Try again when ready.",
+    "errorPasskeyFailed": "Passkey sign-in failed. Please try again.",
+    "errorOAuthFailed": "Authentication failed. Please try again.",
+    "errorAccessDenied": "Access denied. Please contact the administrator.",
+    "errorOAuthStart": "Could not start GitHub sign-in. Please try again."
   },
   "users": {
     "title": "Manage Users",
@@ -432,5 +494,51 @@
     "invited": "Invited",
     "cannotDemoteLastAdmin": "Cannot demote the last admin",
     "removeUser": "Remove user"
+  },
+  "editor": {
+    "fields": {
+      "title": "Title",
+      "summary": "Summary",
+      "content": "Content",
+      "location": "Location",
+      "description": "Description"
+    },
+    "groups": {
+      "identity": "Identity",
+      "roles": "Roles",
+      "about": "About",
+      "portrait": "Portrait",
+      "summary": "Title & summary",
+      "content": "Main content",
+      "media": "Cover image",
+      "links": "Project links",
+      "publication": "Publication details",
+      "company": "Role & company",
+      "datesLocation": "Dates & location",
+      "details": "Description & skills",
+      "branding": "Header branding",
+      "footer": "Footer",
+      "document": "Document",
+      "intro": "Introduction",
+      "formFields": "Field labels, hints & options",
+      "submission": "Consent & submission",
+      "profile": "Profile",
+      "access": "Identity & access",
+      "security": "Passkeys",
+      "other": "Additional copy"
+    },
+    "draftHint": "Changes stay in your draft until you publish.",
+    "immediateHint": "These actions take effect immediately.",
+    "applyDraft": "Apply to draft",
+    "addDraft": "Add to draft",
+    "draft": "Draft",
+    "currentFile": "Current file",
+    "pendingFile": "Replacement staged",
+    "openFile": "Open file",
+    "preview": "Preview",
+    "fileUrl": "File URL",
+    "formattingHelp": "Formatting help",
+    "requestDetails": "Request details",
+    "otherLocaleError": "Check the other language for errors."
   }
 }

@@ -46,7 +46,7 @@ export const POLICIES_QUERY = `select n.nspname as table_schema, c.relname as ta
 
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
-export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq') order by c.relname`;
+export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq', 'cms_allowed_users_id_seq') order by c.relname`;
 export const FROZEN_TOP_KEYS = [
   'errors',
   'header',
@@ -699,7 +699,11 @@ async function checkSchemaAndSequences(
     sequence_name: string;
     acl_raw: string | null;
   }>;
-  for (const name of ['site_settings_id_seq', 'project_requests_id_seq']) {
+  for (const name of [
+    'site_settings_id_seq',
+    'project_requests_id_seq',
+    'cms_allowed_users_id_seq',
+  ]) {
     const aclRaw = seqs.find((s) => s.sequence_name === name)?.acl_raw;
     if (aclRaw == null) {
       finding(findings, `Q-${name}`, 'FAIL', `no raw sequence ACL for ${name}`);
@@ -709,7 +713,8 @@ async function checkSchemaAndSequences(
     const bad: string[] = [];
     if (!(acl.service_role ?? []).includes('U'))
       bad.push('service_role/USAGE=false');
-    if (!(acl.service_role ?? []).includes('r'))
+    const requiresSelect = name !== 'cms_allowed_users_id_seq';
+    if (requiresSelect && !(acl.service_role ?? []).includes('r'))
       bad.push('service_role/SELECT=false');
     if ((acl.anon ?? []).includes('U')) bad.push('anon/USAGE=true');
     if ((acl.anon ?? []).includes('r')) bad.push('anon/SELECT=true');
@@ -723,7 +728,7 @@ async function checkSchemaAndSequences(
       bad.length ? 'FAIL' : 'PASS',
       bad.length
         ? `dev seq ACL diverges: ${bad.join('; ')}; raw=${aclRaw}`
-        : `dev seq ACL identical (service_role USAGE+SELECT only); raw=${aclRaw}`
+        : `dev seq ACL matches (service_role USAGE${requiresSelect ? '+SELECT' : ''}); raw=${aclRaw}`
     );
   }
 }

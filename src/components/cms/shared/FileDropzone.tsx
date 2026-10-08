@@ -2,6 +2,7 @@
 
 import {
   Download,
+  ExternalLink,
   FileText,
   Image as ImageIcon,
   Upload,
@@ -14,6 +15,7 @@ import type React from 'react';
 interface FileDropzoneProps {
   accept?: string;
   previewUrl: string | null;
+  hasPendingFile: boolean;
   blurhash?: string | null;
   isDragging: boolean;
   isProcessing: boolean;
@@ -35,6 +37,7 @@ interface FileDropzoneProps {
   onClear: () => void;
   onBrowse: () => void;
   onCopyUrl?: () => void;
+  onOpen?: () => void;
   onDownload?: () => void;
   label?: string;
   showUrl?: string | null;
@@ -43,6 +46,7 @@ interface FileDropzoneProps {
 
 export function FileDropzone({
   previewUrl,
+  hasPendingFile,
   blurhash,
   isDragging,
   isProcessing,
@@ -54,6 +58,7 @@ export function FileDropzone({
   onClear,
   onBrowse,
   onCopyUrl,
+  onOpen,
   onDownload,
   label,
   showUrl,
@@ -104,6 +109,9 @@ export function FileDropzone({
 
         {displayUrl ? (
           <div className="space-y-3">
+            <p className="text-xs font-medium text-text-muted" role="status">
+              {t(hasPendingFile ? 'editor.pendingFile' : 'editor.currentFile')}
+            </p>
             {!isPdf ? (
               <div className="flex justify-center">
                 <Image
@@ -118,24 +126,25 @@ export function FileDropzone({
                 />
               </div>
             ) : (
-              <div className="space-y-3">
-                <div className="relative overflow-hidden rounded-lg border border-border-subtle bg-surface-base ">
-                  <iframe
-                    src={displayUrl}
-                    title="PDF preview"
-                    className={`w-full ${compact ? 'h-56' : 'h-80 md:h-96'}`}
-                  />
-                </div>
-                <div className="flex items-center justify-center text-sm text-text-muted ">
-                  <FileText className="w-4 h-4 mr-2" />
-                  <span>PDF Document</span>
-                </div>
-              </div>
+              <details className="rounded-lg border border-border-subtle bg-surface-base text-left">
+                <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-sm text-text-main">
+                  <FileText className="h-4 w-4" aria-hidden="true" />
+                  {t('editor.preview')}
+                </summary>
+                <iframe
+                  src={displayUrl}
+                  title={t('editor.preview')}
+                  className={`w-full border-t border-border-subtle ${compact ? 'h-56' : 'h-80 md:h-96'}`}
+                />
+              </details>
             )}
             {showUrl && (
-              <p className="text-xs text-text-muted truncate max-w-full">
-                {showUrl}
-              </p>
+              <details className="text-left text-xs text-text-muted">
+                <summary className="min-h-11 cursor-pointer py-3">
+                  {t('editor.fileUrl')}
+                </summary>
+                <p className="break-all pb-2">{showUrl}</p>
+              </details>
             )}
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button
@@ -144,7 +153,7 @@ export function FileDropzone({
                   e.stopPropagation();
                   onBrowse();
                 }}
-                className="px-3 py-1.5 text-sm bg-accent-violet-deep hover:bg-accent-violet-deep text-white rounded-lg transition-colors"
+                className="min-h-11 rounded-lg bg-accent-violet-deep px-3 py-2 text-sm text-white transition-colors hover:bg-accent-violet"
               >
                 {t('common.changeFile')}
               </button>
@@ -155,9 +164,22 @@ export function FileDropzone({
                     e.stopPropagation();
                     onCopyUrl();
                   }}
-                  className="px-3 py-1.5 text-sm bg-surface-raised hover:bg-surface-raised text-white rounded-lg transition-colors"
+                  className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
                 >
                   {t('common.copyUrl')}
+                </button>
+              )}
+              {onOpen && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpen();
+                  }}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
+                >
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  {t('editor.openFile')}
                 </button>
               )}
               {onDownload && (
@@ -167,7 +189,7 @@ export function FileDropzone({
                     e.stopPropagation();
                     onDownload();
                   }}
-                  className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                  className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
                 >
                   <Download className="w-3 h-3 inline mr-1" />
                   {t('common.download')}
@@ -179,7 +201,7 @@ export function FileDropzone({
                   e.stopPropagation();
                   onClear();
                 }}
-                className="px-3 py-1.5 text-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                className="min-h-11 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10"
               >
                 <X className="w-3 h-3 inline mr-1" />
                 {t('common.removeFile')}

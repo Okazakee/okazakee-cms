@@ -2,11 +2,32 @@
   "copy": {
     "requestTitle": "Modulo richieste",
     "requestDescription": "Non ancora pubblicato sul sito. Queste etichette sono di proprietà del componente del modulo pubblico finché non passerà alle traduzioni del CMS. Modificarle qui non ha effetto sul sito pubblico.",
+    "requestForm": {
+      "eyebrowLabel": "Occhiello",
+      "titleLabel": "Titolo",
+      "subtitleLabel": "Sottotitolo",
+      "namePlaceholderLabel": "Segnaposto nome",
+      "emailPlaceholderLabel": "Segnaposto email",
+      "companyPlaceholderLabel": "Segnaposto azienda",
+      "websitePlaceholderLabel": "Segnaposto sito web",
+      "typeLabel": "Etichetta tipo di progetto",
+      "typeOptionsLabel": "Opzioni tipo di progetto",
+      "budgetLabel": "Etichetta budget",
+      "budgetOptionsLabel": "Opzioni budget",
+      "timelineLabel": "Etichetta tempistiche",
+      "timelineOptionsLabel": "Opzioni tempistiche",
+      "requestLabel": "Etichetta richiesta",
+      "requestPlaceholderLabel": "Segnaposto richiesta",
+      "consentLabel": "Testo del consenso",
+      "submitLabel": "Pulsante di invio",
+      "comingSoonLabel": "Avviso di prossima disponibilità"
+    },
     "namespaces": {
       "request-form": "Modulo richieste"
     }
   },
   "requests": {
+    "details": "Dettagli",
     "title": "Richieste di progetto",
     "subtitle": "Richieste inviate tramite il modulo pubblico. Dati personali: solo admin, mai messe in cache pubblica.",
     "loading": "Caricamento richieste…",
@@ -70,6 +91,7 @@
     "delete": "Elimina",
     "edit": "Modifica",
     "close": "Chiudi",
+    "dismissError": "Chiudi errore",
     "loading": "Caricamento...",
     "applying": "Applicando Modifiche...",
     "saving": "Salvataggio...",
@@ -204,6 +226,9 @@
     "errorCategoryName": "Il nome della categoria è obbligatorio"
   },
   "career": {
+    "skillsLabel": "Competenze",
+    "skillsHint": "Elenco di competenze separate da virgole",
+    "logoGroupTitle": "Logo aziendale",
     "title": "Sezione Carriera",
     "subtitle": "Gestisci la tua storia professionale",
     "careerEntriesTitle": "Voci di Carriera",
@@ -237,6 +262,12 @@
     "errorFetch": "Impossibile recuperare i dati della carriera"
   },
   "portfolio": {
+    "tagsLabel": "Tag",
+    "dateLabel": "Data",
+    "authorLabel": "Autore",
+    "authorPlaceholder": "Seleziona un autore",
+    "hiddenLabel": "Nascosto",
+    "viewsLabel": "{count, plural, one {# visualizzazione} other {# visualizzazioni}}",
     "title": "Sezione Portfolio",
     "subtitle": "Gestisci i tuoi progetti portfolio",
     "createNewPost": "Crea Nuovo Progetto Portfolio",
@@ -281,6 +312,12 @@
     "noPortfolioPosts": "Nessun progetto trovato. Crea il tuo primo progetto!"
   },
   "blog": {
+    "tagsLabel": "Tag",
+    "dateLabel": "Data",
+    "authorLabel": "Autore",
+    "authorPlaceholder": "Seleziona un autore",
+    "hiddenLabel": "Nascosto",
+    "viewsLabel": "{count, plural, one {# visualizzazione} other {# visualizzazioni}}",
     "title": "Sezione Blog",
     "subtitle": "Gestisci i tuoi post del blog",
     "createNewPost": "Crea Nuovo Post Blog",
@@ -389,7 +426,32 @@
     "passkeysLoadError": "Impossibile caricare le passkey",
     "passkeysRegisterError": "Impossibile registrare la passkey",
     "passkeysDeleteError": "Impossibile eliminare la passkey",
-    "passkeyAlreadyRegistered": "Questa passkey è già registrata."
+    "passkeyAlreadyRegistered": "Questa passkey è già registrata.",
+    "changePhoto": "Cambia foto",
+    "uploadHint": "PNG, JPG, WebP, GIF o AVIF — fino a 10MB",
+    "editDisplayName": "Modifica nome visualizzato",
+    "savedName": "Nome visualizzato salvato",
+    "savedAvatar": "Foto profilo aggiornata",
+    "savedPasskeyAdded": "Passkey aggiunta",
+    "savedPasskeyDeleted": "Passkey rimossa",
+    "passkeyDeleteConfirmTitle": "Eliminare la passkey?"
+  },
+  "login": {
+    "title": "Okazakee CMS",
+    "welcomeBack": "Bentornato,",
+    "subtitle": "Accedi con un account autorizzato per gestire il sito.",
+    "wordmarkAlt": "Okazakee CMS",
+    "rememberedAs": "Ultimo accesso come",
+    "forgetRemembered": "Dimentica l'account ricordato",
+    "rememberedHint": "Rimuove solo il promemoria su questo dispositivo. Non effettua il logout né cambia l'account GitHub.",
+    "continueWithGitHub": "Continua con GitHub",
+    "usePasskey": "Accedi con passkey",
+    "errorPasskeyNotFound": "Nessuna passkey trovata su questo dispositivo. Accedi con GitHub, poi aggiungine una dalla scheda Account.",
+    "errorPasskeyCancelled": "Accesso con passkey annullato. Riprova quando vuoi.",
+    "errorPasskeyFailed": "Accesso con passkey non riuscito. Riprova.",
+    "errorOAuthFailed": "Autenticazione non riuscita. Riprova.",
+    "errorAccessDenied": "Accesso negato. Contatta l'amministratore.",
+    "errorOAuthStart": "Impossibile avviare l'accesso con GitHub. Riprova."
   },
   "users": {
     "title": "Gestisci Utenti",
@@ -432,5 +494,51 @@
     "invited": "Invitato",
     "cannotDemoteLastAdmin": "Impossibile declassare l'ultimo admin",
     "removeUser": "Rimuovi utente"
+  },
+  "editor": {
+    "fields": {
+      "title": "Titolo",
+      "summary": "Riepilogo",
+      "content": "Contenuto",
+      "location": "Sede",
+      "description": "Descrizione"
+    },
+    "groups": {
+      "identity": "Identità",
+      "roles": "Ruoli",
+      "about": "Presentazione",
+      "portrait": "Ritratto",
+      "summary": "Titolo e riepilogo",
+      "content": "Contenuto principale",
+      "media": "Immagine di copertina",
+      "links": "Link del progetto",
+      "publication": "Dettagli di pubblicazione",
+      "company": "Ruolo e azienda",
+      "datesLocation": "Date e sede",
+      "details": "Descrizione e competenze",
+      "branding": "Immagini dell'intestazione",
+      "footer": "Piè di pagina",
+      "document": "Documento",
+      "intro": "Introduzione",
+      "formFields": "Etichette, suggerimenti e opzioni",
+      "submission": "Consenso e invio",
+      "profile": "Profilo",
+      "access": "Identità e accesso",
+      "security": "Passkey",
+      "other": "Altri testi"
+    },
+    "draftHint": "Le modifiche restano in bozza fino alla pubblicazione.",
+    "immediateHint": "Queste azioni hanno effetto immediato.",
+    "applyDraft": "Applica alla bozza",
+    "addDraft": "Aggiungi alla bozza",
+    "draft": "Bozza",
+    "currentFile": "File attuale",
+    "pendingFile": "Sostituzione in bozza",
+    "openFile": "Apri file",
+    "preview": "Anteprima",
+    "fileUrl": "URL del file",
+    "formattingHelp": "Guida alla formattazione",
+    "requestDetails": "Dettagli della richiesta",
+    "otherLocaleError": "Controlla gli errori nell'altra lingua."
   }
 }

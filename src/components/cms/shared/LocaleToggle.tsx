@@ -11,13 +11,17 @@ export function LocaleToggle({ activeLocale, onChange }: LocaleToggleProps) {
   const t = useTranslations('cms');
 
   return (
-    <div className="flex gap-1 bg-surface-raised rounded-lg p-0.5">
+    <fieldset
+      aria-label={t('common.translations')}
+      className="m-0 flex min-w-0 gap-1 rounded-lg border-0 bg-surface-raised p-0.5"
+    >
       {(['en', 'it'] as const).map((loc) => (
         <button
           key={loc}
           type="button"
           onClick={() => onChange(loc)}
-          className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+          aria-pressed={activeLocale === loc}
+          className={`min-h-11 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
             activeLocale === loc
               ? 'bg-surface-base text-accent-violet shadow-sm'
               : 'text-text-muted hover:text-text-main '
@@ -26,6 +30,6 @@ export function LocaleToggle({ activeLocale, onChange }: LocaleToggleProps) {
           {loc === 'en' ? t('common.english') : t('common.italian')}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }

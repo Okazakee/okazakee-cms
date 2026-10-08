@@ -4,6 +4,7 @@ import { Inbox } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { EditorToolbar } from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
@@ -61,23 +62,30 @@ export default function RequestsSection() {
     <div className="space-y-6">
       <SectionHeader title={tr('title')} description={tr('subtitle')} />
 
-      <div className="flex justify-center gap-2">
-        {filters.map((value) => (
-          <button
-            aria-pressed={filter === value}
-            className={`min-h-[36px] rounded-lg border px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors ${
-              filter === value
-                ? 'border-accent-violet/60 bg-accent-violet text-text-on-accent'
-                : 'border-border-subtle bg-surface-raised text-text-muted hover:text-text-main'
-            }`}
-            key={value}
-            onClick={() => setFilter(value)}
-            type="button"
-          >
-            {tr(value === 'active' ? 'filterActive' : 'filterArchived')}
-          </button>
-        ))}
-      </div>
+      <EditorToolbar
+        actions={
+          <div className="flex gap-2">
+            {filters.map((value) => (
+              <button
+                aria-pressed={filter === value}
+                className={`min-h-11 rounded-lg border px-4 py-2 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors ${
+                  filter === value
+                    ? 'border-accent-violet/60 bg-accent-violet text-text-on-accent'
+                    : 'border-border-subtle bg-surface-raised text-text-muted hover:text-text-main'
+                }`}
+                key={value}
+                onClick={() => setFilter(value)}
+                type="button"
+              >
+                {tr(value === 'active' ? 'filterActive' : 'filterArchived')}
+              </button>
+            ))}
+          </div>
+        }
+        count={entries.length}
+        description={t('editor.immediateHint')}
+        title={tr(filter === 'active' ? 'filterActive' : 'filterArchived')}
+      />
 
       {error && <ErrorBanner message={error} onDismiss={clearError} />}
 

@@ -281,12 +281,14 @@ about `public`, shared auth, or pre-existing history.
 
 Native `supabase_migrations` history is mixed-scope and does not certify
 content effects. Dev authority lives in `dev_staging.cms_migration_audit`:
-12 records — eight `verified_existing` and four `applied`. The applied
+13 records — eight `verified_existing` and five `applied`. The applied
 records are the immutable GitHub-subject catch-up (`20261006233000`), Skills
 reseed (`20261008122200`), the CMS content-controls cutover
-(`20261008135608`) and the dev-only header-image restoration
-(`20261008145842`). Live catalog/data checks reflect that latest cutover;
-historical source files are never rewritten or replayed against `public`.
+(`20261008135608`), the dev-only header-image restoration
+(`20261008145842`) and allowlist ID-sequence usage (`20261008213304`).
+Live catalog/data checks include the allowlist sequence's service-role
+`USAGE`, with no client-role access. Historical source files are never
+rewritten or replayed against `public`.
 Source bytes are immutable: a changed registered file
 fails verification, never re-applies. The ledger bootstrap
 (`20261005234758_create_cms_migration_audit_ledger.sql`) is dev-only DDL
@@ -300,6 +302,13 @@ Two things are *not*
   (`website-dev`, selected by `getCmsStorageBucket`) so a test upload cannot land in the live one.
 - **Auth** — `auth.users` is shared, so a signed-in browser session carries over
   between schemas; `cms_allowed_users` does not, and must be seeded per schema.
+
+User creation needs both table `INSERT` and sequence `USAGE`: RLS bypass
+does not bypass sequence privileges. The scoped sequence grant fixes
+`permission denied for sequence cms_allowed_users_id_seq` without opening
+the allowlist to browser roles. User actions preserve PostgREST error
+messages instead of collapsing plain database error objects into an
+unknown-error fallback.
 
 ## Auth & Account Semantics
 

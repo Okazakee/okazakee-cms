@@ -22,6 +22,15 @@ import {
   usersActions,
 } from '@/app/actions/cms/sections/usersActions';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { RoleSelect } from '@/components/cms/shared/RoleChip';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
@@ -217,9 +226,6 @@ export default function UsersSection() {
     }
   };
 
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
-
   const roleLabels = {
     admin: t('users.roleAdmin'),
     editor: t('users.roleEditor'),
@@ -250,31 +256,35 @@ export default function UsersSection() {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-2">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-text-dim" />
-          <span className="text-sm font-medium text-text-main">
+      <EditorToolbar
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Users className="h-4 w-4 text-text-dim" />
             {t('users.allowedUsersTitle')}
           </span>
-          <span className="rounded-full bg-surface-raised px-2 py-0.5 text-xs tabular-nums text-text-dim">
-            {users.length}
-          </span>
-        </div>
-        {isAdmin && !isAdding && (
-          <button
-            type="button"
-            onClick={() => setIsAdding(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-accent-violet-deep px-3 py-1.5 text-sm text-white transition-colors hover:bg-accent-violet"
-          >
-            <Plus className="h-4 w-4" />
-            {t('users.addUser')}
-          </button>
-        )}
-      </div>
+        }
+        count={users.length}
+        description={t('editor.immediateHint')}
+        actions={
+          isAdmin && !isAdding ? (
+            <button
+              type="button"
+              onClick={() => setIsAdding(true)}
+              className={editorPrimaryButtonClass}
+            >
+              <Plus className="h-4 w-4" />
+              {t('users.addUser')}
+            </button>
+          ) : undefined
+        }
+      />
 
       {isAdmin && isAdding && (
-        <div className="rounded-xl border border-border-subtle bg-surface-card p-4">
-          <div className="inline-flex rounded-lg bg-surface-base p-1">
+        <EditorGroup
+          title={t('users.addNewUserTitle')}
+          description={t('editor.immediateHint')}
+        >
+          <div className="inline-flex max-w-full flex-wrap rounded-lg bg-surface-base p-1">
             {(['email', 'github', 'dummy'] as const).map((type) => (
               <button
                 key={type}
@@ -308,45 +318,57 @@ export default function UsersSection() {
             ))}
           </div>
 
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <input
-              type={addType === 'email' ? 'email' : 'text'}
-              value={newUserInput}
-              onChange={(e) => setNewUserInput(e.target.value)}
-              className={inputClass}
-              placeholder={
-                addType === 'email'
-                  ? t('users.emailPlaceholder')
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label htmlFor="users-new-identity" className={editorLabelClass}>
+                {addType === 'email'
+                  ? t('users.emailAddressLabel')
                   : addType === 'github'
-                    ? t('users.githubPlaceholder')
-                    : t('users.displayNamePlaceholder')
-              }
-            />
-            <RoleSelect
-              cmsRole={newUserRole}
-              labels={roleLabels}
-              label={t('users.roleLabel')}
-              onChange={(r) => {
-                setNewUserRole(r);
-                setError(null);
-              }}
-            />
+                    ? t('users.githubUsernameLabel')
+                    : t('users.displayNameLabel')}
+              </label>
+              <input
+                id="users-new-identity"
+                type={addType === 'email' ? 'email' : 'text'}
+                value={newUserInput}
+                onChange={(e) => setNewUserInput(e.target.value)}
+                className={editorInputClass}
+                placeholder={
+                  addType === 'email'
+                    ? t('users.emailPlaceholder')
+                    : addType === 'github'
+                      ? t('users.githubPlaceholder')
+                      : t('users.displayNamePlaceholder')
+                }
+              />
+              <p className="mt-1 text-xs text-text-dim">
+                {addType === 'email'
+                  ? t('users.emailInviteInfo')
+                  : addType === 'github'
+                    ? t('users.githubInviteInfo')
+                    : t('users.dummyUserInfo')}
+              </p>
+            </div>
+            <div>
+              <span className={editorLabelClass}>{t('users.roleLabel')}</span>
+              <RoleSelect
+                cmsRole={newUserRole}
+                labels={roleLabels}
+                label={t('users.roleLabel')}
+                onChange={(r) => {
+                  setNewUserRole(r);
+                  setError(null);
+                }}
+              />
+            </div>
           </div>
 
-          <p className="mt-2 text-xs text-text-dim">
-            {addType === 'email'
-              ? t('users.emailInviteInfo')
-              : addType === 'github'
-                ? t('users.githubInviteInfo')
-                : t('users.dummyUserInfo')}
-          </p>
-
-          <div className="mt-4 flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               onClick={handleAddUser}
               disabled={isSubmitting}
-              className="flex items-center gap-1.5 rounded-lg bg-accent-violet-deep px-3 py-1.5 text-sm text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
+              className={editorPrimaryButtonClass}
             >
               <UserCheck className="h-3.5 w-3.5" />
               {isSubmitting ? t('users.adding') : t('users.addUser')}
@@ -358,12 +380,12 @@ export default function UsersSection() {
                 setNewUserInput('');
                 setError(null);
               }}
-              className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised"
+              className={editorSecondaryButtonClass}
             >
               {t('common.cancel')}
             </button>
           </div>
-        </div>
+        </EditorGroup>
       )}
 
       {users.length === 0 ? (
@@ -410,21 +432,23 @@ export default function UsersSection() {
           );
 
           return (
-            <div
+            <article
               key={au.id}
-              className="flex flex-col gap-4 border-t border-border-subtle py-4 sm:flex-row sm:items-center sm:gap-6"
+              aria-label={displayName}
+              className={`${editorRowClass} flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 {hasProfile && isAdmin && !isCurrentUser ? (
                   <>
                     <button
                       type="button"
+                      aria-label={`${t('account.clickToUpload')} — ${displayName}`}
                       onClick={() => {
                         const inp = fileInputRefs.current.get(au.profile!.id);
                         inp?.click();
                       }}
                       disabled={isUploading}
-                      className="group/avatar relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-full bg-surface-raised"
+                      className="group/avatar relative h-11 w-11 shrink-0 cursor-pointer overflow-hidden rounded-full bg-surface-raised"
                     >
                       {avatar}
                       <span
@@ -478,14 +502,15 @@ export default function UsersSection() {
                 )}
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {isEditing ? (
-                      <div className="flex items-center gap-1">
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                         <input
                           type="text"
+                          aria-label={t('users.displayNameLabel')}
                           value={editedName}
                           onChange={(e) => setEditedName(e.target.value)}
-                          className="w-28 rounded border border-accent-violet bg-surface-card px-1 py-0.5 text-sm text-text-main focus:outline-none"
+                          className={editorInputClass}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter')
                               handleSaveName(au.profile!.id);
@@ -497,19 +522,21 @@ export default function UsersSection() {
                         />
                         <button
                           type="button"
+                          aria-label={t('common.save')}
                           onClick={() => handleSaveName(au.profile!.id)}
                           disabled={savingNameFor === au.profile?.id}
-                          className="p-0.5 text-green-400"
+                          className={editorPrimaryButtonClass}
                         >
                           <Check className="h-4 w-4" />
                         </button>
                         <button
                           type="button"
+                          aria-label={t('common.cancel')}
                           onClick={() => {
                             setEditingNameFor(null);
                             setEditedName('');
                           }}
-                          className="p-0.5 text-red-400"
+                          className={editorSecondaryButtonClass}
                         >
                           <X className="h-4 w-4" />
                         </button>
@@ -522,11 +549,12 @@ export default function UsersSection() {
                         {hasProfile && isAdmin && !isCurrentUser && (
                           <button
                             type="button"
+                            aria-label={`${t('common.edit')} — ${displayName}`}
                             onClick={() => {
                               setEditingNameFor(au.profile!.id);
                               setEditedName(au.profile?.display_name || '');
                             }}
-                            className="shrink-0 rounded p-0.5 text-text-dim transition-colors hover:text-accent-violet"
+                            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-text-dim transition-colors hover:bg-surface-raised hover:text-accent-violet"
                           >
                             <Pencil className="h-3 w-3" />
                           </button>
@@ -575,7 +603,7 @@ export default function UsersSection() {
               </div>
 
               {isAdmin && !isCurrentUser && (
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                   <RoleSelect
                     cmsRole={au.role}
                     labels={roleLabels}
@@ -601,13 +629,13 @@ export default function UsersSection() {
                       isSubmitting
                     }
                     aria-label={t('users.removeUser')}
-                    className="rounded-md p-2 text-text-dim transition-colors hover:text-red-400"
+                    className="flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-text-dim transition-colors hover:bg-surface-raised hover:text-red-400"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               )}
-            </div>
+            </article>
           );
         })
       )}

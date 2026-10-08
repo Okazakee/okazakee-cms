@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SiteSettingsResult } from '@/app/actions/cms/sections/siteSettingsActions';
 import { siteSettingsActions } from '@/app/actions/cms/sections/siteSettingsActions';
+import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
@@ -167,63 +168,68 @@ export function LayoutSection() {
         title={t('layout.title')}
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-      <div className="grid gap-6 md:grid-cols-2">
-        {(['dark', 'light'] as const).map((variant) => {
-          const upload = variant === 'dark' ? darkUpload : lightUpload;
-          const removed = removals[variant] && !upload.file;
-          return (
-            <section
-              key={variant}
-              data-testid={`header-logo-${variant}`}
-              className="rounded-2xl border border-border-subtle bg-surface-card p-6"
-            >
-              <h2 className="mb-5 text-lg font-bold text-text-white">
-                {t(
-                  `layout.headerLogo${variant === 'dark' ? 'Dark' : 'Light'}Title`
-                )}
-              </h2>
-              <FileDropzone
-                {...upload}
-                onBrowse={upload.openFileDialog}
-                onClear={() => {
-                  if (upload.file) upload.clearFile();
-                  else
-                    setRemovals((previous) => ({
-                      ...previous,
-                      [variant]: true,
-                    }));
-                }}
-                currentUrl={removed ? null : settings[`header_logo_${variant}`]}
-                previewUrl={upload.previewUrl}
-              />
-              {removals[variant] && (
-                <div className="mt-3 space-y-2 text-xs text-text-muted">
-                  <p>{t('layout.headerLogoRemovalNote')}</p>
-                  <button
-                    type="button"
-                    onClick={() =>
+      <EditorGroup
+        title={t('editor.groups.branding')}
+        description={t('layout.headerLogoNote')}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          {(['dark', 'light'] as const).map((variant) => {
+            const upload = variant === 'dark' ? darkUpload : lightUpload;
+            const removed = removals[variant] && !upload.file;
+            return (
+              <section
+                key={variant}
+                data-testid={`header-logo-${variant}`}
+                className="space-y-3 rounded-xl border border-border-subtle bg-surface-base p-4"
+              >
+                <h3 className="text-sm font-semibold text-text-white">
+                  {t(
+                    `layout.headerLogo${variant === 'dark' ? 'Dark' : 'Light'}Title`
+                  )}
+                </h3>
+                <FileDropzone
+                  {...upload}
+                  hasPendingFile={Boolean(upload.file)}
+                  onBrowse={upload.openFileDialog}
+                  onClear={() => {
+                    if (upload.file) upload.clearFile();
+                    else
                       setRemovals((previous) => ({
                         ...previous,
-                        [variant]: false,
-                      }))
-                    }
-                    className="min-h-11 rounded-lg border border-border-subtle px-3"
-                  >
-                    {t('layout.headerLogoUndoRemoval')}
-                  </button>
-                </div>
-              )}
-              <p className="mt-4 text-xs leading-relaxed text-text-dim">
-                {t('layout.headerLogoNote')}
-              </p>
-            </section>
-          );
-        })}
-      </div>
-      <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
-        <h2 className="mb-5 text-lg font-bold text-text-white">
-          {t('layout.footerIdentityTitle')}
-        </h2>
+                        [variant]: true,
+                      }));
+                  }}
+                  currentUrl={
+                    removed ? null : settings[`header_logo_${variant}`]
+                  }
+                  previewUrl={upload.previewUrl}
+                />
+                {removals[variant] && (
+                  <div className="space-y-2 text-xs text-text-muted">
+                    <p>{t('layout.headerLogoRemovalNote')}</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRemovals((previous) => ({
+                          ...previous,
+                          [variant]: false,
+                        }))
+                      }
+                      className="min-h-11 rounded-lg border border-border-subtle px-3"
+                    >
+                      {t('layout.headerLogoUndoRemoval')}
+                    </button>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      </EditorGroup>
+      <EditorGroup
+        title={t('editor.groups.footer')}
+        description={t('layout.footerVatHint')}
+      >
         {isLoading ? (
           <p className="text-xs text-text-dim">{t('common.loading')}</p>
         ) : (
@@ -237,10 +243,7 @@ export function LayoutSection() {
             />
           </label>
         )}
-        <p className="mt-4 text-xs leading-relaxed text-text-dim">
-          {t('layout.footerVatHint')}
-        </p>
-      </section>
+      </EditorGroup>
     </fieldset>
   );
 }

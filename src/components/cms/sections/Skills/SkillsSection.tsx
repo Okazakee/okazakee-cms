@@ -1,12 +1,20 @@
 'use client';
 
-import { ArrowDown, ArrowUp, Edit3, Plus, Trash2, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import { skillsActions } from '@/app/actions/cms/sections/skillsActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
@@ -675,9 +683,6 @@ export default function SkillsSection() {
     setSkillOrderChanged(true);
   };
 
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -706,236 +711,238 @@ export default function SkillsSection() {
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {/* Category Management */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('skills.manageCategoriesTitle')}
-          </h2>
-          {!isCreatingCategory && (
+      <EditorToolbar
+        title={t('skills.manageCategoriesTitle')}
+        count={categories.length}
+        actions={
+          !isCreatingCategory ? (
             <button
               type="button"
               onClick={() => setIsCreatingCategory(true)}
-              className="flex items-center gap-2 px-4 py-2 min-h-[44px] bg-accent-violet-deep hover:bg-accent-violet text-white font-medium rounded-lg transition-colors"
+              className={editorPrimaryButtonClass}
             >
               <Plus className="w-4 h-4" />
               {t('skills.addCategory')}
             </button>
-          )}
-        </div>
-        {isCreatingCategory && (
-          <div className="flex items-center gap-3 mb-4">
-            <input
-              type="text"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              className={`flex-1 ${inputClass}`}
-              placeholder={t('skills.categoryNamePlaceholder')}
-            />
+          ) : undefined
+        }
+      />
+      {isCreatingCategory && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            className={`flex-1 ${editorInputClass}`}
+            placeholder={t('skills.categoryNamePlaceholder')}
+          />
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={createCategory}
-              className="px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+              className={editorPrimaryButtonClass}
             >
-              {t('common.add')}
+              {t('editor.addDraft')}
             </button>
             <button
               type="button"
+              aria-label={t('common.cancel')}
               onClick={() => {
                 setIsCreatingCategory(false);
                 setNewCategoryName('');
               }}
-              className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg font-medium transition-colors"
+              className={editorSecondaryButtonClass}
             >
               <X className="w-4 h-4" />
             </button>
           </div>
-        )}
+        </div>
+      )}
+      {categories.length === 0 && !isCreatingCategory && (
+        <EmptyState message={t('skills.errorCategoryName')} />
+      )}
 
-        {categories.length === 0 && (
-          <EmptyState message={t('skills.errorCategoryName')} />
-        )}
-      </div>
-
-      {/* Categories & Skills */}
-      <div className="space-y-4">
+      <div className="space-y-6">
         {categories.map((cat, idx) => (
-          <div key={cat.id} className="bg-surface-card rounded-xl p-4 md:p-6">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                {renamingCategoryId === cat.id ? (
-                  <input
-                    aria-label={t('skills.categoryNamePlaceholder')}
-                    className={inputClass}
-                    value={cat.name}
-                    onChange={(event) =>
-                      renameCategory(cat.id, event.target.value)
-                    }
-                    onBlur={() => setRenamingCategoryId(null)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') setRenamingCategoryId(null);
-                    }}
-                  />
-                ) : (
-                  <h2 className="text-xl font-bold text-accent-violet">
-                    {cat.name}
-                  </h2>
-                )}
-                <button
-                  type="button"
-                  className="flex h-11 w-11 items-center justify-center text-text-muted hover:text-accent-violet"
-                  aria-label={`${t('skills.renameCategory')}: ${cat.name}`}
-                  onClick={() => setRenamingCategoryId(cat.id)}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => moveCategory(cat.id, -1)}
-                  disabled={idx === 0}
-                  className="p-2 min-h-[44px] text-text-muted hover:text-accent-violet disabled:opacity-30"
-                  title={t('common.moveUp')}
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveCategory(cat.id, 1)}
-                  disabled={idx === categories.length - 1}
-                  className="p-2 min-h-[44px] text-text-muted hover:text-accent-violet disabled:opacity-30"
-                  title={t('common.moveDown')}
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <div className="w-px h-6 bg-surface-raised mx-1" />
-                <button
-                  type="button"
-                  onClick={() => deleteCategory(cat.id)}
-                  className="p-2 min-h-[44px] text-red-400 hover:text-red-300"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <EditorGroup
+            key={cat.id}
+            count={cat.skills.length}
+            title={
+              renamingCategoryId === cat.id ? (
+                <input
+                  aria-label={t('skills.categoryNamePlaceholder')}
+                  className={editorInputClass}
+                  value={cat.name}
+                  onChange={(event) =>
+                    renameCategory(cat.id, event.target.value)
+                  }
+                  onBlur={() => setRenamingCategoryId(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') setRenamingCategoryId(null);
+                  }}
+                />
+              ) : (
+                cat.name
+              )
+            }
+            actions={
+              <CardToolbar
+                showReorder
+                isFirst={idx === 0}
+                isLast={idx === categories.length - 1}
+                onMoveUp={() => moveCategory(cat.id, -1)}
+                onMoveDown={() => moveCategory(cat.id, 1)}
+                onEdit={() => setRenamingCategoryId(cat.id)}
+                onDelete={() => deleteCategory(cat.id)}
+              />
+            }
+          >
+            <div className="space-y-3">
               {cat.skills.map((skill, skillIdx) => (
-                <div
+                <article
                   key={skill.id}
-                  className={`rounded-lg p-4 text-center transition-colors ${
-                    skill.isEditing
-                      ? 'bg-accent-violet/5 border border-accent-violet/20'
-                      : 'bg-surface-base '
+                  aria-labelledby={`skill-heading-${cat.id}-${skill.id}`}
+                  className={`rounded-xl border border-border-subtle bg-surface-base p-4 ${
+                    skill.isEditing ? 'border-accent-violet/40' : ''
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-text-main truncate pr-2">
-                      {skill.title}
-                    </h3>
-                    <CardToolbar
-                      showReorder
-                      isFirst={skillIdx === 0}
-                      isLast={skillIdx === cat.skills.length - 1}
-                      onMoveUp={() => moveSkill(cat.id, skill.id, -1)}
-                      onMoveDown={() => moveSkill(cat.id, skill.id, 1)}
-                      onEdit={() => toggleEditSkill(cat.id, skill.id)}
-                      onDelete={() => deleteSkill(cat.id, skill.id)}
-                    />
-                  </div>
-                  {skill.icon && !skill.isEditing && (
-                    <div className="mb-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {skill.icon ? (
                       <Image
                         src={skill.icon}
-                        width={64}
-                        height={64}
-                        className={`mx-auto rounded-lg ${skill.invert ? 'dark:invert' : ''}`}
-                        alt={skill.title}
+                        width={32}
+                        height={32}
+                        className={`h-8 w-8 flex-shrink-0 rounded object-contain ${skill.invert ? 'dark:invert' : ''}`}
+                        alt=""
                         placeholder={skill.blurhashURL ? 'blur' : 'empty'}
                         blurDataURL={skill.blurhashURL ?? undefined}
                       />
+                    ) : (
+                      <span className="h-8 w-8 flex-shrink-0 rounded bg-surface-raised" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <h3
+                        id={`skill-heading-${cat.id}-${skill.id}`}
+                        className="truncate font-semibold text-text-main"
+                      >
+                        {skill.title || t('skills.skillTitlePlaceholder')}
+                      </h3>
+                      <p className="truncate text-xs text-text-muted">
+                        {skill.link
+                          ? skill.link
+                          : t('skills.skillLinkPlaceholder')}
+                        {skill.invert ? ` · ${t('skills.invertLabel')}` : ''}
+                      </p>
                     </div>
-                  )}
-                  {skill.isEditing ? (
-                    <div className="space-y-3 text-left">
-                      <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1">
-                          {t('skills.skillTitlePlaceholder')}
-                        </label>
-                        <input
-                          type="text"
-                          value={skill.title}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'title',
-                              e.target.value
-                            )
-                          }
-                          className={`${inputClass} text-sm`}
-                        />
+                    <div className="flex w-full justify-end sm:w-auto">
+                      <CardToolbar
+                        showReorder
+                        isFirst={skillIdx === 0}
+                        isLast={skillIdx === cat.skills.length - 1}
+                        onMoveUp={() => moveSkill(cat.id, skill.id, -1)}
+                        onMoveDown={() => moveSkill(cat.id, skill.id, 1)}
+                        onEdit={() => toggleEditSkill(cat.id, skill.id)}
+                        onDelete={() => deleteSkill(cat.id, skill.id)}
+                      />
+                    </div>
+                  </div>
+                  {skill.isEditing && (
+                    <div className="mt-4 space-y-4 text-left">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label
+                            htmlFor={`skill-title-${cat.id}-${skill.id}`}
+                            className={editorLabelClass}
+                          >
+                            {t('skills.skillTitlePlaceholder')}
+                          </label>
+                          <input
+                            id={`skill-title-${cat.id}-${skill.id}`}
+                            type="text"
+                            value={skill.title}
+                            onChange={(e) =>
+                              handleSkillChange(
+                                cat.id,
+                                skill.id,
+                                'title',
+                                e.target.value
+                              )
+                            }
+                            className={editorInputClass}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor={`skill-icon-${cat.id}-${skill.id}`}
+                            className={editorLabelClass}
+                          >
+                            {t('skills.iconUrlLabel')}
+                          </label>
+                          <input
+                            id={`skill-icon-${cat.id}-${skill.id}`}
+                            type="url"
+                            value={skill.icon}
+                            onChange={(e) =>
+                              handleSkillChange(
+                                cat.id,
+                                skill.id,
+                                'icon',
+                                e.target.value
+                              )
+                            }
+                            className={editorInputClass}
+                            placeholder={t('skills.skillIconPlaceholder')}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1">
-                          Icon URL
-                        </label>
-                        <input
-                          type="url"
-                          value={skill.icon}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'icon',
-                              e.target.value
-                            )
-                          }
-                          className={`${inputClass} text-xs`}
-                          placeholder="https://example.com/icon.svg"
-                        />
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label
+                            htmlFor={`skill-link-${cat.id}-${skill.id}`}
+                            className={editorLabelClass}
+                          >
+                            {t('skills.skillLinkLabel')}
+                          </label>
+                          <input
+                            id={`skill-link-${cat.id}-${skill.id}`}
+                            type="url"
+                            value={skill.link ?? ''}
+                            onChange={(e) =>
+                              handleSkillChange(
+                                cat.id,
+                                skill.id,
+                                'link',
+                                e.target.value
+                              )
+                            }
+                            className={editorInputClass}
+                            placeholder={t('skills.skillLinkPlaceholder')}
+                          />
+                        </div>
+                        <div className="flex items-end pb-2">
+                          <label className="flex items-center gap-2 text-sm text-text-muted">
+                            <input
+                              type="checkbox"
+                              checked={skill.invert}
+                              onChange={(e) =>
+                                handleSkillChange(
+                                  cat.id,
+                                  skill.id,
+                                  'invert',
+                                  e.target.checked
+                                )
+                              }
+                              className="rounded"
+                            />
+                            {t('skills.invertLabel')}
+                          </label>
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1">
-                          {t('skills.skillLinkLabel')}
-                        </label>
-                        <input
-                          type="url"
-                          value={skill.link ?? ''}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'link',
-                              e.target.value
-                            )
-                          }
-                          className={`${inputClass} text-xs`}
-                          placeholder={t('skills.skillLinkPlaceholder')}
-                        />
-                      </div>
-                      <label className="flex items-center gap-2 text-sm text-text-muted ">
-                        <input
-                          type="checkbox"
-                          checked={skill.invert}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'invert',
-                              e.target.checked
-                            )
-                          }
-                          className="rounded"
-                        />
-                        {t('skills.invertLabel')}
-                      </label>
                       <div className="flex gap-2">
                         <button
                           type="button"
                           onClick={() => cancelSkillEdit(cat.id, skill.id)}
-                          className="flex-1 py-1.5 text-sm bg-surface-raised text-white rounded-lg hover:bg-surface-raised"
+                          className={`flex-1 ${editorSecondaryButtonClass}`}
                         >
                           <X className="w-3 h-3 inline mr-1" />
                           {t('common.cancel')}
@@ -943,136 +950,151 @@ export default function SkillsSection() {
                         <button
                           type="button"
                           onClick={() => saveSkillChanges(cat.id, skill.id)}
-                          className="flex-1 py-1.5 text-sm bg-accent-violet text-white rounded-lg hover:bg-accent-violet-deep"
+                          className={`flex-1 ${editorPrimaryButtonClass}`}
                         >
-                          {t('common.done')}
+                          {t('editor.applyDraft')}
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2">
-                      {skill.invert && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-accent-violet/10 text-accent-violet ">
-                          {t('skills.invertLabel')}
-                        </span>
-                      )}
-                    </div>
                   )}
-                </div>
+                </article>
               ))}
 
-              {/* New Skill Form */}
               {cat.newSkill && (
-                <div className="bg-surface-card rounded-lg p-4 border-2 border-dashed border-accent-violet/40">
-                  <h4 className="text-lg font-semibold text-accent-violet mb-3">
-                    {t('skills.newSkill')}
-                  </h4>
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={cat.newSkill.title || ''}
-                      onChange={(e) =>
-                        setCategories((prev) =>
-                          prev.map((c) =>
-                            c.id === cat.id
-                              ? {
-                                  ...c,
-                                  newSkill: {
-                                    ...c.newSkill!,
-                                    title: e.target.value,
-                                  },
-                                }
-                              : c
-                          )
-                        )
-                      }
-                      className={`${inputClass} text-sm`}
-                      placeholder="Skill title"
-                    />
-                    <div className="flex gap-2 items-start">
-                      {cat.newSkill.icon && (
-                        <Image
-                          src={cat.newSkill.icon}
-                          width={48}
-                          height={48}
-                          className="rounded flex-shrink-0"
-                          alt=""
+                <div className="rounded-xl border border-dashed border-accent-violet/40 bg-surface-base p-4">
+                  <EditorToolbar title={t('skills.newSkill')} />
+                  <div className="mt-4 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label
+                          htmlFor={`new-skill-title-${cat.id}`}
+                          className={editorLabelClass}
+                        >
+                          {t('skills.skillTitlePlaceholder')}
+                        </label>
+                        <input
+                          id={`new-skill-title-${cat.id}`}
+                          type="text"
+                          value={cat.newSkill.title || ''}
+                          onChange={(e) =>
+                            setCategories((prev) =>
+                              prev.map((c) =>
+                                c.id === cat.id
+                                  ? {
+                                      ...c,
+                                      newSkill: {
+                                        ...c.newSkill!,
+                                        title: e.target.value,
+                                      },
+                                    }
+                                  : c
+                              )
+                            )
+                          }
+                          className={editorInputClass}
+                          placeholder={t('skills.skillTitlePlaceholder')}
                         />
-                      )}
-                      <input
-                        type="url"
-                        value={cat.newSkill.icon || ''}
-                        onChange={(e) =>
-                          setCategories((prev) =>
-                            prev.map((c) =>
-                              c.id === cat.id
-                                ? {
-                                    ...c,
-                                    newSkill: {
-                                      ...c.newSkill!,
-                                      icon: e.target.value,
-                                    },
-                                  }
-                                : c
-                            )
-                          )
-                        }
-                        className={`flex-1 ${inputClass} text-xs`}
-                        placeholder="https://example.com/icon.svg"
-                      />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor={`new-skill-icon-${cat.id}`}
+                          className={editorLabelClass}
+                        >
+                          {t('skills.iconUrlLabel')}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          {cat.newSkill.icon && (
+                            <Image
+                              src={cat.newSkill.icon}
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 flex-shrink-0 rounded object-contain"
+                              alt=""
+                            />
+                          )}
+                          <input
+                            id={`new-skill-icon-${cat.id}`}
+                            type="url"
+                            value={cat.newSkill.icon || ''}
+                            onChange={(e) =>
+                              setCategories((prev) =>
+                                prev.map((c) =>
+                                  c.id === cat.id
+                                    ? {
+                                        ...c,
+                                        newSkill: {
+                                          ...c.newSkill!,
+                                          icon: e.target.value,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
+                            }
+                            className={editorInputClass}
+                            placeholder={t('skills.skillIconPlaceholder')}
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <input
-                      type="url"
-                      value={cat.newSkill.link || ''}
-                      onChange={(e) =>
-                        setCategories((prev) =>
-                          prev.map((c) =>
-                            c.id === cat.id
-                              ? {
-                                  ...c,
-                                  newSkill: {
-                                    ...c.newSkill!,
-                                    link: e.target.value,
-                                  },
-                                }
-                              : c
-                          )
-                        )
-                      }
-                      className={`${inputClass} text-xs`}
-                      placeholder={t('skills.skillLinkPlaceholder')}
-                    />
-                    <label className="flex items-center gap-2 text-sm text-text-muted ">
-                      <input
-                        type="checkbox"
-                        checked={cat.newSkill.invert || false}
-                        onChange={(e) =>
-                          setCategories((prev) =>
-                            prev.map((c) =>
-                              c.id === cat.id
-                                ? {
-                                    ...c,
-                                    newSkill: {
-                                      ...c.newSkill!,
-                                      invert: e.target.checked,
-                                    },
-                                  }
-                                : c
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label
+                          htmlFor={`new-skill-link-${cat.id}`}
+                          className={editorLabelClass}
+                        >
+                          {t('skills.skillLinkLabel')}
+                        </label>
+                        <input
+                          id={`new-skill-link-${cat.id}`}
+                          type="url"
+                          value={cat.newSkill.link || ''}
+                          onChange={(e) =>
+                            setCategories((prev) =>
+                              prev.map((c) =>
+                                c.id === cat.id
+                                  ? {
+                                      ...c,
+                                      newSkill: {
+                                        ...c.newSkill!,
+                                        link: e.target.value,
+                                      },
+                                    }
+                                  : c
+                              )
                             )
-                          )
-                        }
-                        className="rounded"
-                      />
-                      {t('skills.invertLabel')}
-                    </label>
+                          }
+                          className={editorInputClass}
+                          placeholder={t('skills.skillLinkPlaceholder')}
+                        />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm text-text-muted">
+                          <input
+                            type="checkbox"
+                            checked={cat.newSkill.invert || false}
+                            onChange={(e) =>
+                              setCategories((prev) =>
+                                prev.map((c) =>
+                                  c.id === cat.id
+                                    ? {
+                                        ...c,
+                                        newSkill: {
+                                          ...c.newSkill!,
+                                          invert: e.target.checked,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
+                            }
+                            className="rounded"
+                          />
+                          {t('skills.invertLabel')}
+                        </label>
+                      </div>
+                    </div>
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => saveNewSkill(cat.id)}
-                        className="flex-1 py-1 text-sm bg-accent-violet text-white rounded-lg hover:bg-accent-violet-deep"
-                      >
-                        {t('common.add')}
-                      </button>
                       <button
                         type="button"
                         onClick={() =>
@@ -1084,28 +1106,36 @@ export default function SkillsSection() {
                             )
                           )
                         }
-                        className="flex-1 py-1 text-sm bg-surface-raised text-white rounded-lg hover:bg-surface-raised"
+                        className={`flex-1 ${editorSecondaryButtonClass}`}
                       >
                         <X className="w-3 h-3 inline mr-1" />
                         {t('common.cancel')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveNewSkill(cat.id)}
+                        className={`flex-1 ${editorPrimaryButtonClass}`}
+                      >
+                        {t('editor.addDraft')}
                       </button>
                     </div>
                   </div>
                 </div>
               )}
             </div>
-
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => addNewSkill(cat.id)}
-                className="flex items-center gap-2 px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                {t('skills.addSkill')}
-              </button>
-            </div>
-          </div>
+            {!cat.newSkill && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => addNewSkill(cat.id)}
+                  className={editorSecondaryButtonClass}
+                >
+                  <Plus className="w-4 h-4" />
+                  {t('skills.addSkill')}
+                </button>
+              </div>
+            )}
+          </EditorGroup>
         ))}
       </div>
 

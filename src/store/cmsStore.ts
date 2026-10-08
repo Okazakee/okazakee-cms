@@ -67,7 +67,7 @@ interface CmsState {
 export const useCmsStore = create<CmsState>((set, get) => ({
   user: null,
   sidePanelSections: [],
-  activeSection: 'hero',
+  activeSection: null,
   heroSection: null,
   loading: false,
   error: null,

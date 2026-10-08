@@ -239,7 +239,8 @@ export function useSectionTranslations(
 
   const getField = useCallback(
     (locale: CmsLocale, path: string): string => {
-      return translations[locale]?.[path] ?? '';
+      const fields = translations[locale];
+      return Object.hasOwn(fields, path) ? fields[path] : '';
     },
     [translations]
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { useId } from 'react';
 import { ValidationMessage } from './ValidationMessage';
 
 interface TranslationFieldProps {
@@ -35,6 +36,7 @@ export function TranslationField({
   activeLocale,
 }: TranslationFieldProps) {
   const t = useTranslations('cms');
+  const fieldId = useId();
   const inputClass =
     'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
 
@@ -42,12 +44,16 @@ export function TranslationField({
     const value = activeLocale === 'en' ? enValue : itValue;
     const onChange = activeLocale === 'en' ? onChangeEn : onChangeIt;
     const error = activeLocale === 'en' ? enError : itError;
+    const otherError = activeLocale === 'en' ? itError : enError;
     const placeholder = activeLocale === 'en' ? enPlaceholder : itPlaceholder;
-    const id = `tf-${label.replace(/\s+/g, '-').toLowerCase()}-${activeLocale}`;
+    const id = `${fieldId}-${activeLocale}`;
 
     return (
       <div>
-        <label className="block text-sm font-medium text-text-main mb-2">
+        <label
+          htmlFor={id}
+          className="block text-sm font-medium text-text-main mb-2"
+        >
           {label}
           {required && <span className="text-red-500 ml-1">*</span>}
         </label>
@@ -76,26 +82,32 @@ export function TranslationField({
           />
         )}
         <ValidationMessage message={error} show />
+        {otherError && (
+          <ValidationMessage
+            message={`${t('editor.otherLocaleError')} ${otherError}`}
+            show
+          />
+        )}
       </div>
     );
   }
 
-  const idEn = `tf-en-${label.replace(/\s+/g, '-').toLowerCase()}`;
-  const idIt = `tf-it-${label.replace(/\s+/g, '-').toLowerCase()}`;
+  const idEn = `${fieldId}-en`;
+  const idIt = `${fieldId}-it`;
 
   return (
     <div>
-      <label className="block text-sm font-medium text-text-main mb-2">
+      <p className="block text-sm font-medium text-text-main mb-2">
         {label}
         {required && <span className="text-red-500 ml-1">*</span>}
-      </label>
+      </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <div className="flex items-center gap-1 mb-1">
+          <label htmlFor={idEn} className="flex items-center gap-1 mb-1">
             <span className="text-xs font-medium text-text-dim uppercase">
-              {t('common.english')}
+              {label} — {t('common.english')}
             </span>
-          </div>
+          </label>
           {type === 'textarea' ? (
             <textarea
               id={idEn}
@@ -118,11 +130,11 @@ export function TranslationField({
           <ValidationMessage message={enError} show />
         </div>
         <div>
-          <div className="flex items-center gap-1 mb-1">
+          <label htmlFor={idIt} className="flex items-center gap-1 mb-1">
             <span className="text-xs font-medium text-text-dim uppercase">
-              {t('common.italian')}
+              {label} — {t('common.italian')}
             </span>
-          </div>
+          </label>
           {type === 'textarea' ? (
             <textarea
               id={idIt}

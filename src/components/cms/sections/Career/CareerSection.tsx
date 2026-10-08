@@ -1,6 +1,6 @@
 'use client';
 
-import { Calendar, Globe, MapPin, Plus, X } from 'lucide-react';
+import { Calendar, Globe, MapPin, Plus } from 'lucide-react';
 import Image from 'next/image';
 import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
@@ -8,6 +8,15 @@ import { careerActions } from '@/app/actions/cms/sections/careerActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
@@ -391,9 +400,6 @@ export default function CareerSection() {
 
   useSectionCallbacks('career', handlePublish, handleRevert);
 
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none text-sm';
-
   if (isLoading)
     return (
       <div className="flex items-center justify-center py-12">
@@ -404,131 +410,102 @@ export default function CareerSection() {
   if (mode === 'create' || mode === 'edit') {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-main ">
-            {mode === 'create'
+        <EditorToolbar
+          title={
+            mode === 'create'
               ? t('career.createNewEntry')
-              : t('career.editEntry')}
-          </h2>
-          <div className="flex items-center gap-3">
+              : t('career.editEntry')
+          }
+          actions={
             <LocaleToggle activeLocale={formLocale} onChange={setFormLocale} />
-            <button
-              type="button"
-              onClick={closeForm}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-raised rounded-lg hover:bg-surface-raised text-text-main "
-            >
-              <X className="w-4 h-4" />
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
+          }
+        />
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-        {/* Role & Company */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('career.jobTitleLabel')} & {t('career.companyLabel')}
-          </h3>
-          <div className="grid md:grid-cols-2 gap-3">
+        <EditorGroup title={t('editor.groups.company')}>
+          <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-title" className={editorLabelClass}>
                 {t('career.jobTitleLabel')}{' '}
                 <span className="text-red-500">*</span>
               </label>
               <input
+                id="career-title"
                 type="text"
                 value={formData.title}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, title: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 placeholder={t('career.jobTitlePlaceholder')}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-company" className={editorLabelClass}>
                 {t('career.companyLabel')}{' '}
                 <span className="text-red-500">*</span>
               </label>
               <input
+                id="career-company"
                 type="text"
                 value={formData.company}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, company: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 placeholder={t('career.companyPlaceholder')}
                 required
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label htmlFor="career-website" className={editorLabelClass}>
               {t('career.websiteUrlLabel')}
             </label>
             <input
+              id="career-website"
               type="url"
               value={formData.website_url}
               onChange={(e) =>
                 setFormData((p) => ({ ...p, website_url: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('career.websiteUrlPlaceholder')}
             />
           </div>
-          <FileDropzone
-            label={t('career.selectLogo')}
-            previewUrl={logoUpload.previewUrl}
-            blurhash={logoUpload.blurhash}
-            isDragging={logoUpload.isDragging}
-            isProcessing={logoUpload.isProcessing}
-            error={logoUpload.error}
-            dropzoneProps={{
-              onDragOver: logoUpload.dropzoneProps.onDragOver,
-              onDragLeave: logoUpload.dropzoneProps.onDragLeave,
-              onDrop: logoUpload.dropzoneProps.onDrop,
-            }}
-            fileInputProps={logoUpload.fileInputProps}
-            fileInputRef={logoUpload.fileInputRef}
-            onClear={logoUpload.clearFile}
-            onBrowse={logoUpload.openFileDialog}
-            compact
-          />
-        </div>
+        </EditorGroup>
 
-        {/* Time & Location */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('career.startDateLabel')} & {t('career.locationEnLabel')}
-          </h3>
-          <div className="grid md:grid-cols-2 gap-3">
+        <EditorGroup title={t('editor.groups.datesLocation')}>
+          <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-start" className={editorLabelClass}>
                 {t('career.startDateLabel')}{' '}
                 <span className="text-red-500">*</span>
               </label>
               <input
+                id="career-start"
                 type="date"
                 value={formData.startDate}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, startDate: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-end" className={editorLabelClass}>
                 {t('career.endDateLabel')}
               </label>
               <input
+                id="career-end"
                 type="date"
                 value={formData.endDate}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, endDate: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 disabled={isCurrentPosition}
               />
               <label className="flex items-center gap-2 mt-2 text-sm text-text-muted ">
@@ -547,10 +524,7 @@ export default function CareerSection() {
             </div>
           </div>
           <div>
-            <label
-              htmlFor="career-remote"
-              className="block text-sm font-medium text-text-main mb-1"
-            >
+            <label htmlFor="career-remote" className={editorLabelClass}>
               {t('career.remoteTypeLabel')}
             </label>
             <Dropdown
@@ -559,7 +533,7 @@ export default function CareerSection() {
               onChange={(value) =>
                 setFormData((p) => ({ ...p, remote: value as RemoteType }))
               }
-              triggerClassName={inputClass}
+              triggerClassName={editorInputClass}
               options={[
                 { value: 'full', label: t('career.remoteFullOption') },
                 { value: 'hybrid', label: t('career.remoteHybridOption') },
@@ -568,22 +542,18 @@ export default function CareerSection() {
             />
           </div>
           <TranslationField
-            label={t('career.locationEnLabel')}
+            label={t('editor.fields.location')}
             enValue={formData.location_en}
             itValue={formData.location_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, location_en: v }))}
             onChangeIt={(v) => setFormData((p) => ({ ...p, location_it: v }))}
             activeLocale={formLocale}
           />
-        </div>
+        </EditorGroup>
 
-        {/* Content */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('career.descriptionEnLabel')}
-          </h3>
+        <EditorGroup title={t('editor.groups.details')}>
           <TranslationField
-            label={t('career.descriptionEnLabel')}
+            label={t('editor.fields.description')}
             enValue={formData.description_en}
             itValue={formData.description_it}
             onChangeEn={(v) =>
@@ -596,44 +566,62 @@ export default function CareerSection() {
             rows={4}
             activeLocale={formLocale}
           />
-        </div>
-
-        {/* Details */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">Skills</h3>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              Skills
+            <label htmlFor="career-skills" className={editorLabelClass}>
+              {t('career.skillsLabel')}
             </label>
             <input
+              id="career-skills"
               type="text"
               value={formData.skills}
               onChange={(e) =>
                 setFormData((p) => ({ ...p, skills: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('career.skillsPlaceholder')}
             />
             <p className="text-xs text-text-muted mt-1">
-              Comma-separated list of skills
+              {t('career.skillsHint')}
             </p>
           </div>
-        </div>
+        </EditorGroup>
+
+        <EditorGroup title={t('career.logoGroupTitle')}>
+          <FileDropzone
+            label={t('career.selectLogo')}
+            previewUrl={logoUpload.previewUrl}
+            blurhash={logoUpload.blurhash}
+            isDragging={logoUpload.isDragging}
+            isProcessing={logoUpload.isProcessing}
+            hasPendingFile={Boolean(logoUpload.file)}
+            error={logoUpload.error}
+            dropzoneProps={{
+              onDragOver: logoUpload.dropzoneProps.onDragOver,
+              onDragLeave: logoUpload.dropzoneProps.onDragLeave,
+              onDrop: logoUpload.dropzoneProps.onDrop,
+            }}
+            fileInputProps={logoUpload.fileInputProps}
+            fileInputRef={logoUpload.fileInputRef}
+            onClear={logoUpload.clearFile}
+            onBrowse={logoUpload.openFileDialog}
+            compact
+          />
+        </EditorGroup>
 
         <div className="flex gap-3 pt-2">
           <button
             type="button"
             onClick={closeForm}
-            className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg"
+            className={editorSecondaryButtonClass}
           >
             {t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={mode === 'create' ? handleCreate : handleUpdate}
-            className="px-4 py-2 min-h-[44px] bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
+            className={editorPrimaryButtonClass}
           >
-            {mode === 'create' ? t('common.add') : t('common.done')}
+            {mode === 'create' ? t('editor.addDraft') : t('editor.applyDraft')}
           </button>
         </div>
       </div>
@@ -660,19 +648,20 @@ export default function CareerSection() {
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
       {/* Entries */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('career.careerEntriesTitle')}
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-        >
-          <Plus className="w-4 h-4" />
-          {t('career.addCareerEntry')}
-        </button>
-      </div>
+      <EditorToolbar
+        title={t('career.careerEntriesTitle')}
+        count={entries.length}
+        actions={
+          <button
+            type="button"
+            onClick={openCreate}
+            className={editorPrimaryButtonClass}
+          >
+            <Plus className="w-4 h-4" />
+            {t('career.addCareerEntry')}
+          </button>
+        }
+      />
 
       {entries.length === 0 ? (
         <EmptyState message={t('career.noCareerEntries')} />
@@ -681,7 +670,7 @@ export default function CareerSection() {
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className="bg-surface-card rounded-xl p-4 md:p-6 flex items-start gap-4"
+              className={`${editorRowClass} flex items-start gap-4`}
             >
               {entry.logo ? (
                 <Image
@@ -727,7 +716,9 @@ export default function CareerSection() {
                   </span>
                   <span>
                     <MapPin className="w-3 h-3 inline mr-1" />
-                    {entry.location_en}
+                    {activeLocale === 'it'
+                      ? entry.location_it || entry.location_en
+                      : entry.location_en}
                   </span>
                 </div>
               </div>

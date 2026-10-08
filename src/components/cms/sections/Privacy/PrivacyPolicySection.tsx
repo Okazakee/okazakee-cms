@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
@@ -106,7 +107,7 @@ export default function PrivacyPolicySection() {
   useSectionCallbacks('privacy-policy', handlePublish, handleRevert);
 
   const textareaClass =
-    'w-full px-4 py-3 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none font-mono text-sm resize-y';
+    'w-full min-h-80 px-4 py-3 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none font-mono text-sm resize-y';
 
   if (isLoading)
     return (
@@ -133,14 +134,15 @@ export default function PrivacyPolicySection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-      <div className="flex items-center justify-between gap-2">
-        <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
-      </div>
-
-      <div>
-        <h2 className="text-lg font-bold text-accent-violet mb-3">
-          {activeLocale === 'en' ? t('common.english') : t('common.italian')}
-        </h2>
+      <EditorGroup
+        title={t('editor.groups.document')}
+        actions={
+          <LocaleToggle
+            activeLocale={activeLocale}
+            onChange={setActiveLocale}
+          />
+        }
+      >
         <textarea
           aria-label={t('privacy.bodyLabel')}
           value={activeLocale === 'en' ? enMarkdown : itMarkdown}
@@ -156,7 +158,7 @@ export default function PrivacyPolicySection() {
               : '# Informativa sulla Privacy'
           }
         />
-      </div>
+      </EditorGroup>
 
       <ConfirmDialog
         isOpen={showConfirmRevert}

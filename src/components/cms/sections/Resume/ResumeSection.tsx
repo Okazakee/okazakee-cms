@@ -1,9 +1,9 @@
 'use client';
 
-import { Copy, Download, ExternalLink } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
+import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
@@ -94,74 +94,56 @@ export function ResumeSection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-      <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
-        <div className="grid gap-6 md:grid-cols-2">
-          {(['en', 'it'] as const).map((locale) => {
-            const upload = locale === 'en' ? enUpload : itUpload;
-            const currentUrl =
-              heroSection?.[locale === 'en' ? 'resume_en' : 'resume_it'] ??
-              null;
-            return (
-              <div key={locale}>
-                <h2 className="mb-2 text-sm font-medium text-text-main">
-                  {t(
-                    locale === 'en'
-                      ? 'resume.englishLabel'
-                      : 'resume.italianLabel'
-                  )}
-                </h2>
-                <FileDropzone
-                  compact
-                  currentUrl={currentUrl}
-                  dropzoneProps={upload.dropzoneProps}
-                  error={upload.error}
-                  fileInputProps={{ ...upload.fileInputProps, accept: '.pdf' }}
-                  fileInputRef={upload.fileInputRef}
-                  isDragging={upload.isDragging}
-                  isProcessing={upload.isProcessing}
-                  onBrowse={upload.openFileDialog}
-                  onClear={upload.clearFile}
-                  previewUrl={upload.previewUrl}
-                />
-                {currentUrl && (
-                  <div className="mt-2 flex flex-wrap gap-2 text-sm">
-                    <a
-                      href={currentUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-surface-base px-3"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      {t('resume.openLabel')}
-                    </a>
-                    <button
-                      type="button"
-                      className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-surface-base px-3"
-                      onClick={() =>
+      <div className="grid gap-6 md:grid-cols-2">
+        {(['en', 'it'] as const).map((locale) => {
+          const upload = locale === 'en' ? enUpload : itUpload;
+          const currentUrl =
+            heroSection?.[locale === 'en' ? 'resume_en' : 'resume_it'] ?? null;
+          const displayUrl = upload.previewUrl ?? currentUrl;
+          return (
+            <EditorGroup
+              key={locale}
+              title={t(
+                locale === 'en' ? 'resume.englishLabel' : 'resume.italianLabel'
+              )}
+            >
+              <FileDropzone
+                compact
+                currentUrl={currentUrl}
+                dropzoneProps={upload.dropzoneProps}
+                error={upload.error}
+                fileInputProps={{ ...upload.fileInputProps, accept: '.pdf' }}
+                fileInputRef={upload.fileInputRef}
+                isDragging={upload.isDragging}
+                isProcessing={upload.isProcessing}
+                hasPendingFile={Boolean(upload.file)}
+                onBrowse={upload.openFileDialog}
+                onClear={upload.clearFile}
+                onCopyUrl={
+                  currentUrl
+                    ? () =>
                         navigator.clipboard
                           .writeText(currentUrl)
                           .catch(() => setError(t('resume.errorCopy')))
-                      }
-                    >
-                      <Copy className="h-3 w-3" />
-                      {t('resume.copyUrl')}
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex min-h-11 items-center gap-1 rounded-lg bg-surface-base px-3"
-                      onClick={() => download(currentUrl, locale)}
-                    >
-                      <Download className="h-3 w-3" />
-                      {t('resume.download')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <p className="mt-4 text-xs text-text-muted">{t('resume.pdfNote')}</p>
-      </section>
+                    : undefined
+                }
+                onDownload={
+                  currentUrl ? () => download(currentUrl, locale) : undefined
+                }
+                onOpen={
+                  displayUrl
+                    ? () =>
+                        window.open(displayUrl, '_blank', 'noopener,noreferrer')
+                    : undefined
+                }
+                previewUrl={upload.previewUrl}
+                showUrl={currentUrl}
+              />
+              <p className="text-xs text-text-muted">{t('resume.pdfNote')}</p>
+            </EditorGroup>
+          );
+        })}
+      </div>
     </fieldset>
   );
 }

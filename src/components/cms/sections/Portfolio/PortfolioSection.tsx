@@ -1,6 +1,6 @@
 'use client';
 
-import { Calendar, Edit3, FileText, Info, Plus, Trash2, X } from 'lucide-react';
+import { Calendar, FileText, Plus } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -10,6 +10,15 @@ import {
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
@@ -424,30 +433,18 @@ export default function PortfolioSection() {
     const isEditing = mode === 'edit';
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-main ">
-            {isEditing ? t('portfolio.editPost') : t('portfolio.createNewPost')}
-          </h2>
-          <div className="flex items-center gap-3">
+        <EditorToolbar
+          title={
+            isEditing ? t('portfolio.editPost') : t('portfolio.createNewPost')
+          }
+          actions={
             <LocaleToggle activeLocale={formLocale} onChange={setFormLocale} />
-            <button
-              type="button"
-              onClick={closeForm}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-raised rounded-lg text-text-main hover:bg-surface-raised"
-            >
-              <X className="w-4 h-4" />
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
+          }
+        />
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
-        {/* Content */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.content')}
-          </h3>
+        <EditorGroup title={t('editor.groups.summary')}>
           <TranslationField
-            label={t('portfolio.titleEnLabel')}
+            label={t('editor.fields.title')}
             enValue={formData.title_en}
             itValue={formData.title_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, title_en: v }))}
@@ -456,7 +453,7 @@ export default function PortfolioSection() {
             activeLocale={formLocale}
           />
           <TranslationField
-            label={t('portfolio.descriptionEnLabel')}
+            label={t('editor.fields.summary')}
             enValue={formData.description_en}
             itValue={formData.description_it}
             onChangeEn={(v) =>
@@ -469,8 +466,10 @@ export default function PortfolioSection() {
             rows={3}
             activeLocale={formLocale}
           />
+        </EditorGroup>
+        <EditorGroup title={t('editor.groups.content')}>
           <TranslationField
-            label={t('portfolio.bodyEnLabel')}
+            label={t('editor.fields.content')}
             enValue={formData.body_en}
             itValue={formData.body_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, body_en: v }))}
@@ -479,43 +478,61 @@ export default function PortfolioSection() {
             rows={8}
             activeLocale={formLocale}
           />
-          <div className="flex items-start gap-2 text-xs text-text-muted bg-surface-base rounded-lg p-3 border border-border-subtle ">
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
+          <details className="rounded-lg border border-border-subtle bg-surface-base p-3 text-xs text-text-muted">
+            <summary className="cursor-pointer font-medium text-text-main">
+              {t('editor.formattingHelp')}
+            </summary>
+            <div className="mt-2 space-y-1">
               <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
                   ****text****
                 </code>{' '}
                 {t('portfolio.syntaxHighlight')}
               </p>
               <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
                   ![alt-blurhash](url)
                 </code>{' '}
                 {t('portfolio.syntaxImage')}
               </p>
             </div>
-          </div>
-        </div>
+          </details>
+        </EditorGroup>
 
-        {/* Buttons */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-accent-violet">
-              {t('portfolio.buttonsTitle')}
-            </h3>
+        <EditorGroup title={t('editor.groups.media')}>
+          <FileDropzone
+            previewUrl={imgUpload.previewUrl}
+            blurhash={imgUpload.blurhash}
+            isDragging={imgUpload.isDragging}
+            isProcessing={imgUpload.isProcessing}
+            hasPendingFile={Boolean(imgUpload.file)}
+            error={imgUpload.error}
+            currentUrl={isEditing ? formData.image : undefined}
+            dropzoneProps={{
+              onDragOver: imgUpload.dropzoneProps.onDragOver,
+              onDragLeave: imgUpload.dropzoneProps.onDragLeave,
+              onDrop: imgUpload.dropzoneProps.onDrop,
+            }}
+            fileInputProps={imgUpload.fileInputProps}
+            fileInputRef={imgUpload.fileInputRef}
+            onClear={imgUpload.clearFile}
+            onBrowse={imgUpload.openFileDialog}
+          />
+        </EditorGroup>
+        <EditorGroup
+          title={t('editor.groups.links')}
+          description={t('portfolio.buttonsHint')}
+          actions={
             <button
               type="button"
               onClick={addButton}
-              className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
+              className={editorPrimaryButtonClass}
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="h-4 w-4" />
               {t('portfolio.addButton')}
             </button>
-          </div>
-          <p className="text-xs text-text-muted">
-            {t('portfolio.buttonsHint')}
-          </p>
+          }
+        >
           {formData.buttons.length === 0 ? (
             <p className="text-sm text-text-muted">
               {t('portfolio.buttonsEmpty')}
@@ -577,47 +594,42 @@ export default function PortfolioSection() {
               ))}
             </div>
           )}
-        </div>
+        </EditorGroup>
 
-        {/* Metadata */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.configuration')}
-          </h3>
-          <div className="grid md:grid-cols-3 gap-3">
+        <EditorGroup title={t('editor.groups.publication')}>
+          <div className="grid gap-4 md:grid-cols-3">
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Tags
+              <label htmlFor="portfolio-tags" className={editorLabelClass}>
+                {t('portfolio.tagsLabel')}
               </label>
               <input
+                id="portfolio-tags"
                 type="text"
                 value={formData.post_tags}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, post_tags: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 placeholder={t('portfolio.tagsPlaceholder')}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Date
+              <label htmlFor="portfolio-date" className={editorLabelClass}>
+                {t('portfolio.dateLabel')}
               </label>
               <input
+                id="portfolio-date"
                 type="date"
                 value={formData.created_at}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, created_at: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
               />
             </div>
             <div>
-              <label
-                htmlFor="portfolio-author"
-                className="block text-sm font-medium text-text-main mb-1"
-              >
-                Author
+              <label htmlFor="portfolio-author" className={editorLabelClass}>
+                {t('portfolio.authorLabel')}
               </label>
               <Dropdown
                 id="portfolio-author"
@@ -625,10 +637,13 @@ export default function PortfolioSection() {
                 onChange={(value) =>
                   setFormData((p) => ({ ...p, author_id: value }))
                 }
-                placeholder="Select"
+                placeholder={t('portfolio.authorPlaceholder')}
                 triggerClassName={inputClass}
                 options={[
-                  { label: 'Select', value: '' },
+                  {
+                    label: t('portfolio.authorPlaceholder'),
+                    value: '',
+                  },
                   ...authors.map((a) => ({
                     value: a.id,
                     label: a.display_name,
@@ -637,58 +652,33 @@ export default function PortfolioSection() {
               />
             </div>
           </div>
-          <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-main">
             <input
               type="checkbox"
               checked={formData.hidden}
               onChange={(e) =>
                 setFormData((p) => ({ ...p, hidden: e.target.checked }))
               }
-              className="w-4 h-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
+              className="h-4 w-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
             />
-            Hidden
+            {t('portfolio.hiddenLabel')}
           </label>
-        </div>
+        </EditorGroup>
 
-        {/* Media */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('portfolio.selectImage')}
-          </h3>
-          <FileDropzone
-            label="Image"
-            previewUrl={imgUpload.previewUrl}
-            blurhash={imgUpload.blurhash}
-            isDragging={imgUpload.isDragging}
-            isProcessing={imgUpload.isProcessing}
-            error={imgUpload.error}
-            currentUrl={isEditing ? formData.image : undefined}
-            dropzoneProps={{
-              onDragOver: imgUpload.dropzoneProps.onDragOver,
-              onDragLeave: imgUpload.dropzoneProps.onDragLeave,
-              onDrop: imgUpload.dropzoneProps.onDrop,
-            }}
-            fileInputProps={imgUpload.fileInputProps}
-            fileInputRef={imgUpload.fileInputRef}
-            onClear={imgUpload.clearFile}
-            onBrowse={imgUpload.openFileDialog}
-          />
-        </div>
-
-        <div className="flex gap-3 pt-4">
+        <div className="flex flex-wrap gap-3 pt-4">
           <button
             type="button"
             onClick={closeForm}
-            className="px-4 py-2 bg-surface-raised text-white rounded-lg"
+            className={editorSecondaryButtonClass}
           >
             {t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={isEditing ? handleUpdate : handleCreate}
-            className="px-4 py-2 bg-accent-violet text-white rounded-lg"
+            className={editorPrimaryButtonClass}
           >
-            {t('common.done')}
+            {isEditing ? t('editor.applyDraft') : t('editor.addDraft')}
           </button>
         </div>
       </div>
@@ -714,70 +704,80 @@ export default function PortfolioSection() {
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('portfolio.postsTitle')}
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-        >
-          <Plus className="w-4 h-4" />
-          {t('portfolio.addPortfolioPost')}
-        </button>
-      </div>
+      <EditorToolbar
+        title={t('portfolio.postsTitle')}
+        count={posts.length}
+        actions={
+          <button
+            type="button"
+            onClick={openCreate}
+            className={editorPrimaryButtonClass}
+          >
+            <Plus className="h-4 w-4" />
+            {t('portfolio.addPortfolioPost')}
+          </button>
+        }
+      />
 
       {posts.length === 0 ? (
         <EmptyState icon={FileText} message={t('portfolio.noPortfolioPosts')} />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {posts.map((post) => (
-            <div
-              key={post.id}
-              className="bg-surface-card rounded-xl overflow-hidden border-2 border-accent-violet/20"
-            >
-              <ListPostImage
-                imageFile={post.image_file}
-                imageUrl={post.image}
-                blurhashURL={post.blurhashURL}
-                alt={post.title_en}
-              />
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-text-main truncate">
-                    {post.title_en}
+        <ul className="space-y-3">
+          {posts.map((post) => {
+            const title =
+              (activeLocale === 'it' ? post.title_it : post.title_en) ||
+              post.title_en;
+            const description =
+              (activeLocale === 'it'
+                ? post.description_it
+                : post.description_en) || post.description_en;
+            return (
+              <li
+                key={post.id}
+                className={`${editorRowClass} flex flex-wrap items-start gap-4`}
+              >
+                <ListPostImage
+                  imageFile={post.image_file}
+                  imageUrl={post.image}
+                  blurhashURL={post.blurhashURL}
+                  alt={title}
+                  compact
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate font-semibold text-text-main">
+                    {title}
                   </h3>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(post)}
-                      className="p-1 text-accent-violet hover:text-accent-violet-deep"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(post.id)}
-                      className="p-1 text-red-500 hover:text-red-400"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {description && (
+                    <p className="truncate text-sm text-text-muted">
+                      {description}
+                    </p>
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                    <span className="inline-flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      {new Date(post.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <FileText className="h-3 w-3" />
+                      {t('portfolio.viewsLabel', { count: post.views })}
+                    </span>
+                    {post.hidden && (
+                      <span className="rounded-full bg-surface-raised px-2 py-0.5 text-xs text-text-muted">
+                        {t('portfolio.hiddenLabel')}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <p className="text-sm text-text-main mb-2 line-clamp-2">
-                  {post.description_en}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-text-muted ">
-                  <Calendar className="w-3 h-3" />
-                  <span>{new Date(post.created_at).toLocaleDateString()}</span>
-                  <FileText className="w-3 h-3" />
-                  <span>{post.views} views</span>
+                <div className="flex w-full justify-end sm:w-auto">
+                  <CardToolbar
+                    onEdit={() => openEdit(post)}
+                    onDelete={() => handleDelete(post.id)}
+                  />
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       <ConfirmDialog

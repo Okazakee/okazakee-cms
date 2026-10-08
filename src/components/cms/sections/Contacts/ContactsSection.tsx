@@ -1,11 +1,19 @@
 'use client';
 
-import { Plus, Trash2, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import { contactsActions } from '@/app/actions/cms/sections/contactsActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import {
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
@@ -22,6 +30,20 @@ import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
 import { isValidHttpUrl } from '@/utils/cms/validation';
+
+function ContactPreview({ icon, bgColor }: { icon: string; bgColor: string }) {
+  return (
+    <div
+      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg font-bold text-sm text-white"
+      style={{ backgroundColor: bgColor }}
+    >
+      {icon.trim() && isValidHttpUrl(icon) && (
+        // biome-ignore lint/performance/noImgElement: SVG URLs are supplied by editors.
+        <img src={icon.trim()} alt="" className="h-6 w-6 object-contain" />
+      )}
+    </div>
+  );
+}
 
 export default function ContactsSection() {
   const t = useTranslations('cms');
@@ -90,7 +112,7 @@ export default function ContactsSection() {
 
   const handleAdd = () => {
     if (!newForm.label || !newForm.icon || !newForm.link) {
-      setError('Label, icon, and link are required');
+      setError(t('skills.errorRequiredFields'));
       return;
     }
     const temp: Contact = {
@@ -305,9 +327,6 @@ export default function ContactsSection() {
 
   useSectionCallbacks('contacts', handlePublish, handleRevert);
 
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none text-sm';
-
   if (isLoading)
     return (
       <div className="flex items-center justify-center py-12">
@@ -334,109 +353,115 @@ export default function ContactsSection() {
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {/* Contact Links */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('contacts.title')}
-        </h2>
-        {!isAdding && (
-          <button
-            type="button"
-            onClick={() => setIsAdding(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-          >
-            <Plus className="w-4 h-4" />
-            {t('contacts.addNewContact')}
-          </button>
-        )}
-      </div>
+      <EditorToolbar
+        title={t('contacts.title')}
+        count={contacts.length}
+        actions={
+          !isAdding ? (
+            <button
+              type="button"
+              onClick={() => setIsAdding(true)}
+              className={editorPrimaryButtonClass}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {t('contacts.addNewContact')}
+            </button>
+          ) : undefined
+        }
+      />
 
       {isAdding && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-3">
+        <div className={`${editorRowClass} space-y-4`}>
+          <EditorToolbar
+            title={t('contacts.addNewContact')}
+            actions={
+              <ContactPreview icon={newForm.icon} bgColor={newForm.bg_color} />
+            }
+          />
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              {t('contacts.iconUrlLabel')}
-            </label>
-            <input
-              type="url"
-              value={newForm.icon}
-              onChange={(e) =>
-                setNewForm((p) => ({ ...p, icon: e.target.value }))
-              }
-              className={inputClass}
-              placeholder={t('contacts.iconUrlPlaceholder')}
-            />
-            {newForm.icon.trim() && isValidHttpUrl(newForm.icon) && (
-              // biome-ignore lint/performance/noImgElement: SVG URLs are supplied by editors.
-              <img
-                src={newForm.icon.trim()}
-                alt=""
-                className="mt-2 h-8 w-8 object-contain"
-              />
-            )}
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label className={editorLabelClass} htmlFor="contact-new-label">
               {t('contacts.labelFieldLabel')}
             </label>
             <input
+              id="contact-new-label"
               type="text"
               value={newForm.label}
               onChange={(e) =>
                 setNewForm((p) => ({ ...p, label: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('contacts.labelPlaceholder')}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label className={editorLabelClass} htmlFor="contact-new-link">
               {t('contacts.linkLabel')}
             </label>
             <input
+              id="contact-new-link"
               type="url"
               value={newForm.link}
               onChange={(e) =>
                 setNewForm((p) => ({ ...p, link: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('contacts.linkPlaceholder')}
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              {t('common.color')}
-            </label>
-            <div className="flex items-center gap-2">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className={editorLabelClass} htmlFor="contact-new-icon">
+                {t('contacts.iconUrlLabel')}
+              </label>
               <input
-                type="color"
-                value={newForm.bg_color}
+                id="contact-new-icon"
+                type="url"
+                value={newForm.icon}
                 onChange={(e) =>
-                  setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                  setNewForm((p) => ({ ...p, icon: e.target.value }))
                 }
-                className="w-10 h-10 rounded cursor-pointer border-0"
-              />
-              <input
-                type="text"
-                value={newForm.bg_color}
-                onChange={(e) =>
-                  setNewForm((p) => ({ ...p, bg_color: e.target.value }))
-                }
-                className={`flex-1 ${inputClass}`}
-                placeholder="#000000"
+                className={editorInputClass}
+                placeholder={t('contacts.iconUrlPlaceholder')}
               />
             </div>
+            <div>
+              <label className={editorLabelClass} htmlFor="contact-new-color">
+                {t('common.color')}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  aria-label={t('common.color')}
+                  value={newForm.bg_color}
+                  onChange={(e) =>
+                    setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                  }
+                  className="h-10 w-10 flex-shrink-0 cursor-pointer rounded border-0"
+                />
+                <input
+                  id="contact-new-color"
+                  type="text"
+                  value={newForm.bg_color}
+                  onChange={(e) =>
+                    setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                  }
+                  className={editorInputClass}
+                  placeholder="#000000"
+                />
+              </div>
+            </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={handleAdd}
-              className="px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg"
+              className={editorPrimaryButtonClass}
             >
-              {t('common.add')}
+              {t('editor.addDraft')}
             </button>
             <button
               type="button"
+              aria-label={t('common.cancel')}
               onClick={() => {
                 setIsAdding(false);
                 setNewForm({
@@ -446,9 +471,9 @@ export default function ContactsSection() {
                   bg_color: '#000000',
                 });
               }}
-              className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg"
+              className={editorSecondaryButtonClass}
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -457,76 +482,95 @@ export default function ContactsSection() {
       {contacts.length === 0 ? (
         <EmptyState message={t('contacts.title')} />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {contacts.map((c, idx) => (
-            <div
-              key={c.id}
-              className="bg-surface-card rounded-xl p-4 space-y-3"
-            >
-              <div className="flex items-center gap-3">
+            <div key={c.id} className={`${editorRowClass} space-y-4`}>
+              <div className="flex items-center justify-between gap-3">
+                <ContactPreview icon={c.icon} bgColor={c.bg_color} />
                 <CardToolbar
                   showReorder
                   onMoveUp={() => move(c.id, -1)}
                   onMoveDown={() => move(c.id, 1)}
+                  onDelete={() => handleDelete(c.id)}
                   isFirst={idx === 0}
                   isLast={idx === contacts.length - 1}
                 />
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-sm"
-                  style={{ backgroundColor: c.bg_color }}
+              </div>
+              <div>
+                <label
+                  className={editorLabelClass}
+                  htmlFor={`contact-${c.id}-label`}
                 >
-                  {c.icon.trim() && isValidHttpUrl(c.icon) && (
-                    // biome-ignore lint/performance/noImgElement: SVG URLs are supplied by editors.
-                    <img
-                      src={c.icon.trim()}
-                      alt=""
-                      className="h-6 w-6 object-contain"
-                    />
-                  )}
-                </div>
+                  {t('contacts.labelFieldLabel')}
+                </label>
                 <input
+                  id={`contact-${c.id}-label`}
                   type="text"
                   value={c.label}
                   onChange={(e) => handleChange(c.id, 'label', e.target.value)}
-                  className={`flex-1 ${inputClass}`}
+                  className={editorInputClass}
                   placeholder={t('contacts.labelPlaceholder')}
                 />
-                <button
-                  type="button"
-                  onClick={() => handleDelete(c.id)}
-                  className="p-2 text-red-400 hover:text-red-300 flex-shrink-0"
-                  title={t('common.delete')}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
               </div>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div>
+                <label
+                  className={editorLabelClass}
+                  htmlFor={`contact-${c.id}-link`}
+                >
+                  {t('contacts.linkLabel')}
+                </label>
                 <input
+                  id={`contact-${c.id}-link`}
                   type="url"
                   value={c.link}
                   onChange={(e) => handleChange(c.id, 'link', e.target.value)}
-                  className={`flex-1 ${inputClass}`}
+                  className={editorInputClass}
                   placeholder={t('contacts.linkPlaceholder')}
                 />
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label
+                    className={editorLabelClass}
+                    htmlFor={`contact-${c.id}-icon`}
+                  >
+                    {t('contacts.iconUrlLabel')}
+                  </label>
                   <input
-                    type="color"
-                    value={c.bg_color}
-                    onChange={(e) =>
-                      handleChange(c.id, 'bg_color', e.target.value)
-                    }
-                    className="w-10 h-10 rounded cursor-pointer border-0 flex-shrink-0"
+                    id={`contact-${c.id}-icon`}
+                    type="url"
+                    value={c.icon}
+                    onChange={(e) => handleChange(c.id, 'icon', e.target.value)}
+                    className={editorInputClass}
+                    placeholder={t('contacts.iconUrlPlaceholder')}
                   />
-                  <div className="w-full sm:w-44">
+                </div>
+                <div>
+                  <label
+                    className={editorLabelClass}
+                    htmlFor={`contact-${c.id}-color`}
+                  >
+                    {t('common.color')}
+                  </label>
+                  <div className="flex items-center gap-2">
                     <input
-                      type="url"
-                      aria-label={t('contacts.iconUrlLabel')}
-                      value={c.icon}
+                      type="color"
+                      aria-label={t('common.color')}
+                      value={c.bg_color}
                       onChange={(e) =>
-                        handleChange(c.id, 'icon', e.target.value)
+                        handleChange(c.id, 'bg_color', e.target.value)
                       }
-                      className={inputClass}
-                      placeholder={t('contacts.iconUrlPlaceholder')}
+                      className="h-10 w-10 flex-shrink-0 cursor-pointer rounded border-0"
+                    />
+                    <input
+                      id={`contact-${c.id}-color`}
+                      type="text"
+                      value={c.bg_color}
+                      onChange={(e) =>
+                        handleChange(c.id, 'bg_color', e.target.value)
+                      }
+                      className={editorInputClass}
+                      placeholder="#000000"
                     />
                   </div>
                 </div>

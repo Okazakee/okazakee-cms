@@ -1,11 +1,17 @@
 'use client';
 
-import { ArrowDown, ArrowUp, Copy, Download, Plus, Trash2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  editorInputClass,
+  editorPrimaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
@@ -27,10 +33,6 @@ import {
 } from '@/utils/heroDisplay';
 
 const locales = ['en', 'it'] as const;
-const inputClass =
-  'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
-const iconButtonClass =
-  'flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-text-muted hover:bg-surface-raised disabled:opacity-30';
 
 export default function HeroSection() {
   const t = useTranslations('cms');
@@ -224,15 +226,22 @@ export default function HeroSection() {
 
   useSectionCallbacks('hero', handlePublish, handleRevert);
 
-  const copyUrl = (url: string) => {
-    navigator.clipboard
-      .writeText(url)
-      .catch(() => setError(t('hero.errorCopyUrl')));
-  };
+  const openImage = useCallback(() => {
+    if (mainImageUrl)
+      window.open(mainImageUrl, '_blank', 'noopener,noreferrer');
+  }, [mainImageUrl]);
 
-  const downloadImage = async (url: string) => {
+  const copyImageUrl = useCallback(() => {
+    if (!mainImageUrl) return;
+    navigator.clipboard
+      .writeText(mainImageUrl)
+      .catch(() => setError(t('hero.errorCopyUrl')));
+  }, [mainImageUrl, t]);
+
+  const downloadPortrait = useCallback(async () => {
+    if (!mainImageUrl) return;
     try {
-      const res = await fetch(url);
+      const res = await fetch(mainImageUrl);
       const blob = await res.blob();
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -245,12 +254,12 @@ export default function HeroSection() {
     } catch {
       setError(t('hero.errorDownloadImage'));
     }
-  };
+  }, [mainImageUrl, t]);
 
   if (!heroSection) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-accent-violet border-t-transparent" />
       </div>
     );
   }
@@ -275,18 +284,125 @@ export default function HeroSection() {
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {/* Hero Image */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4">
-          {t('hero.heroImageTitle')}
-        </h2>
-        <div className="flex flex-col lg:flex-row items-start gap-6">
-          <div className="w-full lg:w-72 flex-shrink-0">
+      <div className="flex justify-end">
+        <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
+      </div>
+
+      <div className="flex flex-col gap-6">
+        <EditorGroup
+          title={t('editor.groups.identity')}
+          description={t('hero.topSection')}
+        >
+          {transLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : (
+            <TranslationField
+              label={t('hero.nameLabel')}
+              enValue={getField('en', 'top.name')}
+              itValue={getField('it', 'top.name')}
+              onChangeEn={(v) => setField('en', 'top.name', v)}
+              onChangeIt={(v) => setField('it', 'top.name', v)}
+              enPlaceholder={t('hero.namePlaceholder')}
+              itPlaceholder={t('hero.namePlaceholder')}
+              activeLocale={activeLocale}
+            />
+          )}
+        </EditorGroup>
+
+        <EditorGroup
+          title={t('editor.groups.roles')}
+          description={t('hero.rolesHint')}
+          count={roleCount}
+          actions={
+            !transLoading ? (
+              <button
+                className={editorPrimaryButtonClass}
+                onClick={addRole}
+                type="button"
+              >
+                <Plus className="w-4 h-4" />
+                {t('hero.addRole')}
+              </button>
+            ) : undefined
+          }
+        >
+          {transLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {Array.from({ length: roleCount }, (_, index) => (
+                <div
+                  className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end"
+                  key={heroRolePath(index)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <TranslationField
+                      label={`${t('hero.roleLabel')} ${index + 1}`}
+                      enValue={getField('en', heroRolePath(index))}
+                      itValue={getField('it', heroRolePath(index))}
+                      onChangeEn={(v) => setField('en', heroRolePath(index), v)}
+                      onChangeIt={(v) => setField('it', heroRolePath(index), v)}
+                      enPlaceholder={t('hero.rolePlaceholder')}
+                      itPlaceholder={t('hero.rolePlaceholder')}
+                      activeLocale={activeLocale}
+                    />
+                  </div>
+                  <div className="self-end pb-1">
+                    <CardToolbar
+                      showReorder
+                      onMoveUp={() => moveRole(index, -1)}
+                      onMoveDown={() => moveRole(index, 1)}
+                      onDelete={() => removeRole(index)}
+                      isFirst={index === 0}
+                      isLast={index === roleCount - 1}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </EditorGroup>
+
+        <EditorGroup
+          title={t('editor.groups.about')}
+          description={t('hero.aboutMeSection')}
+        >
+          {transLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : (
+            <TranslationField
+              label={t('hero.aboutMeParagraphLabel')}
+              enValue={getField('en', 'aboutme.paragraph')}
+              itValue={getField('it', 'aboutme.paragraph')}
+              onChangeEn={(v) => setField('en', 'aboutme.paragraph', v)}
+              onChangeIt={(v) => setField('it', 'aboutme.paragraph', v)}
+              enPlaceholder={t('hero.aboutMeParagraphPlaceholder')}
+              itPlaceholder={t('hero.aboutMeParagraphPlaceholder')}
+              activeLocale={activeLocale}
+              type="textarea"
+              rows={8}
+            />
+          )}
+        </EditorGroup>
+
+        <EditorGroup
+          title={t('editor.groups.portrait')}
+          description={t('hero.shapeHint')}
+        >
+          <div className="w-full max-w-72">
             <FileDropzone
+              label={t('hero.heroImageTitle')}
               previewUrl={imgUpload.previewUrl}
               blurhash={imgUpload.blurhash}
               isDragging={imgUpload.isDragging}
               isProcessing={imgUpload.isProcessing}
+              hasPendingFile={Boolean(imgUpload.file)}
               error={imgUpload.error}
               currentUrl={heroSection.mainImage}
               dropzoneProps={{
@@ -298,161 +414,31 @@ export default function HeroSection() {
               fileInputRef={imgUpload.fileInputRef}
               onClear={imgUpload.clearFile}
               onBrowse={imgUpload.openFileDialog}
+              onCopyUrl={copyImageUrl}
+              onOpen={openImage}
+              onDownload={downloadPortrait}
+              showUrl={mainImageUrl || null}
             />
           </div>
-          {mainImageUrl && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => copyUrl(mainImageUrl)}
-                className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors"
-              >
-                <Copy className="w-3 h-3 inline mr-1" />
-                {t('hero.copyUrl')}
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadImage(mainImageUrl)}
-                className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
-              >
-                <Download className="w-3 h-3 inline mr-1" />
-                {t('hero.download')}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Portrait shape */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-        <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-          {t('hero.portraitSection')}
-        </h2>
-
-        <div>
-          <label
-            htmlFor="hero-shape"
-            className="block text-sm font-medium text-text-main mb-1"
-          >
-            {t('hero.shapeLabel')}
-          </label>
-          <Dropdown
-            id="hero-shape"
-            triggerClassName={inputClass}
-            onChange={(value) => setShape(normalizeHeroShape(value))}
-            value={shape}
-            options={heroShapes.map((preset) => ({
-              value: preset,
-              label: t(`hero.shapeOptions.${preset}`),
-            }))}
-          />
-          <p className="mt-2 text-xs text-text-muted">{t('hero.shapeHint')}</p>
-        </div>
-      </div>
-
-      {/* Identity and content */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('hero.identitySection')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-
-        {transLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <h3 className="text-base font-semibold text-text-main ">
-              {t('hero.topSection')}
-            </h3>
-            <TranslationField
-              label={t('hero.nameLabel')}
-              enValue={getField('en', 'top.name')}
-              itValue={getField('it', 'top.name')}
-              onChangeEn={(v) => setField('en', 'top.name', v)}
-              onChangeIt={(v) => setField('it', 'top.name', v)}
-              activeLocale={activeLocale}
-            />
-
-            <div className="space-y-3">
-              {Array.from({ length: roleCount }, (_, index) => (
-                <div className="flex items-end gap-2" key={heroRolePath(index)}>
-                  <div className="min-w-0 flex-1">
-                    <TranslationField
-                      label={`${t('hero.roleLabel')} ${index + 1}`}
-                      enValue={getField('en', heroRolePath(index))}
-                      itValue={getField('it', heroRolePath(index))}
-                      onChangeEn={(v) => setField('en', heroRolePath(index), v)}
-                      onChangeIt={(v) => setField('it', heroRolePath(index), v)}
-                      activeLocale={activeLocale}
-                    />
-                  </div>
-                  <div className="flex items-center gap-1 pb-1">
-                    <button
-                      aria-label={`${t('common.moveUp')}: ${index + 1}`}
-                      className={`${iconButtonClass} hover:text-accent-violet`}
-                      disabled={index === 0}
-                      onClick={() => moveRole(index, -1)}
-                      title={t('common.moveUp')}
-                      type="button"
-                    >
-                      <ArrowUp className="w-4 h-4" />
-                    </button>
-                    <button
-                      aria-label={`${t('common.moveDown')}: ${index + 1}`}
-                      className={`${iconButtonClass} hover:text-accent-violet`}
-                      disabled={index === roleCount - 1}
-                      onClick={() => moveRole(index, 1)}
-                      title={t('common.moveDown')}
-                      type="button"
-                    >
-                      <ArrowDown className="w-4 h-4" />
-                    </button>
-                    <button
-                      aria-label={`${t('hero.removeRole')}: ${index + 1}`}
-                      className={`${iconButtonClass} hover:text-red-400`}
-                      onClick={() => removeRole(index)}
-                      title={t('hero.removeRole')}
-                      type="button"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <p className="text-xs text-text-muted">{t('hero.rolesHint')}</p>
-            <button
-              className="inline-flex items-center gap-2 min-h-11 px-4 text-sm bg-surface-raised text-text-main rounded-lg hover:bg-surface-card"
-              onClick={addRole}
-              type="button"
+          <div>
+            <label
+              htmlFor="hero-shape"
+              className="block text-sm font-medium text-text-main mb-1"
             >
-              <Plus className="w-4 h-4" />
-              {t('hero.addRole')}
-            </button>
-
-            <h3 className="text-base font-semibold text-text-main pt-2">
-              {t('hero.aboutMeSection')}
-            </h3>
-            <TranslationField
-              label={t('hero.aboutMeParagraphLabel')}
-              enValue={getField('en', 'aboutme.paragraph')}
-              itValue={getField('it', 'aboutme.paragraph')}
-              onChangeEn={(v) => setField('en', 'aboutme.paragraph', v)}
-              onChangeIt={(v) => setField('it', 'aboutme.paragraph', v)}
-              activeLocale={activeLocale}
-              type="textarea"
-              rows={8}
+              {t('hero.shapeLabel')}
+            </label>
+            <Dropdown
+              id="hero-shape"
+              triggerClassName={editorInputClass}
+              onChange={(value) => setShape(normalizeHeroShape(value))}
+              value={shape}
+              options={heroShapes.map((preset) => ({
+                value: preset,
+                label: t(`hero.shapeOptions.${preset}`),
+              }))}
             />
           </div>
-        )}
+        </EditorGroup>
       </div>
 
       <ConfirmDialog

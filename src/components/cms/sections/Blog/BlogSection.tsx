@@ -1,14 +1,24 @@
 'use client';
 
-import { Calendar, Edit3, FileText, Info, Plus, Trash2 } from 'lucide-react';
+import { Calendar, EyeOff, FileText, Plus } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type Author,
   blogActions,
 } from '@/app/actions/cms/sections/blogActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
 import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
@@ -368,9 +378,6 @@ export default function BlogSection() {
 
   useSectionCallbacks('blog', handlePublish, handleRevert);
 
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
-
   if (isLoading)
     return (
       <div className="flex items-center justify-center py-12">
@@ -382,38 +389,28 @@ export default function BlogSection() {
     const isEditing = mode === 'edit';
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-main ">
-            {isEditing ? t('blog.editPost') : t('blog.createNewPost')}
-          </h2>
-          <div className="flex items-center gap-3">
+        <EditorToolbar
+          title={isEditing ? t('blog.editPost') : t('blog.createNewPost')}
+          description={t('editor.draftHint')}
+          actions={
             <LocaleToggle activeLocale={formLocale} onChange={setFormLocale} />
-            <button
-              type="button"
-              onClick={closeForm}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-raised rounded-lg text-text-main hover:bg-surface-raised"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
+          }
+        />
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
-        {/* Content */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.content')}
-          </h3>
+        <EditorGroup title={t('editor.groups.summary')}>
           <TranslationField
-            label={t('blog.titleEnLabel')}
+            label={t('editor.fields.title')}
             enValue={formData.title_en}
             itValue={formData.title_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, title_en: v }))}
             onChangeIt={(v) => setFormData((p) => ({ ...p, title_it: v }))}
+            enPlaceholder={t('blog.titleEnPlaceholder')}
+            itPlaceholder={t('blog.titleItPlaceholder')}
             required
             activeLocale={formLocale}
           />
           <TranslationField
-            label={t('blog.descriptionEnLabel')}
+            label={t('editor.fields.summary')}
             enValue={formData.description_en}
             itValue={formData.description_it}
             onChangeEn={(v) =>
@@ -422,121 +419,56 @@ export default function BlogSection() {
             onChangeIt={(v) =>
               setFormData((p) => ({ ...p, description_it: v }))
             }
+            enPlaceholder={t('blog.descriptionEnPlaceholder')}
+            itPlaceholder={t('blog.descriptionItPlaceholder')}
             type="textarea"
             rows={3}
             activeLocale={formLocale}
           />
+        </EditorGroup>
+
+        <EditorGroup title={t('editor.groups.content')}>
           <TranslationField
-            label={t('blog.bodyEnLabel')}
+            label={t('editor.fields.content')}
             enValue={formData.body_en}
             itValue={formData.body_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, body_en: v }))}
             onChangeIt={(v) => setFormData((p) => ({ ...p, body_it: v }))}
+            enPlaceholder={t('blog.bodyEnPlaceholder')}
+            itPlaceholder={t('blog.bodyItPlaceholder')}
             type="textarea"
             rows={8}
             activeLocale={formLocale}
           />
-          <div className="flex items-start gap-2 text-xs text-text-muted bg-surface-base rounded-lg p-3 border border-border-subtle ">
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
+          <details className="rounded-lg border border-border-subtle bg-surface-base p-3 text-xs text-text-muted">
+            <summary className="cursor-pointer font-medium text-text-main">
+              {t('editor.formattingHelp')}
+            </summary>
+            <div className="mt-2 space-y-1">
               <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
                   ****text****
                 </code>{' '}
                 {t('blog.syntaxHighlight')}
               </p>
               <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
                   ![alt-blurhash](url)
                 </code>{' '}
                 {t('blog.syntaxImage')}
               </p>
             </div>
-          </div>
-        </div>
+          </details>
+        </EditorGroup>
 
-        {/* Metadata */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.configuration')}
-          </h3>
-          <div className="grid md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Tags
-              </label>
-              <input
-                type="text"
-                value={formData.post_tags}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, post_tags: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('blog.tagsPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                value={formData.created_at}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, created_at: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="blog-author"
-                className="block text-sm font-medium text-text-main mb-1"
-              >
-                Author
-              </label>
-              <Dropdown
-                id="blog-author"
-                value={formData.author_id}
-                onChange={(value) =>
-                  setFormData((p) => ({ ...p, author_id: value }))
-                }
-                placeholder="Select"
-                triggerClassName={inputClass}
-                options={[
-                  { label: 'Select', value: '' },
-                  ...authors.map((a) => ({
-                    value: a.id,
-                    label: a.display_name,
-                  })),
-                ]}
-              />
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.hidden}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, hidden: e.target.checked }))
-              }
-              className="w-4 h-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
-            />
-            Hidden
-          </label>
-        </div>
-
-        {/* Media */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('blog.selectImage')}
-          </h3>
+        <EditorGroup title={t('editor.groups.media')}>
           <FileDropzone
-            label="Image"
+            label={t('blog.selectImage')}
             previewUrl={imgUpload.previewUrl}
             blurhash={imgUpload.blurhash}
             isDragging={imgUpload.isDragging}
             isProcessing={imgUpload.isProcessing}
+            hasPendingFile={Boolean(imgUpload.file)}
             error={imgUpload.error}
             currentUrl={isEditing ? formData.image : undefined}
             dropzoneProps={{
@@ -549,22 +481,88 @@ export default function BlogSection() {
             onClear={imgUpload.clearFile}
             onBrowse={imgUpload.openFileDialog}
           />
-        </div>
+        </EditorGroup>
 
-        <div className="flex gap-3 pt-4">
+        <EditorGroup title={t('editor.groups.publication')}>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <label htmlFor="blog-tags" className={editorLabelClass}>
+                {t('blog.tagsLabel')}
+              </label>
+              <input
+                id="blog-tags"
+                type="text"
+                value={formData.post_tags}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, post_tags: e.target.value }))
+                }
+                className={editorInputClass}
+                placeholder={t('blog.tagsPlaceholder')}
+              />
+            </div>
+            <div>
+              <label htmlFor="blog-date" className={editorLabelClass}>
+                {t('blog.dateLabel')}
+              </label>
+              <input
+                id="blog-date"
+                type="date"
+                value={formData.created_at}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, created_at: e.target.value }))
+                }
+                className={editorInputClass}
+              />
+            </div>
+            <div>
+              <label htmlFor="blog-author" className={editorLabelClass}>
+                {t('blog.authorLabel')}
+              </label>
+              <Dropdown
+                id="blog-author"
+                value={formData.author_id}
+                onChange={(value) =>
+                  setFormData((p) => ({ ...p, author_id: value }))
+                }
+                placeholder={t('blog.authorPlaceholder')}
+                triggerClassName={editorInputClass}
+                options={[
+                  { label: t('blog.authorPlaceholder'), value: '' },
+                  ...authors.map((a) => ({
+                    value: a.id,
+                    label: a.display_name,
+                  })),
+                ]}
+              />
+            </div>
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-main">
+            <input
+              type="checkbox"
+              checked={formData.hidden}
+              onChange={(e) =>
+                setFormData((p) => ({ ...p, hidden: e.target.checked }))
+              }
+              className="h-4 w-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
+            />
+            {t('blog.hiddenLabel')}
+          </label>
+        </EditorGroup>
+
+        <div className="flex gap-3 pt-2">
           <button
             type="button"
             onClick={closeForm}
-            className="px-4 py-2 bg-surface-raised text-white rounded-lg"
+            className={editorSecondaryButtonClass}
           >
             {t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={isEditing ? handleUpdate : handleCreate}
-            className="px-4 py-2 bg-accent-violet text-white rounded-lg"
+            className={editorPrimaryButtonClass}
           >
-            {t('common.done')}
+            {isEditing ? t('editor.applyDraft') : t('editor.addDraft')}
           </button>
         </div>
       </div>
@@ -590,69 +588,81 @@ export default function BlogSection() {
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('blog.postsTitle')}
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-        >
-          <Plus className="w-4 h-4" />
-          {t('blog.addBlogPost')}
-        </button>
-      </div>
+      <EditorToolbar
+        title={t('blog.postsTitle')}
+        count={posts.length}
+        actions={
+          <button
+            type="button"
+            onClick={openCreate}
+            className={editorPrimaryButtonClass}
+          >
+            <Plus className="w-4 h-4" />
+            {t('blog.addBlogPost')}
+          </button>
+        }
+      />
 
       {posts.length === 0 ? (
         <EmptyState icon={FileText} message={t('blog.noBlogPosts')} />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {posts.map((post) => (
-            <div
-              key={post.id}
-              className="bg-surface-card rounded-xl overflow-hidden border-2 border-accent-violet/20"
-            >
-              <ListPostImage
-                imageFile={post.image_file}
-                imageUrl={post.image}
-                blurhashURL={post.blurhashURL}
-                alt={post.title_en}
-              />
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-text-main truncate">
-                    {post.title_en}
-                  </h3>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(post)}
-                      className="p-1 text-accent-violet hover:text-accent-violet-deep"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(post.id)}
-                      className="p-1 text-red-500 hover:text-red-400"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+        <div className="space-y-3">
+          {posts.map((post) => {
+            const title =
+              activeLocale === 'it'
+                ? post.title_it || post.title_en
+                : post.title_en;
+            const description =
+              activeLocale === 'it'
+                ? post.description_it || post.description_en
+                : post.description_en;
+            return (
+              <div
+                key={post.id}
+                className={`${editorRowClass} flex flex-wrap items-start gap-4`}
+              >
+                <ListPostImage
+                  imageFile={post.image_file}
+                  imageUrl={post.image}
+                  blurhashURL={post.blurhashURL}
+                  alt={title}
+                  compact
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate font-semibold text-text-main">
+                      {title}
+                    </h3>
+                    {post.hidden && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-text-muted">
+                        <EyeOff className="h-3 w-3" />
+                        {t('blog.hiddenLabel')}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-sm text-text-muted">
+                    {description}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
+                    <span>
+                      <Calendar className="mr-1 inline h-3 w-3" />
+                      {new Date(post.created_at).toLocaleDateString()}
+                    </span>
+                    <span>
+                      <FileText className="mr-1 inline h-3 w-3" />
+                      {t('blog.viewsLabel', { count: post.views })}
+                    </span>
                   </div>
                 </div>
-                <p className="text-sm text-text-main mb-2 line-clamp-2">
-                  {post.description_en}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-text-muted ">
-                  <Calendar className="w-3 h-3" />
-                  <span>{new Date(post.created_at).toLocaleDateString()}</span>
-                  <FileText className="w-3 h-3" />
-                  <span>{post.views} views</span>
+                <div className="flex w-full justify-end sm:w-auto">
+                  <CardToolbar
+                    onEdit={() => openEdit(post)}
+                    onDelete={() => handleDelete(post.id)}
+                  />
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 
 interface ErrorBannerProps {
@@ -14,6 +15,8 @@ export function ErrorBanner({
   onDismiss,
   autoDismissMs,
 }: ErrorBannerProps) {
+  const t = useTranslations('cms');
+
   useEffect(() => {
     if (message && autoDismissMs && onDismiss) {
       const timer = setTimeout(onDismiss, autoDismissMs);
@@ -34,7 +37,7 @@ export function ErrorBanner({
           type="button"
           onClick={onDismiss}
           className="text-red-400 hover:text-red-300 flex-shrink-0"
-          aria-label="Dismiss error"
+          aria-label={t('common.dismissError')}
         >
           <X className="w-4 h-4" />
         </button>

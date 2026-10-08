@@ -410,12 +410,13 @@ urgent it feels.
 - **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
   (`src/utils/cms/devMigrations.ts`;
   `src/libs/cms/devMigrations/devCheck.ts`; registry
-  `src/libs/cms/devMigrations/registry.json`, 12 `{version,name,sourceFile}`
+  `src/libs/cms/devMigrations/registry.json`, 13 `{version,name,sourceFile}`
   entries) plus content tables and the dev-only `dev_staging.cms_migration_audit`
-  ledger (eight `verified_existing`, four `applied`: GitHub subjects, Skills
-  reseed, the `20261008135608` content-controls cutover and the
-  `20261008145842` header-image restoration). Source hashes
-  certify immutable bytes; live effect checks reflect the latest cutover.
+  ledger (eight `verified_existing`, five `applied`: GitHub subjects, Skills
+  reseed, the `20261008135608` content-controls cutover,
+  `20261008145842` header-image restoration and `20261008213304` allowlist
+  ID-sequence usage). Source hashes certify immutable bytes; live effect
+  checks include service-role sequence usage and reflect the latest cutover.
   Native Supabase history is mixed-scope, not proof of content state.
   Historical public/unqualified sources must never be replayed against
   shared `public`. Link once (`supabase login`, `supabase link --project-ref
@@ -434,6 +435,10 @@ urgent it feels.
 - **Never use relative imports across directory boundaries.** Use `@/` path aliases defined in `tsconfig.json`.
 - **Never call Supabase directly from client components (browser).** Use server actions (`'use server'`) to proxy all Supabase calls.
 - **Never commit `.env.local`** or any file containing secrets.
+- **All new CMS work stays on `staging`.** Before editing, switch to the local
+  `staging` branch and confirm it tracks `origin/staging`; do not create or
+  work on feature branches. Preserve uncommitted work when switching. Commit
+  and push CMS changes only to `staging`, and only push when asked.
 - **Never commit or push directly to `main`.** Work on a branch and open a PR — the only exception is a direct push you explicitly asked for in the session (§13.1).
 - **Never open a PR, or merge one, without the owner's go-ahead.** A pushed branch is not a PR request; wait for confirmation (§13.1).
 - **Never add a `'use server'` directive inside a file that also has `'use client'`.** These directives are mutually exclusive at the file level.

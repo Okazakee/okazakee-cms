@@ -306,26 +306,36 @@ so a new section cannot drift into a private look:
   mono `text-accent-violet-light` description and a 10×2 accent rule, centred. It
   renders at every breakpoint; the mobile header carries only the wordmark, so a
   section that hides its own title leaves mobile with no heading at all.
-- **Cards** — `rounded-2xl border border-border-subtle bg-surface-card p-6` with a
-  `mb-5 text-lg font-bold text-text-white` heading. `rounded-xl` is for *nested*
-  panels (a composer inside a card), not for cards. The one exception is the danger
-  zone: `rounded-2xl border border-red-500/30 bg-red-500/5`.
+- **Body groups** — `EditorGroup` / `EditorToolbar` from
+  `src/components/cms/shared/EditorBody.tsx` own headings, optional counts,
+  descriptions and contextual actions. Groups use `rounded-2xl border
+  border-border-subtle bg-surface-card p-4 sm:p-6`, neutral `text-text-white`
+  headings and 24px spacing. Related fields have 16px spacing; short pairs
+  may share a row, but long-form text keeps the full width. Compact collection
+  rows and nested editors use `rounded-xl`; the danger zone remains a
+  separate `rounded-2xl border border-red-500/30 bg-red-500/5` panel.
 - **Fields** — label `block text-sm font-medium text-text-main mb-1`; control
   `w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-sm
   text-text-main focus:border-accent-violet focus:outline-none`. Borders are
   `border-subtle` until the field is interacted with, never `accent-violet` at rest.
-- **Choice controls** — every native `<select>` (author, remote type, hero shape and
-  typewriter target, button kind, role) renders through the shared `Dropdown`
+- **Choice controls** — author, remote type, portrait shape, button kind and
+  role render through the shared `Dropdown`
   (`@/components/cms/shared/Dropdown`) so a choice wears the field canon and reads
   like its sibling inputs. The menu is portalled to `document.body`, so a section's
   `overflow` can never clip it; the highlighted row is `accent-violet/10`, the
   selected row `accent-violet-light` + a check, and `triggerClassName` replaces the
   trigger chrome (the role pill keeps its coloured pill).
-- **Actions** — primary `flex items-center gap-1.5 rounded-lg bg-accent-violet-deep
-  px-3 py-1.5 text-sm text-white hover:bg-accent-violet`; neutral `rounded-lg
-  bg-surface-base px-3 py-1.5 text-sm text-text-main hover:bg-surface-raised`;
-  destructive `bg-red-500 hover:bg-red-600` filled, or `border border-red-500/40
-  bg-red-500/10 text-red-400` when it only opens a confirmation.
+- **Body actions** — shared primary/secondary button classes from `EditorBody`
+  use 44px minimum hit targets, violet for the main action and neutral surfaces
+  for secondary actions. Row actions follow reorder → edit → delete where
+  supported, with boundary moves disabled and localized accessible names.
+  On narrow screens, row actions sit below the identity/content instead of
+  squeezing names between thumbnails and buttons. Existing `SectionHeader`
+  titles/subtitles and `SectionActions` Revert/Publish controls stay unchanged.
+  Content composers say **Add to draft / Apply to draft**; these never publish.
+  Requests, Users and Account explicitly identify their immediate operations
+  and do not join the draft queue.
+  Destructive confirmations keep the red treatment.
 - **Status** — `ErrorBanner` for any failure, both the page-level one and a
   scoped one inside a card. Never a hand-rolled `bg-red-500/10` block.
 - **Spinners** — `border-2 border-<colour> border-t-transparent`, never `border-b-2`.
@@ -336,19 +346,44 @@ so a new section cannot drift into a private look:
 - Read-only values are rendered with the field classes on a `<span>` inside a
   bordered `bg-surface-base` panel, so a value and its editable twin read as the
   same object.
-- **Copy lives next to what it labels.** The `Website copy` section is gone; there is
-  no place to edit copy that has no home. `privacyPolicy.description` is edited from
-  the Privacy policy section, `posts-section` `title1`/`subtitle1` from Portfolio and
-  `title2`/`subtitle2` from Blog — each as a `CopyEditor` keyed `<section>:copy`, so
-  Publish All and the draft dot still reach it. Frozen copy (§8) is not editable here
-  at all, and the header and footer have no copy editor for the same reason — both
-  namespaces are frozen in the site — so everything an editor *may* change about the
-  chrome (logos, résumé PDFs, footer identity) is grouped in the single
-  **Layout** section.
+- **Body patterns** — Hero uses Identity → Roles → About → Portrait (image and
+  shape together). Career, Portfolio and Blog have compact summary lists and
+  full-width grouped composers, not drawers or public-style card galleries.
+  Portfolio/Blog separate title/summary, body, cover and publication details;
+  Portfolio also has ordered project links. Skills keeps category → skill
+  hierarchy with inline editing; Contacts uses the same field order for
+  creation and inline editing. Requests exposes compact summaries and native
+  expandable details while keeping archive/delete actions reachable. Account
+  separates Profile, read-only Identity/access, Passkeys and the final Danger
+  zone; Users keeps identity/access separate from role/actions.
+- **Localization** — one EN/IT switch per localized editor context; field
+  labels remain neutral and the selected language is shown separately. Both
+  locale drafts survive switches. Collection summaries use the UI locale
+  with English fallback. Shared settings such as Contacts/Skills/Layout have
+  no content-language switch. Request-form copy is grouped into Introduction,
+  field labels/hints/options, Consent/submission and Additional copy; unknown
+  keys from either locale remain editable. Static lookup records and localized
+  getters check own keys so names such as `constructor`/`toString` cannot be
+  mistaken for inherited members.
+- **Assets** — `FileDropzone` owns preview and Replace/Open/Copy/Download/Remove
+  controls. Pending/current status comes from the explicit selected-file flag,
+  not from the presence of a preview URL (committed assets also have previews).
+  PDF previews, technical URLs and formatting help use native disclosure
+  controls. Layout groups matching dark/light header-image panels and footer
+  VAT. Resume has matching EN/IT PDF panels, both visible and stacked on mobile.
+- **Content ownership** — Hero edits the name, ordered roles, about paragraph
+  and portrait/shape; Privacy edits policy bodies. Structural headings and
+  vocabulary remain website-local. Layout owns header images and textual VAT;
+  System → Resume owns PDFs. The standalone Website copy section remains gone.
+  Request-form copy keeps its planned/no-live-site-effect warning.
 - **Copy editors are addressed by their namespace key**, never by DOM position. A
   section that embeds a `CopyEditor` must give its own body control an `aria-label`,
   and tests select on that: `querySelector('textarea')` silently retargets to
   whichever copy editor mounted first.
+- **Navigation state** — a fresh store starts with no active section so boot
+  can restore an allowed `cms_active_section`, otherwise choosing the first
+  allowed section. Visited editors stay mounted while hidden: navigation must
+  preserve local drafts and raw Publish All callbacks.
 
 ---
 
