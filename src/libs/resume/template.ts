@@ -130,6 +130,16 @@ export type RenderResumeOptions = {
 const TOTAL_PAGES = 2;
 
 /**
+ * Page-2 header title derives from the headline: the role phrase before
+ * the "·" separator ("Full-Stack & Mobile Engineer · TypeScript …" →
+ * "Full-Stack & Mobile Engineer"). Falls back to the full headline.
+ */
+export function resumeContinuationTitle(headline: string): string {
+  const head = headline.split('·')[0]?.trim();
+  return head === '' || head === undefined ? headline : head;
+}
+
+/**
  * Derived footer data (never user-edited): the left cell mirrors the
  * header name plus the website contact text, and page labels follow the
  * document locale.
@@ -232,7 +242,7 @@ ${contacts}
 <div class="page-footer"><span>${escapeHtml(footer.left)}</span><span>${escapeHtml(footer.pages[0])}</span></div>
 </div>
 <div class="page">
-<div class="continuation-header"><span class="continuation-name">${escapeHtml(data.name)}</span><span class="continuation-title">${escapeHtml(data.continuationTitle)}</span></div>
+<div class="continuation-header"><span class="continuation-name">${escapeHtml(data.name)}</span><span class="continuation-title">${escapeHtml(resumeContinuationTitle(data.title))}</span></div>
 <main>
 <section><div class="section-title">${escapeHtml(data.projectsTitle)}</div>${projects}</section>
 <div class="two-col">

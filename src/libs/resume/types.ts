@@ -66,7 +66,6 @@ export type ResumeData = {
   education: ResumeEducation[];
   languagesTitle: string;
   languages: ResumeLanguage[];
-  continuationTitle: string;
 };
 
 export type ResumeLocale = 'en' | 'it';

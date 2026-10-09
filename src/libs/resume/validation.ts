@@ -83,7 +83,6 @@ export function validateResumeData(
     'projectsTitle',
     'educationTitle',
     'languagesTitle',
-    'continuationTitle',
   ]) {
     checkShort(issues, `${path}.${key}`, d[key], MAX_SHORT, true);
   }

@@ -341,16 +341,6 @@ export function ResumeLocaleForm({
           />
         </EditorGroup>
       </div>
-
-      {/* Page footers are derived (name + website, locale page labels). */}
-      <EditorGroup title={t('footerGroup')}>
-        <Field label={t('continuationLabel')}>
-          <TextInput
-            value={data.continuationTitle}
-            onChange={(continuationTitle) => patch({ continuationTitle })}
-          />
-        </Field>
-      </EditorGroup>
     </div>
   );
 }

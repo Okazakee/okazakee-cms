@@ -4,6 +4,7 @@ import { DEFAULT_EN, DEFAULT_IT } from './defaults';
 import {
   escapeHtml,
   renderResumeHtml,
+  resumeContinuationTitle,
   sanitizeHref,
   sanitizeRichText,
 } from './template';
@@ -94,6 +95,27 @@ describe('renderResumeHtml', () => {
     });
     expect(it).toContain('Pagina 1 / 2');
     expect(it).toContain('Pagina 2 / 2');
+  });
+
+  it('derives the page-2 header title from the headline', () => {
+    expect(
+      resumeContinuationTitle(
+        'Full-Stack & Mobile Engineer · TypeScript · React Native / Node.js'
+      )
+    ).toBe('Full-Stack & Mobile Engineer');
+    expect(
+      resumeContinuationTitle(
+        'Ingegnere Full-Stack & Mobile · TypeScript · React Native / Node.js'
+      )
+    ).toBe('Ingegnere Full-Stack & Mobile');
+    expect(resumeContinuationTitle('Solo headline')).toBe('Solo headline');
+    const html = renderResumeHtml(DEFAULT_EN, DEFAULT_RESUME_CSS, {
+      locale: 'en',
+      docTitle: 't',
+    });
+    expect(html).toContain(
+      'continuation-title">Full-Stack &amp; Mobile Engineer<'
+    );
   });
 
   it('honours a CSS override and escapes hostile text', () => {

@@ -205,7 +205,6 @@ export const DEFAULT_EN: ResumeData = {
     { name: 'Italian', level: 'Native' },
     { name: 'English', level: 'C1 – Technical fluency' },
   ],
-  continuationTitle: 'Full-Stack & Mobile Engineer',
 };
 
 export const DEFAULT_IT: ResumeData = {
@@ -408,5 +407,4 @@ export const DEFAULT_IT: ResumeData = {
     { name: 'Italiano', level: 'Madrelingua' },
     { name: 'Inglese', level: 'C1 – Padronanza tecnica' },
   ],
-  continuationTitle: 'Ingegnere Full-Stack & Mobile',
 };
