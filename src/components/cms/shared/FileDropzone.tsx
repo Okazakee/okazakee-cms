@@ -42,6 +42,7 @@ interface FileDropzoneProps {
   label?: string;
   showUrl?: string | null;
   compact?: boolean;
+  actionsLayout?: 'below' | 'side';
 }
 
 export function FileDropzone({
@@ -63,6 +64,7 @@ export function FileDropzone({
   label,
   showUrl,
   compact = false,
+  actionsLayout = 'below',
 }: FileDropzoneProps) {
   const t = useTranslations('cms');
   const displayUrl = previewUrl ?? currentUrl ?? null;
@@ -71,6 +73,76 @@ export function FileDropzone({
   const isPdf =
     normalizedDisplayUrl?.endsWith('.pdf') ||
     fileInputProps.accept.includes('.pdf');
+  const sideActions = actionsLayout === 'side' && !isPdf;
+  const actionCount =
+    2 + (onCopyUrl && showUrl ? 1 : 0) + (onOpen ? 1 : 0) + (onDownload ? 1 : 0);
+  const lastSpansFull = sideActions && actionCount % 2 === 1;
+
+  const actionButtons = (
+    <div
+      className={`flex flex-wrap items-center justify-center gap-2 ${sideActions ? 'md:grid md:grid-cols-2 md:items-stretch' : ''}`}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onBrowse();
+        }}
+        className={`min-h-11 rounded-lg bg-accent-violet-deep px-3 py-2 text-sm text-white transition-colors hover:bg-accent-violet ${sideActions ? 'md:w-full' : ''}`}
+      >
+        {t('common.changeFile')}
+      </button>
+      {onCopyUrl && showUrl && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopyUrl();
+          }}
+          className={`min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised ${sideActions ? 'md:w-full' : ''}`}
+        >
+          {t('common.copyUrl')}
+        </button>
+      )}
+      {onOpen && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised ${sideActions ? 'md:w-full' : ''}`}
+        >
+          <ExternalLink className="h-4 w-4" aria-hidden="true" />
+          {t('editor.openFile')}
+        </button>
+      )}
+      {onDownload && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownload();
+          }}
+          className={`min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised ${sideActions ? 'md:w-full' : ''}`}
+        >
+          <Download className="w-3 h-3 inline mr-1" />
+          {t('common.download')}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClear();
+        }}
+        className={`min-h-11 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10 ${sideActions ? 'md:w-full' : ''} ${lastSpansFull ? 'md:col-span-2' : ''}`}
+      >
+        <X className="w-3 h-3 inline mr-1" />
+        {t('common.removeFile')}
+      </button>
+    </div>
+  );
 
   return (
     <div>
@@ -108,106 +180,66 @@ export function FileDropzone({
         )}
 
         {displayUrl ? (
-          <div className="space-y-3">
-            <p className="text-xs font-medium text-text-muted" role="status">
-              {t(hasPendingFile ? 'editor.pendingFile' : 'editor.currentFile')}
-            </p>
-            {!isPdf ? (
-              <div className="flex justify-center">
-                <Image
-                  src={displayUrl}
-                  alt="Preview"
-                  width={compact ? 120 : 200}
-                  height={compact ? 120 : 200}
-                  className="rounded-lg object-cover mx-auto"
-                  placeholder={displayBlur ? 'blur' : 'empty'}
-                  blurDataURL={displayBlur ?? undefined}
-                  unoptimized={displayUrl.startsWith('blob:')}
-                />
+          sideActions ? (
+            <div className="space-y-3 md:grid md:grid-cols-[200px_1fr] md:items-center md:gap-6 md:space-y-0 md:text-left">
+              <div className="space-y-3">
+                <p
+                  className="text-xs font-medium text-text-muted"
+                  role="status"
+                >
+                  {t(
+                    hasPendingFile ? 'editor.pendingFile' : 'editor.currentFile'
+                  )}
+                </p>
+                <div className="flex justify-center md:justify-start">
+                  <Image
+                    src={displayUrl}
+                    alt="Preview"
+                    width={compact ? 120 : 200}
+                    height={compact ? 120 : 200}
+                    className="rounded-lg object-cover"
+                    placeholder={displayBlur ? 'blur' : 'empty'}
+                    blurDataURL={displayBlur ?? undefined}
+                    unoptimized={displayUrl.startsWith('blob:')}
+                  />
+                </div>
               </div>
-            ) : (
-              <details className="rounded-lg border border-border-subtle bg-surface-base text-left">
-                <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-sm text-text-main">
-                  <FileText className="h-4 w-4" aria-hidden="true" />
-                  {t('editor.preview')}
-                </summary>
-                <iframe
-                  src={displayUrl}
-                  title={t('editor.preview')}
-                  className={`w-full border-t border-border-subtle ${compact ? 'h-56' : 'h-80 md:h-96'}`}
-                />
-              </details>
-            )}
-            {showUrl && (
-              <details className="text-left text-xs text-text-muted">
-                <summary className="min-h-11 cursor-pointer py-3">
-                  {t('editor.fileUrl')}
-                </summary>
-                <p className="break-all pb-2">{showUrl}</p>
-              </details>
-            )}
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onBrowse();
-                }}
-                className="min-h-11 rounded-lg bg-accent-violet-deep px-3 py-2 text-sm text-white transition-colors hover:bg-accent-violet"
-              >
-                {t('common.changeFile')}
-              </button>
-              {onCopyUrl && showUrl && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCopyUrl();
-                  }}
-                  className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
-                >
-                  {t('common.copyUrl')}
-                </button>
-              )}
-              {onOpen && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpen();
-                  }}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
-                >
-                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  {t('editor.openFile')}
-                </button>
-              )}
-              {onDownload && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDownload();
-                  }}
-                  className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
-                >
-                  <Download className="w-3 h-3 inline mr-1" />
-                  {t('common.download')}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClear();
-                }}
-                className="min-h-11 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-400 transition-colors hover:bg-red-500/10"
-              >
-                <X className="w-3 h-3 inline mr-1" />
-                {t('common.removeFile')}
-              </button>
+              <div className="min-w-0 md:self-center">{actionButtons}</div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-text-muted" role="status">
+                {t(hasPendingFile ? 'editor.pendingFile' : 'editor.currentFile')}
+              </p>
+              {!isPdf ? (
+                <div className="flex justify-center">
+                  <Image
+                    src={displayUrl}
+                    alt="Preview"
+                    width={compact ? 120 : 200}
+                    height={compact ? 120 : 200}
+                    className="rounded-lg object-cover mx-auto"
+                    placeholder={displayBlur ? 'blur' : 'empty'}
+                    blurDataURL={displayBlur ?? undefined}
+                    unoptimized={displayUrl.startsWith('blob:')}
+                  />
+                </div>
+              ) : (
+                <details className="rounded-lg border border-border-subtle bg-surface-base text-left">
+                  <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-3 py-2 text-sm text-text-main">
+                    <FileText className="h-4 w-4" aria-hidden="true" />
+                    {t('editor.preview')}
+                  </summary>
+                  <iframe
+                    src={displayUrl}
+                    title={t('editor.preview')}
+                    className={`w-full border-t border-border-subtle ${compact ? 'h-56' : 'h-80 md:h-96'}`}
+                  />
+                </details>
+              )}
+              {actionButtons}
+            </div>
+          )
         ) : (
           <button
             type="button"

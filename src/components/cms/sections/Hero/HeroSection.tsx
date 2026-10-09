@@ -290,6 +290,56 @@ export default function HeroSection() {
 
       <div className="flex flex-col gap-6">
         <EditorGroup
+          title={t('editor.groups.portrait')}
+          description={t('hero.shapeHint')}
+        >
+          <div className="w-full">
+            <FileDropzone
+              label={t('hero.heroImageTitle')}
+              previewUrl={imgUpload.previewUrl}
+              blurhash={imgUpload.blurhash}
+              isDragging={imgUpload.isDragging}
+              isProcessing={imgUpload.isProcessing}
+              hasPendingFile={Boolean(imgUpload.file)}
+              error={imgUpload.error}
+              currentUrl={heroSection.mainImage}
+              dropzoneProps={{
+                onDragOver: imgUpload.dropzoneProps.onDragOver,
+                onDragLeave: imgUpload.dropzoneProps.onDragLeave,
+                onDrop: imgUpload.dropzoneProps.onDrop,
+              }}
+              fileInputProps={imgUpload.fileInputProps}
+              fileInputRef={imgUpload.fileInputRef}
+              onClear={imgUpload.clearFile}
+              onBrowse={imgUpload.openFileDialog}
+              onCopyUrl={copyImageUrl}
+              onOpen={openImage}
+              onDownload={downloadPortrait}
+              showUrl={mainImageUrl || null}
+              actionsLayout="side"
+            />
+          </div>
+          <div className="max-w-md">
+            <label
+              htmlFor="hero-shape"
+              className="block text-sm font-medium text-text-main mb-1"
+            >
+              {t('hero.shapeLabel')}
+            </label>
+            <Dropdown
+              id="hero-shape"
+              triggerClassName={editorInputClass}
+              onChange={(value) => setShape(normalizeHeroShape(value))}
+              value={shape}
+              options={heroShapes.map((preset) => ({
+                value: preset,
+                label: t(`hero.shapeOptions.${preset}`),
+              }))}
+            />
+          </div>
+        </EditorGroup>
+
+        <EditorGroup
           title={t('editor.groups.identity')}
           description={t('hero.topSection')}
         >
@@ -389,55 +439,6 @@ export default function HeroSection() {
               rows={8}
             />
           )}
-        </EditorGroup>
-
-        <EditorGroup
-          title={t('editor.groups.portrait')}
-          description={t('hero.shapeHint')}
-        >
-          <div className="w-full max-w-72">
-            <FileDropzone
-              label={t('hero.heroImageTitle')}
-              previewUrl={imgUpload.previewUrl}
-              blurhash={imgUpload.blurhash}
-              isDragging={imgUpload.isDragging}
-              isProcessing={imgUpload.isProcessing}
-              hasPendingFile={Boolean(imgUpload.file)}
-              error={imgUpload.error}
-              currentUrl={heroSection.mainImage}
-              dropzoneProps={{
-                onDragOver: imgUpload.dropzoneProps.onDragOver,
-                onDragLeave: imgUpload.dropzoneProps.onDragLeave,
-                onDrop: imgUpload.dropzoneProps.onDrop,
-              }}
-              fileInputProps={imgUpload.fileInputProps}
-              fileInputRef={imgUpload.fileInputRef}
-              onClear={imgUpload.clearFile}
-              onBrowse={imgUpload.openFileDialog}
-              onCopyUrl={copyImageUrl}
-              onOpen={openImage}
-              onDownload={downloadPortrait}
-              showUrl={mainImageUrl || null}
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="hero-shape"
-              className="block text-sm font-medium text-text-main mb-1"
-            >
-              {t('hero.shapeLabel')}
-            </label>
-            <Dropdown
-              id="hero-shape"
-              triggerClassName={editorInputClass}
-              onChange={(value) => setShape(normalizeHeroShape(value))}
-              value={shape}
-              options={heroShapes.map((preset) => ({
-                value: preset,
-                label: t(`hero.shapeOptions.${preset}`),
-              }))}
-            />
-          </div>
         </EditorGroup>
       </div>
 

@@ -254,6 +254,7 @@
     "skillsPlaceholder": "[\"ReactJS\", \"Express.js\", \"Angular\", \"CMS\"]",
     "startDateLabel": "Start Date",
     "endDateLabel": "End Date",
+    "presentLabel": "Present",
     "selectLogo": "Select Logo",
     "changeLogo": "Change Logo",
     "creating": "Creating...",
