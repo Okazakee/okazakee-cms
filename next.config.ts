@@ -76,6 +76,7 @@ const nextConfig: NextConfig = {
   // compile-error badge back at the cost of that poll.
   devIndicators: false,
   cacheComponents: true,
+  partialPrefetching: true,
   async headers() {
     return [
       {
