@@ -252,9 +252,6 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     >
       <div className="relative">
         <item.icon className={SIDEBAR_ROW_ICON} />
-        {hasDraft(item.id) && (
-          <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />
-        )}
       </div>
       <span className={SIDEBAR_ROW_LABEL}>
         {sectionLabelMap[item.id] || item.label}
