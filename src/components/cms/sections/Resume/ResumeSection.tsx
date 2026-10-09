@@ -241,11 +241,11 @@ export function ResumeSection() {
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="space-y-2">
+      <div className="space-y-2 sm:flex sm:items-center sm:justify-center sm:gap-2 sm:space-y-0">
         <div
           role="tablist"
           aria-label={t('title')}
-          className="grid grid-cols-2 gap-2 sm:flex sm:justify-center"
+          className="grid grid-cols-2 gap-2 sm:contents"
         >
           {TABS.map((entry) => (
             <button
@@ -264,7 +264,8 @@ export function ResumeSection() {
             </button>
           ))}
         </div>
-        <div className="grid gap-2 sm:flex sm:justify-center">
+        <span aria-hidden="true" className="hidden w-px self-stretch bg-border-subtle sm:block" />
+        <div className="grid gap-2 sm:contents">
           <button
             type="button"
             onClick={() => setPreviewOpen(true)}
@@ -273,7 +274,7 @@ export function ResumeSection() {
             <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span className="truncate">{tb('previewTitle')}</span>
           </button>
-          <div className="grid grid-cols-3 gap-2 sm:flex">
+          <div className="grid grid-cols-3 gap-2 sm:contents">
             <span aria-hidden="true" className="hidden w-px self-stretch bg-border-subtle sm:block" />
             <button
               type="button"
