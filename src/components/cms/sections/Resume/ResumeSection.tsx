@@ -4,7 +4,6 @@ import { Eye } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resumeActions } from '@/app/actions/cms/sections/resumeActions';
-import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
@@ -54,7 +53,16 @@ export function ResumeSection() {
           it: ResumeData;
           css: string;
         };
-        const initial = { en: data.en, it: data.it, css: data.css ?? '' };
+        const initial = {
+          en: data.en,
+          it: data.it,
+          // The styling editor always shows the full raw stylesheet, so a
+          // tweak never starts from an empty box.
+          css:
+            data.css && data.css.trim() !== ''
+              ? data.css
+              : DEFAULT_RESUME_CSS,
+        };
         setDraft(initial);
         setSaved(initial);
       })
@@ -187,12 +195,8 @@ export function ResumeSection() {
     );
   }
 
-  const published = (
-    [
-      { locale: 'en', url: heroSection?.resume_en ?? null },
-      { locale: 'it', url: heroSection?.resume_it ?? null },
-    ] as const
-  ).filter((entry) => entry.url !== null);
+  const publishedUrl =
+    heroSection?.[tab === 'en' ? 'resume_en' : 'resume_it'] ?? null;
 
   return (
     <fieldset disabled={busy} className="min-w-0 space-y-6">
@@ -239,6 +243,36 @@ export function ResumeSection() {
           <Eye className="h-4 w-4" aria-hidden="true" />
           {tb('previewTitle')}
         </button>
+        <span aria-hidden="true" className="hidden w-px self-stretch bg-border-subtle sm:block" />
+        <button
+          type="button"
+          disabled={!publishedUrl}
+          onClick={() => publishedUrl && window.open(publishedUrl, '_blank', 'noopener')}
+          className="min-h-11 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40"
+        >
+          {t('openLabel')}
+        </button>
+        <button
+          type="button"
+          disabled={!publishedUrl}
+          onClick={() =>
+            publishedUrl &&
+            navigator.clipboard
+              .writeText(publishedUrl)
+              .catch(() => setError(t('errorCopy')))
+          }
+          className="min-h-11 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40"
+        >
+          {t('copyUrl')}
+        </button>
+        <button
+          type="button"
+          disabled={!publishedUrl}
+          onClick={() => publishedUrl && void downloadPdf(publishedUrl, tab)}
+          className="min-h-11 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40"
+        >
+          {t('download')}
+        </button>
       </div>
 
       <ResumeLocaleForm
@@ -276,15 +310,13 @@ export function ResumeSection() {
               value={draft.css}
               onChange={(css) => setDraft({ ...draft, css })}
             />
-            {draft.css.trim() !== '' && (
-              <button
-                type="button"
-                onClick={() => setDraft({ ...draft, css: '' })}
-                className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-4 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
-              >
-                {tb('cssReset')}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setDraft({ ...draft, css: DEFAULT_RESUME_CSS })}
+              className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-4 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
+            >
+              {tb('cssReset')}
+            </button>
           </div>
         )}
       </div>
@@ -301,59 +333,6 @@ export function ResumeSection() {
         />
       )}
 
-      {published.length > 0 && (
-        <EditorGroup
-          title={tb('publishedGroup')}
-          description={tb('publishedHint')}
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            {published.map((entry) => (
-              <div
-                key={entry.locale}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-subtle bg-surface-base p-3"
-              >
-                <span className="text-sm font-medium text-text-main">
-                  {entry.locale === 'en'
-                    ? t('englishLabel')
-                    : t('italianLabel')}
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      window.open(entry.url ?? '', '_blank', 'noopener')
-                    }
-                    className="min-h-11 rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main hover:bg-surface-raised"
-                  >
-                    {t('openLabel')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      entry.url &&
-                      navigator.clipboard
-                        .writeText(entry.url)
-                        .catch(() => setError(t('errorCopy')))
-                    }
-                    className="min-h-11 rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main hover:bg-surface-raised"
-                  >
-                    {t('copyUrl')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      entry.url && void downloadPdf(entry.url, entry.locale)
-                    }
-                    className="min-h-11 rounded-lg border border-border-subtle px-3 py-2 text-sm text-text-main hover:bg-surface-raised"
-                  >
-                    {t('download')}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </EditorGroup>
-      )}
     </fieldset>
   );
 }

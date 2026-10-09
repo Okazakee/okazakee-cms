@@ -429,14 +429,11 @@
       "moveUp": "Move up",
       "moveDown": "Move down",
       "removeEntry": "Remove entry",
-      "cssLabel": "Stylesheet override",
-      "cssHint": "Empty means the default print-perfect stylesheet. Changes apply to preview and exported PDFs.",
+      "cssHint": "The full live stylesheet, applied to the preview and the exported PDFs.",
       "cssReset": "Reset to default",
       "previewTitle": "A4 preview",
       "previewOverflow": "Content overflows the two A4 pages and will be clipped. Shorten copy or move entries before publishing.",
-      "downloadHtml": "Download HTML",
-      "publishedGroup": "Published PDFs",
-      "publishedHint": "Live files served by okazakee.dev. Publishing rebuilds both PDFs from the editor above."
+      "downloadHtml": "Download HTML"
     }
   },
   "privacy": {

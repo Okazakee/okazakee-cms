@@ -356,8 +356,7 @@ export function ResumeLocaleForm({
         />
       </EditorGroup>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <EditorGroup title={t('educationGroup')}>
+      <EditorGroup title={t('educationGroup')}>
           <Field label={t('sectionTitleLabel')}>
             <TextInput
               value={data.educationTitle}
@@ -426,7 +425,6 @@ export function ResumeLocaleForm({
             )}
           />
         </EditorGroup>
-      </div>
     </div>
   );
 }

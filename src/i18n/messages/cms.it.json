@@ -429,14 +429,11 @@
       "moveUp": "Sposta su",
       "moveDown": "Sposta giù",
       "removeEntry": "Rimuovi voce",
-      "cssLabel": "Override foglio di stile",
-      "cssHint": "Vuoto = foglio di stile predefinito. Le modifiche valgono per anteprima e PDF esportati.",
+      "cssHint": "Il foglio di stile completo, applicato ad anteprima e PDF esportati.",
       "cssReset": "Ripristina predefinito",
       "previewTitle": "Anteprima A4",
       "previewOverflow": "Il contenuto supera le due pagine A4 e verrà tagliato. Accorcia il testo o sposta voci prima di pubblicare.",
-      "downloadHtml": "Scarica HTML",
-      "publishedGroup": "PDF pubblicati",
-      "publishedHint": "File live serviti da okazakee.dev. La pubblicazione ricostruisce entrambi i PDF dall'editor sopra."
+      "downloadHtml": "Scarica HTML"
     }
   },
   "privacy": {
