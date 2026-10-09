@@ -38,6 +38,10 @@ const nextConfig: NextConfig = {
       expire: thirtyDaysInSeconds,
     },
   },
+  // @sparticuz/chromium ships compressed binaries resolved at runtime via
+  // executablePath(): bundling them breaks the lookup, so both packages
+  // stay external (loaded lazily by the resume PDF action only).
+  serverExternalPackages: ['puppeteer-core', '@sparticuz/chromium'],
   images: {
     remotePatterns: [
       {
