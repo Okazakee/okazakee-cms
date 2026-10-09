@@ -304,7 +304,7 @@ export function ResumeSection() {
 
       <nav
         aria-label={tb('sectionNav')}
-        className="sticky top-0 z-10 flex justify-center gap-1 overflow-x-auto rounded-xl bg-surface-base/95 py-1 backdrop-blur"
+        className="sticky top-0 z-10 mx-auto flex w-fit max-w-full justify-center gap-1 overflow-x-auto rounded-xl bg-surface-base/95 py-1 backdrop-blur"
       >
         {navItems.map((item) => (
           <button
