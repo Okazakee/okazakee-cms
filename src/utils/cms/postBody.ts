@@ -120,6 +120,29 @@ export function committedImageMarkdown(
   return `![${alt}-${blurhash}](${publicUrl})`;
 }
 
+/** One client-staged body image awaiting upload at publish time. */
+export type BodyImageUpload = {
+  /** Client-generated id matching the `pending:<id>` markdown ref. */
+  localId: string;
+  /** Processed file (WebP via the CMS canvas pipeline, blurhash via blurkit). */
+  file: File;
+  /** Blurkit blurhash generated client-side; server falls back if invalid. */
+  blurhash: string;
+  /** Caption text; dashes are sanitized at commit (dash-split contract). */
+  alt: string;
+};
+
+/** True when any body still holds an un-uploaded `pending:` image ref. */
+export function hasPendingRefs(
+  ...bodies: Array<string | undefined>
+): boolean {
+  return bodies.some(
+    (body) =>
+      body !== undefined &&
+      parseBodyImages(body).some((ref) => ref.pending)
+  );
+}
+
 /**
  * Structural validation for image lines. Legacy committed lines always
  * pass through (never break an unrelated edit); only unbalanced syntax
