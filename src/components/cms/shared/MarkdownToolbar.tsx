@@ -11,10 +11,12 @@ import {
 
 function ToolButton({
   label,
+  active,
   onPress,
   children,
 }: {
   label: string;
+  active?: boolean;
   onPress: () => void;
   children: ReactNode;
 }) {
@@ -28,7 +30,11 @@ function ToolButton({
         event.preventDefault();
         onPress();
       }}
-      className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-text-muted transition-colors hover:bg-surface-raised hover:text-text-main"
+      className={`inline-flex min-h-9 items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors ${
+        active
+          ? 'border-accent-violet-deep bg-accent-violet-deep text-white'
+          : 'border-border-subtle bg-surface-base text-text-muted hover:bg-surface-raised hover:text-text-main'
+      }`}
     >
       {children}
     </button>
@@ -46,10 +52,17 @@ export function MarkdownToolbar({
   targetRef,
   onChange,
   onPickImage,
+  boldActive = false,
+  violetActive = false,
+  onApplied,
 }: {
   targetRef: RefObject<HTMLTextAreaElement | null>;
   onChange: (next: string) => void;
   onPickImage: () => void;
+  boldActive?: boolean;
+  violetActive?: boolean;
+  /** Fires after a button applied its edit (selection already restored). */
+  onApplied?: () => void;
 }) {
   const t = useTranslations('cms.editor');
 
@@ -65,6 +78,7 @@ export function MarkdownToolbar({
       current.focus();
       current.setSelectionRange(next.caretStart, next.caretEnd);
       current.scrollTop = scrollTop;
+      onApplied?.();
     });
   };
 
@@ -86,6 +100,7 @@ export function MarkdownToolbar({
     >
       <ToolButton
         label={t('markdownBold')}
+        active={boldActive}
         onPress={() => {
           const { value, from, to } = selectionOf();
           applyEdit(() => toggleInlineMarker(value, from, to, '****'));
@@ -96,6 +111,7 @@ export function MarkdownToolbar({
       </ToolButton>
       <ToolButton
         label={t('markdownViolet')}
+        active={violetActive}
         onPress={() => {
           const { value, from, to } = selectionOf();
           applyEdit(() => toggleInlineMarker(value, from, to, '*'));

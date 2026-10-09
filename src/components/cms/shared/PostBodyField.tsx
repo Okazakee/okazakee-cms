@@ -1,9 +1,10 @@
 'use client';
 
-import { useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { MarkdownToolbar } from '@/components/cms/shared/MarkdownToolbar';
 import type { StagedBodyImage } from '@/hooks/cms/useBodyImages';
+import { quadActiveAt, violetActiveAt } from '@/utils/cms/postBody';
 
 /**
  * Plain-textarea post body field with the minimal markdown toolbar.
@@ -36,6 +37,26 @@ export function PostBodyField({
   const t = useTranslations('cms.editor');
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const [formatActive, setFormatActive] = useState({
+    bold: false,
+    violet: false,
+  });
+
+  const refreshFormatState = useCallback(() => {
+    const field = areaRef.current;
+    if (!field) return;
+    const from = field.selectionStart ?? 0;
+    const to = field.selectionEnd ?? 0;
+    setFormatActive({
+      bold: quadActiveAt(field.value, from, to),
+      violet: violetActiveAt(field.value, from, to),
+    });
+  }, []);
+
+  // Locale switches swap the value underneath the same field.
+  useEffect(() => {
+    refreshFormatState();
+  }, [value, refreshFormatState]);
 
   const insertAtCaret = (snippet: string) => {
     const field = areaRef.current;
@@ -100,6 +121,9 @@ export function PostBodyField({
         targetRef={areaRef}
         onChange={onChange}
         onPickImage={() => fileRef.current?.click()}
+        boldActive={formatActive.bold}
+        violetActive={formatActive.violet}
+        onApplied={refreshFormatState}
       />
       <textarea
         id={id}
@@ -109,6 +133,9 @@ export function PostBodyField({
         rows={rows}
         placeholder={placeholder}
         spellCheck={false}
+        onSelect={refreshFormatState}
+        onKeyUp={refreshFormatState}
+        onClick={refreshFormatState}
         className="w-full rounded-lg border border-border-subtle bg-surface-base px-3 py-2 font-mono text-sm text-text-main outline-none focus:border-accent-violet"
       />
       <input

@@ -153,10 +153,10 @@ export function MarkerEditor({
           aria-label={t('highlightButton')}
           onMouseDown={(event: MouseEvent) => event.preventDefault()}
           onClick={handlePress}
-          className={`inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors ${
+          className={`inline-flex min-h-9 items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors ${
             highlightActive
-              ? 'bg-accent-violet-deep text-white'
-              : 'text-text-muted hover:bg-surface-raised hover:text-text-main'
+              ? 'border-accent-violet-deep bg-accent-violet-deep text-white'
+              : 'border-border-subtle bg-surface-base text-text-muted hover:bg-surface-raised hover:text-text-main'
           }`}
         >
           <Highlighter className="h-4 w-4" aria-hidden="true" />

@@ -3,10 +3,12 @@ import {
   committedImageMarkdown,
   parseBodyImages,
   pendingImageMarkdown,
+  quadActiveAt,
   rewritePendingRef,
   sanitizeImageAlt,
   toggleInlineMarker,
   validateBodyImages,
+  violetActiveAt,
   wrapCodeFence,
 } from './postBody';
 
@@ -116,5 +118,25 @@ describe('wrapCodeFence', () => {
   it('isolates the selection on its own lines with blank gaps', () => {
     const out = wrapCodeFence('before\nline\n after', 7, 11);
     expect(out.text).toBe('before\n\n```\nline\n```\n\n after');
+  });
+});
+
+describe('quadActiveAt / violetActiveAt', () => {
+  it('detects wrapped selections and carets inside runs', () => {
+    // Wrapped: toggle would unwrap.
+    expect(quadActiveAt('a ****b**** c', 6, 7)).toBe(true);
+    // Caret inside the run.
+    expect(quadActiveAt('a ****b**** c', 6, 6)).toBe(true);
+    // Between runs: the found marker closes an earlier run.
+    expect(quadActiveAt('a ****b**** c', 12, 12)).toBe(false);
+    expect(quadActiveAt('plain', 2, 2)).toBe(false);
+  });
+
+  it('never reports bold runs as violet', () => {
+    expect(violetActiveAt('a *b* c', 3, 4)).toBe(true);
+    expect(violetActiveAt('a *b* c', 4, 4)).toBe(true);
+    expect(violetActiveAt('a ****b**** c', 7, 7)).toBe(false);
+    expect(violetActiveAt('a **b** c', 4, 5)).toBe(false);
+    expect(violetActiveAt('plain', 2, 2)).toBe(false);
   });
 });

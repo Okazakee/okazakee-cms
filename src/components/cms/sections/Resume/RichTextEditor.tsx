@@ -46,10 +46,10 @@ function ToolButton({
         event.preventDefault();
         onPress();
       }}
-      className={`inline-flex min-h-9 min-w-9 items-center justify-center rounded-md px-2 text-sm transition-colors ${
+      className={`inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border px-2 text-sm transition-colors ${
         active
-          ? 'bg-accent-violet-deep text-white'
-          : 'text-text-muted hover:bg-surface-raised hover:text-text-main'
+          ? 'border-accent-violet-deep bg-accent-violet-deep text-white'
+          : 'border-border-subtle bg-surface-base text-text-muted hover:bg-surface-raised hover:text-text-main'
       }`}
     >
       {children}
@@ -77,6 +77,7 @@ export function RichTextEditor({
   const lastEmitted = useRef<string | null>(null);
   const [boldActive, setBoldActive] = useState(false);
   const [italicActive, setItalicActive] = useState(false);
+  const [nowrapActive, setNowrapActive] = useState(false);
 
   // Mount plus external changes (revert, bullet add/remove/reorder):
   // reset the DOM. Own keystrokes skip this via lastEmitted, keeping
@@ -104,6 +105,15 @@ export function RichTextEditor({
     } catch {
       // queryCommandState is deprecated but universal; ignore failures.
     }
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    if (!editor || !selection || selection.rangeCount === 0) {
+      setNowrapActive(false);
+      return;
+    }
+    setNowrapActive(
+      !selection.isCollapsed && !!findNowrap(selection.anchorNode, editor)
+    );
   }, []);
 
   const toggleNowrap = useCallback(() => {
@@ -173,6 +183,7 @@ export function RichTextEditor({
     }
     setBoldActive(false);
     setItalicActive(false);
+    setNowrapActive(false);
   }, []);
 
   return (
@@ -214,9 +225,11 @@ export function RichTextEditor({
         </ToolButton>
         <ToolButton
           label={t('toolbarNowrap')}
+          active={nowrapActive}
           onPress={() => {
             toggleNowrap();
             emit();
+            refreshStates();
           }}
         >
           <span className="font-mono text-xs font-semibold">a↔b</span>

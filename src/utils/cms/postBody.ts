@@ -280,3 +280,65 @@ export function wrapCodeFence(
     caretEnd: caretStart + selected.length,
   };
 }
+
+/**
+ * True when the selection is wrapped in (or the caret sits inside) a
+ * `****` run — i.e. clicking Bold would unwrap. Cosmetic only: drives
+ * the toolbar active state.
+ */
+export function quadActiveAt(
+  value: string,
+  from: number,
+  to: number
+): boolean {
+  const len = value.length;
+  const f = clampIndex(Math.min(from, to), len);
+  const t = clampIndex(Math.max(from, to), len);
+  const before = value.slice(0, f);
+  const after = value.slice(t);
+  if (t > f && before.endsWith('****') && after.startsWith('****')) {
+    return true;
+  }
+  const open = value.lastIndexOf('****', f);
+  if (open < 0) return false;
+  // An odd count before it means this one closes an earlier run.
+  const earlier = value.slice(0, open).split('****').length - 1;
+  if (earlier % 2 !== 0) return false;
+  const close = value.indexOf('****', Math.max(open + 4, t));
+  if (close < 0) return false;
+  return open + 4 <= f && t <= close && open + 4 < close;
+}
+
+const QUAD_MASK_PATTERN = /\*\*\*\*([^*]+?)\*\*\*\*/g;
+
+/**
+ * True when the selection is wrapped in (or the caret sits inside) a
+ * single-`*` run — i.e. clicking Violet would unwrap. Quad runs are
+ * masked first so `**` bold never reports as violet. Cosmetic only.
+ */
+export function violetActiveAt(
+  value: string,
+  from: number,
+  to: number
+): boolean {
+  const masked = value.replace(QUAD_MASK_PATTERN, (m) => ' '.repeat(m.length));
+  const len = masked.length;
+  const f = clampIndex(Math.min(from, to), len);
+  const t = clampIndex(Math.max(from, to), len);
+  const before = masked.slice(0, f);
+  const after = masked.slice(t);
+  if (t > f && /(?<!\*)\*$/.test(before) && /^\*(?!\*)/.test(after)) {
+    return true;
+  }
+  const pattern = /(?<!\*)\*([^*\n]+)\*(?!\*)/g;
+  let match: RegExpExecArray | null = pattern.exec(masked);
+  while (match !== null) {
+    const innerStart = match.index + 1;
+    const innerEnd = match.index + match[0].length - 1;
+    if (f >= innerStart && t <= innerEnd && innerStart < innerEnd) {
+      return true;
+    }
+    match = pattern.exec(masked);
+  }
+  return false;
+}
