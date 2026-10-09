@@ -101,16 +101,41 @@ export function bodyUploadStaged(error: unknown): string[] {
 }
 
 /**
+ * Live captions keyed by pending id, scraped from the submitted markdown.
+ * First locale wins when EN/IT captions differ for the same image.
+ */
+export function captionOverridesFor(
+  bodies: Array<string | undefined>
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const body of bodies) {
+    if (!body) continue;
+    for (const ref of parseBodyImages(body)) {
+      if (ref.pendingId && !map.has(ref.pendingId)) {
+        map.set(ref.pendingId, ref.caption);
+      }
+    }
+  }
+  return map;
+}
+
+/**
  * Uploads staged body images into the post folder. Throws BodyUploadError
  * on the first failure — callers remove every staged path it carries and
  * commit nothing.
+ */
+/**
+ * Uploads staged body images into the post folder. The caption live in the
+ * submitted markdown wins over the stage-time alt (the user may have edited
+ * it in the figure caption afterwards); both fall back safely, never undefined.
  */
 export async function uploadBodyImages(
   admin: SupabaseClient,
   bucket: string,
   prefix: string,
   label: string,
-  files: BodyImageUpload[] | undefined
+  files: BodyImageUpload[] | undefined,
+  altOverrides?: Map<string, string>
 ): Promise<{ rewrites: Map<string, string>; staged: string[] }> {
   const rewrites = new Map<string, string>();
   const staged: string[] = [];
@@ -124,7 +149,8 @@ export async function uploadBodyImages(
       if (!prepared.success) {
         throw new Error(prepared.error ?? 'Body image processing failed');
       }
-      const alt = sanitizeImageAlt(item.alt, label);
+      const override = altOverrides?.get(item.localId);
+    const alt = sanitizeImageAlt(override ?? item.alt, label);
       const upload = await uploadImmutablePreparedImage(
         admin,
         bucket,

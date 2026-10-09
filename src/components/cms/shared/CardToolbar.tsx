@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp, Edit3, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Edit3, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 interface CardToolbarProps {
@@ -8,6 +8,9 @@ interface CardToolbarProps {
   onDelete?: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  onToggleHidden?: () => void;
+  hidden?: boolean;
+  hiddenLabel?: string;
   isFirst?: boolean;
   isLast?: boolean;
   showReorder?: boolean;
@@ -18,6 +21,9 @@ export function CardToolbar({
   onDelete,
   onMoveUp,
   onMoveDown,
+  onToggleHidden,
+  hidden = false,
+  hiddenLabel,
   isFirst = false,
   isLast = false,
   showReorder = false,
@@ -48,6 +54,22 @@ export function CardToolbar({
           aria-label={t('common.moveDown')}
         >
           <ArrowDown className="w-4 h-4" />
+        </button>
+      )}
+      {onToggleHidden && (
+        <button
+          type="button"
+          onClick={onToggleHidden}
+          className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-text-muted hover:text-accent-violet transition-colors"
+          title={hiddenLabel ?? t('common.hide')}
+          aria-label={hiddenLabel ?? t('common.hide')}
+          aria-pressed={!hidden}
+        >
+          {hidden ? (
+            <EyeOff className="w-4 h-4" />
+          ) : (
+            <Eye className="w-4 h-4" />
+          )}
         </button>
       )}
       {onEdit && (

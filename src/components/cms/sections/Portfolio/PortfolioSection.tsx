@@ -27,6 +27,8 @@ import { PostBodyField } from '@/components/cms/shared/PostBodyField';
 import { PostPreviewModal } from '@/components/cms/shared/PostPreviewModal';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
+import { TagEditor } from '@/components/cms/shared/TagEditor';
+import { Toggle } from '@/components/cms/shared/Toggle';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
 import { ListPostImage } from '@/components/common/cms/ListPostImage';
 import {
@@ -296,6 +298,15 @@ export default function PortfolioSection() {
       return next;
     });
     setPosts((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // List quick toggle: stages a visibility flip like any other edit, so
+  // Publish commits it through the normal evidence flow.
+  const toggleHidden = (id: number) => {
+    setPosts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p))
+    );
+    setModifiedIds((prev) => new Set(prev).add(id));
   };
 
   const handlePublish = useCallback(async () => {
@@ -716,21 +727,15 @@ export default function PortfolioSection() {
 
         <EditorGroup title={t('editor.groups.publication')}>
           <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <label htmlFor="portfolio-tags" className={editorLabelClass}>
-                {t('portfolio.tagsLabel')}
-              </label>
-              <input
-                id="portfolio-tags"
-                type="text"
-                value={formData.post_tags}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, post_tags: e.target.value }))
-                }
-                className={editorInputClass}
-                placeholder={t('portfolio.tagsPlaceholder')}
-              />
-            </div>
+            <TagEditor
+              id="portfolio-tags"
+              label={t('portfolio.tagsLabel')}
+              value={formData.post_tags}
+              onChange={(post_tags) =>
+                setFormData((p) => ({ ...p, post_tags }))
+              }
+              placeholder={t('portfolio.tagsPlaceholder')}
+            />
             <div>
               <label htmlFor="portfolio-date" className={editorLabelClass}>
                 {t('portfolio.dateLabel')}
@@ -770,17 +775,11 @@ export default function PortfolioSection() {
               />
             </div>
           </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-main">
-            <input
-              type="checkbox"
-              checked={formData.hidden}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, hidden: e.target.checked }))
-              }
-              className="h-4 w-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
-            />
-            {t('portfolio.hiddenLabel')}
-          </label>
+          <Toggle
+            checked={formData.hidden}
+            onChange={(hidden) => setFormData((p) => ({ ...p, hidden }))}
+            label={t('portfolio.hiddenLabel')}
+          />
         </EditorGroup>
 
         <div className="flex flex-wrap gap-3 pt-4">
@@ -888,6 +887,8 @@ export default function PortfolioSection() {
                 </div>
                 <div className="flex w-full justify-end sm:w-auto">
                   <CardToolbar
+                    onToggleHidden={() => toggleHidden(post.id)}
+                    hidden={post.hidden ?? false}
                     onEdit={() => openEdit(post)}
                     onDelete={() => handleDelete(post.id)}
                   />

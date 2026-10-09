@@ -18,6 +18,7 @@ import {
 import {
   applyBodyImageRewrites,
   bodyUploadStaged,
+  captionOverridesFor,
   cleanupOrphanedBodyImages,
   removeBodyUploads,
   uploadBodyImages,
@@ -369,7 +370,11 @@ async function batchPublishPortfolio(
           bucket,
           portfolioPostPrefix(data.id as number),
           validation.data.title_en || 'untitled',
-          item.bodyFiles
+          item.bodyFiles,
+          captionOverridesFor([
+            validation.data.body_en,
+            validation.data.body_it,
+          ])
         );
         bodyStaged = bodyUpload.staged;
         const rewrittenBodies = applyBodyImageRewrites(
@@ -494,7 +499,11 @@ async function batchPublishPortfolio(
             bucket,
             portfolioPostPrefix(item.id),
             validation.data.title_en || `portfolio-${item.id}`,
-            item.bodyFiles
+            item.bodyFiles,
+            captionOverridesFor([
+              validation.data.body_en,
+              validation.data.body_it,
+            ])
           );
           bodyStaged = bodyUpload.staged;
           const rewritten = applyBodyImageRewrites(

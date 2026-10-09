@@ -18,6 +18,7 @@ import {
 import {
   applyBodyImageRewrites,
   bodyUploadStaged,
+  captionOverridesFor,
   cleanupOrphanedBodyImages,
   removeBodyUploads,
   uploadBodyImages,
@@ -356,7 +357,8 @@ async function batchPublishBlog(
           bucket,
           blogPostPrefix(data.id as number),
           item.data.title_en || 'untitled',
-          item.bodyFiles
+          item.bodyFiles,
+          captionOverridesFor([item.data.body_en, item.data.body_it])
         );
         bodyStaged = bodyUpload.staged;
         bodyRewrites = bodyUpload.rewrites;
@@ -482,7 +484,8 @@ async function batchPublishBlog(
             bucket,
             blogPostPrefix(item.id),
             item.data.title_en || `blog-${item.id}`,
-            item.bodyFiles
+            item.bodyFiles,
+            captionOverridesFor([item.data.body_en, item.data.body_it])
           );
           bodyStaged = bodyUpload.staged;
           const rewritten = applyBodyImageRewrites(

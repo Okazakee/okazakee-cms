@@ -213,13 +213,21 @@ export function LayoutSection() {
           {(['dark', 'light'] as const).map((variant) => {
             const upload = variant === 'dark' ? darkUpload : lightUpload;
             const removed = removals[variant] && !upload.file;
+            // Preview each logo on its intended header background so it
+            // stays visible under either CMS theme; light tiles carry
+            // explicit ink colors since theme tokens assume dark chrome.
+            const onLightTile = variant === 'light';
             return (
               <section
                 key={variant}
                 data-testid={`header-logo-${variant}`}
-                className="space-y-3 rounded-xl border border-border-subtle bg-surface-base p-4"
+                className={`space-y-3 rounded-xl border border-border-subtle p-4 ${
+                  variant === 'dark' ? 'bg-[#0e0e10]' : 'bg-white'
+                }`}
               >
-                <h3 className="text-sm font-semibold text-text-white">
+                <h3
+                  className={`text-sm font-semibold ${onLightTile ? 'text-[#0b0e14]' : 'text-text-white'}`}
+                >
                   {t(
                     `layout.headerLogo${variant === 'dark' ? 'Dark' : 'Light'}Title`
                   )}

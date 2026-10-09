@@ -512,6 +512,28 @@ export default function CareerSection() {
           </div>
         </EditorGroup>
 
+        <EditorGroup title={t('career.logoGroupTitle')}>
+          <FileDropzone
+            label={t('career.selectLogo')}
+            previewUrl={logoUpload.previewUrl}
+            blurhash={logoUpload.blurhash}
+            isDragging={logoUpload.isDragging}
+            isProcessing={logoUpload.isProcessing}
+            hasPendingFile={Boolean(logoUpload.file)}
+            error={logoUpload.error}
+            dropzoneProps={{
+              onDragOver: logoUpload.dropzoneProps.onDragOver,
+              onDragLeave: logoUpload.dropzoneProps.onDragLeave,
+              onDrop: logoUpload.dropzoneProps.onDrop,
+            }}
+            fileInputProps={logoUpload.fileInputProps}
+            fileInputRef={logoUpload.fileInputRef}
+            onClear={logoUpload.clearFile}
+            onBrowse={logoUpload.openFileDialog}
+            compact
+          />
+        </EditorGroup>
+
         <EditorGroup title={t('editor.groups.datesLocation')}>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
@@ -622,27 +644,7 @@ export default function CareerSection() {
           </div>
         </EditorGroup>
 
-        <EditorGroup title={t('career.logoGroupTitle')}>
-          <FileDropzone
-            label={t('career.selectLogo')}
-            previewUrl={logoUpload.previewUrl}
-            blurhash={logoUpload.blurhash}
-            isDragging={logoUpload.isDragging}
-            isProcessing={logoUpload.isProcessing}
-            hasPendingFile={Boolean(logoUpload.file)}
-            error={logoUpload.error}
-            dropzoneProps={{
-              onDragOver: logoUpload.dropzoneProps.onDragOver,
-              onDragLeave: logoUpload.dropzoneProps.onDragLeave,
-              onDrop: logoUpload.dropzoneProps.onDrop,
-            }}
-            fileInputProps={logoUpload.fileInputProps}
-            fileInputRef={logoUpload.fileInputRef}
-            onClear={logoUpload.clearFile}
-            onBrowse={logoUpload.openFileDialog}
-            compact
-          />
-        </EditorGroup>
+
 
         <div className="flex gap-3 pt-2">
           <button

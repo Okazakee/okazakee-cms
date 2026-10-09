@@ -27,6 +27,8 @@ import { PostBodyField } from '@/components/cms/shared/PostBodyField';
 import { PostPreviewModal } from '@/components/cms/shared/PostPreviewModal';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
+import { TagEditor } from '@/components/cms/shared/TagEditor';
+import { Toggle } from '@/components/cms/shared/Toggle';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
 import { ListPostImage } from '@/components/common/cms/ListPostImage';
 import {
@@ -255,6 +257,15 @@ export default function BlogSection() {
       return next;
     });
     setPosts((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // List quick toggle: stages a visibility flip like any other edit, so
+  // Publish commits it through the normal evidence flow.
+  const toggleHidden = (id: number) => {
+    setPosts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p))
+    );
+    setModifiedIds((prev) => new Set(prev).add(id));
   };
 
   const handlePublish = useCallback(async () => {
@@ -607,21 +618,15 @@ export default function BlogSection() {
 
         <EditorGroup title={t('editor.groups.publication')}>
           <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <label htmlFor="blog-tags" className={editorLabelClass}>
-                {t('blog.tagsLabel')}
-              </label>
-              <input
-                id="blog-tags"
-                type="text"
-                value={formData.post_tags}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, post_tags: e.target.value }))
-                }
-                className={editorInputClass}
-                placeholder={t('blog.tagsPlaceholder')}
-              />
-            </div>
+            <TagEditor
+              id="blog-tags"
+              label={t('blog.tagsLabel')}
+              value={formData.post_tags}
+              onChange={(post_tags) =>
+                setFormData((p) => ({ ...p, post_tags }))
+              }
+              placeholder={t('blog.tagsPlaceholder')}
+            />
             <div>
               <label htmlFor="blog-date" className={editorLabelClass}>
                 {t('blog.dateLabel')}
@@ -658,17 +663,11 @@ export default function BlogSection() {
               />
             </div>
           </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-main">
-            <input
-              type="checkbox"
-              checked={formData.hidden}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, hidden: e.target.checked }))
-              }
-              className="h-4 w-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
-            />
-            {t('blog.hiddenLabel')}
-          </label>
+          <Toggle
+            checked={formData.hidden}
+            onChange={(hidden) => setFormData((p) => ({ ...p, hidden }))}
+            label={t('blog.hiddenLabel')}
+          />
         </EditorGroup>
 
         <div className="flex gap-3 pt-2">
@@ -778,6 +777,8 @@ export default function BlogSection() {
                 </div>
                 <div className="flex w-full justify-end sm:w-auto">
                   <CardToolbar
+                    onToggleHidden={() => toggleHidden(post.id)}
+                    hidden={post.hidden ?? false}
                     onEdit={() => openEdit(post)}
                     onDelete={() => handleDelete(post.id)}
                   />
