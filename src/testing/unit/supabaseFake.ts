@@ -323,6 +323,55 @@ class FakeStorageBucket {
     return { data: paths.map((path) => ({ name: path })), error: null };
   }
 
+  async copy(
+    fromPath: string,
+    toPath: string
+  ): Promise<{ data: unknown; error: unknown }> {
+    const fail = this.state.failUpload;
+    if (fail && (!fail.pathIncludes || toPath.includes(fail.pathIncludes))) {
+      return { data: null, error: { message: fail.message } };
+    }
+    const from = `${this.bucket}/${fromPath}`;
+    if (this.state.objects[from] === undefined) {
+      return { data: null, error: { message: 'Source object not found' } };
+    }
+    this.state.objects[`${this.bucket}/${toPath}`] = this.state.objects[from];
+    this.state.uploads.push(toPath);
+    return { data: { path: toPath }, error: null };
+  }
+
+  async download(path: string): Promise<{ data: unknown; error: unknown }> {
+    const stored = this.state.objects[`${this.bucket}/${path}`];
+    if (stored === undefined) {
+      return { data: null, error: { message: 'Object not found' } };
+    }
+    return { data: stored, error: null };
+  }
+
+  async list(
+    prefix?: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<{ data: unknown; error: unknown }> {
+    const base = prefix ? `${this.bucket}/${prefix}/` : `${this.bucket}/`;
+    const limit = options?.limit ?? 100;
+    const offset = options?.offset ?? 0;
+    const seen = new Map<string, { name: string; id: string | null }>();
+    for (const full of Object.keys(this.state.objects)) {
+      if (!full.startsWith(base)) continue;
+      const rest = full.slice(base.length);
+      if (!rest) continue;
+      const slash = rest.indexOf('/');
+      if (slash >= 0) {
+        const folder = rest.slice(0, slash);
+        if (!seen.has(folder)) seen.set(folder, { name: folder, id: null });
+      } else {
+        seen.set(rest, { name: rest, id: `${this.bucket}/${full}` });
+      }
+    }
+    const entries = [...seen.values()].slice(offset, offset + limit);
+    return { data: entries, error: null };
+  }
+
   getPublicUrl(path: string): { data: { publicUrl: string } } {
     return {
       data: {

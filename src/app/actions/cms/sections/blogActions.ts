@@ -2,9 +2,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  finalizeStagedPostImage,
   getAdminClient,
   getCmsActionContext,
   prepareImageUpload,
+  removePrefixBestEffort,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   removeStorageObjectBestEffort,
@@ -29,6 +31,7 @@ import type {
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import { BLOG_STAGING_PREFIX, blogPostPrefix } from '@/libs/cms/storage/paths';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
 
@@ -275,7 +278,7 @@ async function batchPublishBlog(
       const upload = await uploadImmutablePreparedImage(
         admin,
         bucket,
-        'Website Assets/blog',
+        BLOG_STAGING_PREFIX,
         item.data.title_en || 'untitled',
         prepared.image
       );
@@ -301,6 +304,25 @@ async function batchPublishBlog(
           error: error.message,
         });
         continue;
+      }
+
+      // The row id exists only after the INSERT, so the staged upload is
+      // moved into its per-post folder now. The row keeps the staging URL
+      // when the move fails (still valid; the next update moves it).
+      const finalized = await finalizeStagedPostImage(
+        admin,
+        bucket,
+        upload.path,
+        blogPostPrefix(data.id as number)
+      );
+      if (finalized) {
+        const { error: finalizeError } = await admin
+          .from('blog_posts')
+          .update({ image: finalized.publicUrl })
+          .eq('id', data.id);
+        if (finalizeError) {
+          console.error('Error finalizing blog cover path:', finalizeError);
+        }
       }
 
       markCreated(evidence, tempId, data.id);
@@ -358,7 +380,7 @@ async function batchPublishBlog(
         const upload = await uploadImmutablePreparedImage(
           admin,
           bucket,
-          'Website Assets/blog',
+          blogPostPrefix(item.id),
           item.data.title_en || `blog-${item.id}`,
           prepared.image
         );
@@ -455,6 +477,14 @@ async function batchPublishBlog(
                   admin,
                   row.image as string | null,
                   bucket
+                );
+                // Per-post folder: covers body assets the image column never
+                // referenced. Legacy rows may also hold a pre-reorg URL, which
+                // the cover removal above already handled.
+                await removePrefixBestEffort(
+                  admin,
+                  bucket,
+                  blogPostPrefix(row.id as number)
                 );
               }
             }
@@ -689,6 +719,7 @@ async function deleteBlog(
       existingBlog.image as string | null,
       bucket
     );
+    await removePrefixBestEffort(admin, bucket, blogPostPrefix(id));
 
     const revalidation = await invalidatePublicContent({
       entity: 'blog',
@@ -742,7 +773,7 @@ async function uploadBlogImageForNewPost(
     const upload = await uploadImmutablePreparedImage(
       admin,
       bucket,
-      'Website Assets/blog',
+      BLOG_STAGING_PREFIX,
       titleEn || 'untitled',
       prepared.image
     );
@@ -845,7 +876,7 @@ async function uploadBlogImage(
     const upload = await uploadImmutablePreparedImage(
       admin,
       bucket,
-      'Website Assets/blog',
+      blogPostPrefix(blogId),
       existingBlog.title_en || `blog-${blogId}`,
       prepared.image
     );

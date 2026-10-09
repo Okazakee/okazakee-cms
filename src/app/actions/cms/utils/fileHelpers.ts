@@ -526,3 +526,119 @@ export async function removePublicFileIfDifferent(
   if (!filePath || filePath === nextPath) return;
   await removeStorageObjectBestEffort(supabase, bucket, filePath);
 }
+
+/**
+ * Server-side copy of a Storage object within one bucket. Returns the
+ * destination path on success, null on failure. Never throws: callers fall
+ * back to the source path (which stays valid) when the copy fails.
+ */
+export async function copyStorageObjectBestEffort(
+  supabase: SupabaseClient,
+  bucket: string,
+  fromPath: string,
+  toPath: string
+): Promise<string | null> {
+  try {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .copy(fromPath, toPath);
+    if (error) {
+      console.error(
+        `Failed to copy storage object ${fromPath} to ${toPath}:`,
+        error
+      );
+      return null;
+    }
+    return toPath;
+  } catch (error) {
+    console.error(
+      `Failed to copy storage object ${fromPath} to ${toPath}:`,
+      error
+    );
+    return null;
+  }
+}
+
+/**
+ * Moves a staged pre-insert upload into its per-post folder after the row
+ * commits: copies `<stagedPath>` to `<prefix>/<staged-basename>`, removes the
+ * staged object best-effort, and returns the final public URL + path.
+ * Returns null (row keeps pointing at the staged object, which stays valid)
+ * when the copy fails. Never throws.
+ */
+export async function finalizeStagedPostImage(
+  supabase: SupabaseClient,
+  bucket: string,
+  stagedPath: string,
+  prefix: string
+): Promise<{ publicUrl: string; path: string } | null> {
+  const tail = stagedPath.split('/').pop() ?? '';
+  if (!tail) return null;
+  const finalPath = `${prefix}/${tail}`;
+  if (finalPath === stagedPath) return null;
+  const copied = await copyStorageObjectBestEffort(
+    supabase,
+    bucket,
+    stagedPath,
+    finalPath
+  );
+  if (!copied) return null;
+  await removeStorageObjectBestEffort(supabase, bucket, stagedPath);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(finalPath);
+  return { publicUrl: data.publicUrl, path: finalPath };
+}
+
+/**
+ * Best-effort removal of every object under a prefix (e.g. `blog/<id>` when
+ * its post is deleted). Never throws: a surviving orphan is harmless, a
+ * thrown cleanup is not.
+ */
+export async function removePrefixBestEffort(
+  supabase: SupabaseClient,
+  bucket: string,
+  prefix: string
+): Promise<void> {
+  try {
+    const paths: string[] = [];
+    let offset = 0;
+    const limit = 100;
+    for (;;) {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .list(prefix, { limit, offset });
+      if (error || !data || data.length === 0) break;
+      for (const entry of data) {
+        const name = (entry as { name: string }).name;
+        if (!name) continue;
+        const id = (entry as { id: string | null }).id;
+        if (id === null || id === undefined) {
+          await removePrefixBestEffort(supabase, bucket, `${prefix}/${name}`);
+        } else {
+          paths.push(`${prefix}/${name}`);
+        }
+      }
+      if (data.length < limit) break;
+      offset += limit;
+    }
+    for (let i = 0; i < paths.length; i += 100) {
+      try {
+        const { error: removeError } = await supabase.storage
+          .from(bucket)
+          .remove(paths.slice(i, i + 100));
+        if (removeError) {
+          console.error(
+            `Failed to remove storage objects under ${prefix}:`,
+            removeError
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Failed to remove storage objects under ${prefix}:`,
+          error
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to remove storage prefix ${prefix}:`, error);
+  }
+}

@@ -1066,3 +1066,127 @@ describe('draft visibility and author picker', () => {
     ).toEqual([]);
   });
 });
+
+describe('per-post storage layout', () => {
+  it('finalizes a blog create from staging into its per-post folder', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [],
+    });
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [blogCreate('Staged', 's1')],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const staged = h.fake.state.uploads.find((p) =>
+      p.startsWith('blog/staging/')
+    );
+    expect(staged).toBeDefined();
+    const final = h.fake.state.uploads.find((p) => p.startsWith('blog/1/'));
+    expect(final).toBeDefined();
+    // Staged object is removed after the copy; the row points at the copy.
+    expect(h.fake.state.removed).toContain(staged);
+    const row = h.fake.state.tables.blog_posts[0] as Record<string, unknown>;
+    expect(row.image).toContain('/website-dev/blog/1/');
+  });
+
+  it('uploads a blog update directly into its per-post folder', async () => {
+    const oldUrl =
+      'https://fake.supabase.co/storage/v1/object/public/website-dev/blog/7/old.webp';
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [{ id: 7, image: oldUrl, title_en: 'Old' }],
+    });
+    h.fake.state.objects[`website-dev/blog/7/old.webp`] = 'old-bytes';
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [{ id: 7, data: { title_en: 'New' }, file: webpFile() }],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const upload = h.fake.state.uploads[0];
+    expect(upload.startsWith('blog/7/')).toBe(true);
+    expect(h.fake.state.removed).toContain('blog/7/old.webp');
+  });
+
+  it('removes the per-post folder when a blog post is deleted', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [
+        {
+          id: 9,
+          image:
+            'https://fake.supabase.co/storage/v1/object/public/website-dev/blog/9/cover.webp',
+          title_en: 'Gone',
+        },
+      ],
+    });
+    h.fake.state.objects[`website-dev/blog/9/cover.webp`] = 'cover';
+    h.fake.state.objects[`website-dev/blog/9/body.webp`] = 'body';
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [],
+      deletes: [9],
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      Object.keys(h.fake.state.objects).filter((k) =>
+        k.startsWith('website-dev/blog/9/')
+      )
+    ).toEqual([]);
+  });
+
+  it('finalizes a portfolio create from staging into its per-post folder', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      portfolio_posts: [],
+    });
+
+    const result = await portfolioActions({
+      type: 'BATCH_PUBLISH',
+      creates: [
+        {
+          data: {
+            title_en: 'P',
+            title_it: 'P',
+            image: '',
+            description_en: 'd',
+            description_it: 'd',
+            body_en: 'b',
+            body_it: 'b',
+            blurhashURL: '',
+            post_tags: '',
+            author_id: 'user-1',
+          },
+          file: webpFile(),
+          tempId: 'p1',
+        },
+      ],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      h.fake.state.uploads.some((p) => p.startsWith('portfolio/staging/'))
+    ).toBe(true);
+    expect(h.fake.state.uploads.some((p) => p.startsWith('portfolio/1/'))).toBe(
+      true
+    );
+    const row = h.fake.state.tables.portfolio_posts[0] as Record<
+      string,
+      unknown
+    >;
+    expect(row.image).toContain('/website-dev/portfolio/1/');
+  });
+});

@@ -10,6 +10,7 @@ import {
 } from '@/app/actions/cms/utils/auth';
 import {
   prepareImageUpload,
+  removePrefixBestEffort,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   removeStorageObjectBestEffort,
@@ -24,6 +25,7 @@ import {
   type RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import { avatarPrefixForProfile } from '@/libs/cms/storage/paths';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
@@ -674,6 +676,13 @@ async function removeUser(
       deletedProfile.avatar_url,
       bucket
     );
+    // Per-profile folder: wipes any older avatar the update path left behind.
+    // Legacy rows may hold a pre-reorg URL, handled by the removal above.
+    await removePrefixBestEffort(
+      adminClient,
+      bucket,
+      avatarPrefixForProfile(profile.id)
+    );
 
     // Auth is shared across schemas; staging must never cascade public rows.
     if (isDummyUser && supabaseSchema === 'public') {
@@ -814,7 +823,7 @@ export async function uploadUserAvatar(
     upload = await uploadImmutablePreparedImage(
       adminClient,
       bucket,
-      'Website Assets/avatars',
+      avatarPrefixForProfile(profileId),
       profileId,
       prepared.image
     );
@@ -1004,7 +1013,7 @@ export async function updateMyProfile(
       upload = await uploadImmutablePreparedImage(
         admin,
         bucket,
-        'Website Assets/avatars',
+        avatarPrefixForProfile(user.id),
         user.id,
         prepared.image
       );

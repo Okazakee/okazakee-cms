@@ -2,9 +2,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  finalizeStagedPostImage,
   getAdminClient,
   getCmsActionContext,
   prepareImageUpload,
+  removePrefixBestEffort,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   removeStorageObjectBestEffort,
@@ -29,6 +31,10 @@ import type {
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import {
+  PORTFOLIO_STAGING_PREFIX,
+  portfolioPostPrefix,
+} from '@/libs/cms/storage/paths';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { type PostButton, validatePostButtons } from '@/utils/cms/postButtons';
 import { createClient } from '@/utils/supabase/server';
@@ -290,7 +296,7 @@ async function batchPublishPortfolio(
       const upload = await uploadImmutablePreparedImage(
         admin,
         bucket,
-        'Website Assets/portfolio',
+        PORTFOLIO_STAGING_PREFIX,
         validation.data.title_en || 'untitled',
         prepared.image
       );
@@ -312,6 +318,28 @@ async function batchPublishPortfolio(
         await removeStorageObjectBestEffort(admin, bucket, upload.path);
         markFailed(evidence, { kind: 'create', tempId, error: error.message });
         continue;
+      }
+
+      // The row id exists only after the INSERT, so the staged upload is
+      // moved into its per-post folder now. The row keeps the staging URL
+      // when the move fails (still valid; the next update moves it).
+      const finalized = await finalizeStagedPostImage(
+        admin,
+        bucket,
+        upload.path,
+        portfolioPostPrefix(data.id as number)
+      );
+      if (finalized) {
+        const { error: finalizeError } = await admin
+          .from('portfolio_posts')
+          .update({ image: finalized.publicUrl })
+          .eq('id', data.id);
+        if (finalizeError) {
+          console.error(
+            'Error finalizing portfolio cover path:',
+            finalizeError
+          );
+        }
       }
 
       markCreated(evidence, tempId, data.id);
@@ -363,7 +391,7 @@ async function batchPublishPortfolio(
         uploaded = await uploadImmutablePreparedImage(
           admin,
           bucket,
-          'Website Assets/portfolio',
+          portfolioPostPrefix(item.id),
           item.data.title_en || `portfolio-${item.id}`,
           prepared.image
         );
@@ -455,6 +483,14 @@ async function batchPublishPortfolio(
                   admin,
                   row.image as string | null,
                   bucket
+                );
+                // Per-post folder: covers body assets the image column never
+                // referenced. Legacy rows may also hold a pre-reorg URL, which
+                // the cover removal above already handled.
+                await removePrefixBestEffort(
+                  admin,
+                  bucket,
+                  portfolioPostPrefix(row.id as number)
                 );
               }
             }
@@ -689,6 +725,7 @@ async function deletePortfolio(
       existingPortfolio.image as string | null,
       bucket
     );
+    await removePrefixBestEffort(admin, bucket, portfolioPostPrefix(id));
 
     const revalidation = await invalidatePublicContent({
       entity: 'portfolio',
@@ -742,7 +779,7 @@ async function uploadPortfolioImageForNewPost(
     const upload = await uploadImmutablePreparedImage(
       admin,
       bucket,
-      'Website Assets/portfolio',
+      PORTFOLIO_STAGING_PREFIX,
       titleEn || 'untitled',
       prepared.image
     );
@@ -847,7 +884,7 @@ async function uploadPortfolioImage(
     const upload = await uploadImmutablePreparedImage(
       admin,
       bucket,
-      'Website Assets/portfolio',
+      portfolioPostPrefix(portfolioId),
       existingPortfolio.title_en || `portfolio-${portfolioId}`,
       prepared.image
     );
