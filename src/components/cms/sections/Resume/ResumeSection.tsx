@@ -311,7 +311,7 @@ export function ResumeSection() {
             key={item.id}
             type="button"
             onClick={() => scrollToSection(item.id)}
-            className="min-h-9 shrink-0 rounded-full px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-raised hover:text-text-main"
+            className="min-h-9 shrink-0 rounded-full border border-border-subtle bg-surface-card px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-raised hover:text-text-main"
           >
             {item.label}
           </button>
