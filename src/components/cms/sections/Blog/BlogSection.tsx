@@ -474,7 +474,31 @@ export default function BlogSection() {
           />
         </EditorGroup>
 
+        <EditorGroup title={t('editor.groups.media')}>
+          <FileDropzone
+            label={t('blog.selectImage')}
+            previewUrl={imgUpload.previewUrl}
+            blurhash={imgUpload.blurhash}
+            isDragging={imgUpload.isDragging}
+            isProcessing={imgUpload.isProcessing}
+            hasPendingFile={Boolean(imgUpload.file)}
+            error={imgUpload.error}
+            currentUrl={isEditing ? formData.image : undefined}
+            dropzoneProps={{
+              onDragOver: imgUpload.dropzoneProps.onDragOver,
+              onDragLeave: imgUpload.dropzoneProps.onDragLeave,
+              onDrop: imgUpload.dropzoneProps.onDrop,
+            }}
+            fileInputProps={imgUpload.fileInputProps}
+            fileInputRef={imgUpload.fileInputRef}
+            onClear={imgUpload.clearFile}
+            onBrowse={imgUpload.openFileDialog}
+            overlayActions
+          />
+        </EditorGroup>
+
         <EditorGroup title={t('editor.groups.content')}>
+
           <PostBodyField
             id="blog-body"
             label={t('editor.fields.content')}
@@ -484,7 +508,6 @@ export default function BlogSection() {
                 formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
               )
             }
-            rows={8}
             placeholder={
               formLocale === 'en'
                 ? t('blog.bodyEnPlaceholder')
@@ -529,28 +552,6 @@ export default function BlogSection() {
               </p>
             </div>
           </details>
-        </EditorGroup>
-
-        <EditorGroup title={t('editor.groups.media')}>
-          <FileDropzone
-            label={t('blog.selectImage')}
-            previewUrl={imgUpload.previewUrl}
-            blurhash={imgUpload.blurhash}
-            isDragging={imgUpload.isDragging}
-            isProcessing={imgUpload.isProcessing}
-            hasPendingFile={Boolean(imgUpload.file)}
-            error={imgUpload.error}
-            currentUrl={isEditing ? formData.image : undefined}
-            dropzoneProps={{
-              onDragOver: imgUpload.dropzoneProps.onDragOver,
-              onDragLeave: imgUpload.dropzoneProps.onDragLeave,
-              onDrop: imgUpload.dropzoneProps.onDrop,
-            }}
-            fileInputProps={imgUpload.fileInputProps}
-            fileInputRef={imgUpload.fileInputRef}
-            onClear={imgUpload.clearFile}
-            onBrowse={imgUpload.openFileDialog}
-          />
         </EditorGroup>
 
         <EditorGroup title={t('editor.groups.publication')}>

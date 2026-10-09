@@ -514,6 +514,27 @@ export default function PortfolioSection() {
             activeLocale={formLocale}
           />
         </EditorGroup>
+        <EditorGroup title={t('editor.groups.media')}>
+          <FileDropzone
+            previewUrl={imgUpload.previewUrl}
+            blurhash={imgUpload.blurhash}
+            isDragging={imgUpload.isDragging}
+            isProcessing={imgUpload.isProcessing}
+            hasPendingFile={Boolean(imgUpload.file)}
+            error={imgUpload.error}
+            currentUrl={isEditing ? formData.image : undefined}
+            dropzoneProps={{
+              onDragOver: imgUpload.dropzoneProps.onDragOver,
+              onDragLeave: imgUpload.dropzoneProps.onDragLeave,
+              onDrop: imgUpload.dropzoneProps.onDrop,
+            }}
+            fileInputProps={imgUpload.fileInputProps}
+            fileInputRef={imgUpload.fileInputRef}
+            onClear={imgUpload.clearFile}
+            onBrowse={imgUpload.openFileDialog}
+            overlayActions
+          />
+        </EditorGroup>
         <EditorGroup title={t('editor.groups.content')}>
           <PostBodyField
             id="portfolio-body"
@@ -524,7 +545,6 @@ export default function PortfolioSection() {
                 formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
               )
             }
-            rows={8}
             stageImages={bodyImages.stageFiles}
             stagingErrors={bodyImages.stagingErrors}
             onPreview={() => setPreviewOpen(true)}
@@ -566,26 +586,6 @@ export default function PortfolioSection() {
           </details>
         </EditorGroup>
 
-        <EditorGroup title={t('editor.groups.media')}>
-          <FileDropzone
-            previewUrl={imgUpload.previewUrl}
-            blurhash={imgUpload.blurhash}
-            isDragging={imgUpload.isDragging}
-            isProcessing={imgUpload.isProcessing}
-            hasPendingFile={Boolean(imgUpload.file)}
-            error={imgUpload.error}
-            currentUrl={isEditing ? formData.image : undefined}
-            dropzoneProps={{
-              onDragOver: imgUpload.dropzoneProps.onDragOver,
-              onDragLeave: imgUpload.dropzoneProps.onDragLeave,
-              onDrop: imgUpload.dropzoneProps.onDrop,
-            }}
-            fileInputProps={imgUpload.fileInputProps}
-            fileInputRef={imgUpload.fileInputRef}
-            onClear={imgUpload.clearFile}
-            onBrowse={imgUpload.openFileDialog}
-          />
-        </EditorGroup>
         <EditorGroup
           title={t('editor.groups.links')}
           description={t('portfolio.buttonsHint')}

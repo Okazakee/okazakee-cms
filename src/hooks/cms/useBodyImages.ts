@@ -18,6 +18,7 @@ export type StagedBodyImage = {
   localId: string;
   blobUrl: string;
   markdown: string;
+  alt: string;
 };
 
 const BODY_IMAGE_OPTIONS = {
@@ -99,6 +100,7 @@ export function useBodyImages() {
           localId,
           blobUrl,
           markdown: pendingImageMarkdown(alt, localId, blobUrl),
+          alt,
         });
         setPending((prev) => [...prev, entry]);
       }

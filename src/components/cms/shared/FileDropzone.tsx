@@ -43,6 +43,12 @@ interface FileDropzoneProps {
   showUrl?: string | null;
   compact?: boolean;
   actionsLayout?: 'below' | 'side';
+  /**
+   * Full-width image with hover-reveal action overlay (desktop) instead of
+   * the thumbnail + buttons-below layout. Touch screens always show the
+   * actions since hover does not exist there. PDFs ignore this.
+   */
+  overlayActions?: boolean;
 }
 
 export function FileDropzone({
@@ -65,6 +71,7 @@ export function FileDropzone({
   showUrl,
   compact = false,
   actionsLayout = 'below',
+  overlayActions = false,
 }: FileDropzoneProps) {
   const t = useTranslations('cms');
   const displayUrl = previewUrl ?? currentUrl ?? null;
@@ -156,7 +163,7 @@ export function FileDropzone({
           isDragging
             ? 'border-accent-violet bg-accent-violet/10 '
             : 'border-border-subtle hover:border-accent-violet'
-        } ${compact ? 'p-4' : 'p-6 md:p-8'}`}
+        } ${overlayActions && displayUrl && !isPdf ? 'border-0 p-0' : compact ? 'p-4' : 'p-6 md:p-8'}`}
         {...dropzoneProps}
       >
         {isProcessing && (
@@ -180,7 +187,29 @@ export function FileDropzone({
         )}
 
         {displayUrl ? (
-          sideActions ? (
+          overlayActions && !isPdf ? (
+            <div className="group relative overflow-hidden rounded-lg border border-border-subtle">
+              <Image
+                src={displayUrl}
+                alt="Preview"
+                width={1200}
+                height={630}
+                className="h-auto max-h-[480px] w-full object-cover"
+                placeholder={displayBlur ? 'blur' : 'empty'}
+                blurDataURL={displayBlur ?? undefined}
+                unoptimized={displayUrl.startsWith('blob:')}
+              />
+              <p
+                className="absolute left-3 top-3 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white"
+                role="status"
+              >
+                {t(hasPendingFile ? 'editor.pendingFile' : 'editor.currentFile')}
+              </p>
+              <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center justify-center gap-2 bg-gradient-to-t from-black/70 to-transparent p-3 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100">
+                {actionButtons}
+              </div>
+            </div>
+          ) : sideActions ? (
             <div className="space-y-3 md:grid md:grid-cols-[200px_1fr] md:items-center md:gap-6 md:space-y-0 md:text-left">
               <div className="space-y-3">
                 <p

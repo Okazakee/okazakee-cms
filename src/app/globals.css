@@ -335,6 +335,191 @@
   pointer-events: none;
 }
 
+/* CMS visual body editor: storage markdown renders as formatted blocks.
+   Inline runs mirror the public site (bold dark, violet em, mono code,
+   underlined links); structural blocks get quiet chrome. */
+.cms-visual-body h2 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--c-text-white);
+  margin: 0.75rem 0 0.5rem;
+}
+.cms-visual-body h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--c-text-white);
+  margin: 0.75rem 0 0.5rem;
+}
+.cms-visual-body h1,
+.cms-visual-body h4,
+.cms-visual-body h5,
+.cms-visual-body h6 {
+  font-weight: 600;
+  color: var(--c-text-white);
+  margin: 0.75rem 0 0.5rem;
+}
+.cms-visual-body p {
+  margin: 0.5rem 0;
+}
+.cms-visual-body p:first-child,
+.cms-visual-body h2:first-child,
+.cms-visual-body h3:first-child {
+  margin-top: 0;
+}
+.cms-visual-body ul,
+.cms-visual-body ol {
+  margin: 0.5rem 0 0.5rem 1.25rem;
+}
+.cms-visual-body ul {
+  list-style: disc;
+}
+.cms-visual-body ol {
+  list-style: decimal;
+}
+.cms-visual-body li {
+  margin-bottom: 0.25rem;
+}
+.cms-visual-body li::marker {
+  color: var(--c-accent-violet);
+}
+.cms-visual-body strong {
+  font-weight: 600;
+  color: var(--c-text-white);
+}
+.cms-visual-body em {
+  color: var(--c-accent-violet-light);
+}
+.cms-visual-body code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--c-accent-cyan);
+  background: var(--c-surface-card-hover);
+  border: 1px solid var(--c-border-subtle);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.cms-visual-body a {
+  color: var(--c-accent-violet-light);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cms-visual-body blockquote {
+  border-left: 2px solid var(--c-accent-violet);
+  padding-left: 1rem;
+  font-style: italic;
+  margin: 0.5rem 0;
+  color: var(--c-text-main);
+}
+.cms-visual-body hr {
+  border-color: var(--c-border-subtle);
+  margin: 1rem 0;
+}
+.cms-visual-body table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0.75rem 0;
+  font-size: 0.85rem;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cms-visual-body th,
+.cms-visual-body td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border-subtle);
+  min-width: 3rem;
+}
+.cms-visual-body th {
+  background: var(--c-surface-card);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: left;
+}
+.cms-visual-body pre {
+  position: relative;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: 12px;
+  background: var(--c-code-bg);
+  padding: 16px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  color: var(--c-code-fg);
+  white-space: pre-wrap;
+}
+.cms-visual-body pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.cms-visual-body pre [data-badge] {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--c-text-dim);
+  pointer-events: none;
+}
+.cms-visual-body figure[data-block='image'] {
+  position: relative;
+  margin: 1rem auto;
+  max-width: 560px;
+  border: 1px solid var(--c-border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--c-surface-card);
+}
+.cms-visual-body figure[data-block='image'] img {
+  display: block;
+  width: 100%;
+}
+.cms-visual-body figure[data-block='image'] figcaption {
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: var(--c-text-main);
+  border-top: 1px solid var(--c-border-subtle);
+}
+.cms-visual-body figure[data-block='image'] figcaption:empty::before {
+  content: attr(data-caption-hint);
+  color: var(--c-text-dim);
+}
+.cms-visual-body figure[data-block='image'] [data-remove-image] {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  min-height: 32px;
+  min-width: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--c-border-subtle);
+  background: var(--c-surface-base);
+  color: var(--c-text-main);
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.cms-visual-body figure[data-block='image']:hover [data-remove-image],
+.cms-visual-body figure[data-block='image']:focus-within [data-remove-image] {
+  opacity: 1;
+}
+.cms-visual-body:empty::before {
+  content: attr(data-placeholder);
+  color: var(--c-text-dim);
+  pointer-events: none;
+}
+
 /* CMS post body preview: structural mirror of the public site's `.post`
    rules on a light canvas (production theme owns the final palette).
    Bold renders dark, violet `*em*` violet — like the published page. */
@@ -397,6 +582,7 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: preview scope never shares a subtree with the public `.post` rules */
 .cms-post code {
   font-family: ui-monospace, monospace;
   font-size: 0.82rem;
@@ -450,6 +636,7 @@
   border-radius: 12px;
   border: 1px solid #d9dce6;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: preview scope never shares a subtree with the public `.post` rules */
 .cms-post-figure figcaption {
   display: block;
   margin-top: 0.6rem;
@@ -479,6 +666,7 @@
   padding: 16px;
   margin: 0;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: preview scope never shares a subtree with the public `.post` rules */
 .cms-post-codeblock code {
   background: none;
   border: 0;
