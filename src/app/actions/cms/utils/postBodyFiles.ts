@@ -199,12 +199,8 @@ export async function cleanupOrphanedBodyImages(
         if (!body) continue;
         for (const ref of parseBodyImages(body)) {
           if (ref.pending) continue;
-          const path = getStoragePathFromPublicUrl(
-            ref.url,
-            bucket,
-            origin
-          );
-          if (path && path.startsWith(`${prefix}/`)) paths.add(path);
+          const path = getStoragePathFromPublicUrl(ref.url, bucket, origin);
+          if (path?.startsWith(`${prefix}/`)) paths.add(path);
         }
       }
       return paths;

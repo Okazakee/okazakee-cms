@@ -596,6 +596,14 @@
     "fileUrl": "URL del file",
     "formattingHelp": "Guida alla formattazione",
     "highlightButton": "Evidenzia",
+    "markdownToolbar": "Formattazione corpo",
+    "markdownBold": "Grassetto",
+    "markdownViolet": "Viola",
+    "markdownImage": "Immagine",
+    "markdownCode": "Codice",
+    "markdownPreview": "Anteprima",
+    "syntaxBold": "Grassetto (testo bianco)",
+    "syntaxViolet": "Evidenziazione viola",
     "requestDetails": "Dettagli della richiesta",
     "otherLocaleError": "Controlla gli errori nell'altra lingua."
   }

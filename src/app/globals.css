@@ -335,6 +335,160 @@
   pointer-events: none;
 }
 
+/* CMS post body preview: structural mirror of the public site's `.post`
+   rules on a light canvas (production theme owns the final palette).
+   Bold renders dark, violet `*em*` violet — like the published page. */
+.cms-post {
+  background: #ffffff;
+  color: #1f2937;
+  border-radius: 12px;
+  padding: 20px 22px;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.cms-post h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #080808;
+  margin: 2rem 0 1rem;
+}
+.cms-post h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #080808;
+  margin: 1.5rem 0 0.75rem;
+}
+.cms-post h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #080808;
+  margin: 1.25rem 0 0.5rem;
+}
+.cms-post p {
+  margin-bottom: 1.1rem;
+}
+.cms-post ul,
+.cms-post ol {
+  margin: 0 0 1.25rem 1.25rem;
+}
+.cms-post ul {
+  list-style: disc;
+}
+.cms-post ol {
+  list-style: decimal;
+}
+.cms-post li {
+  margin-bottom: 0.4rem;
+}
+.cms-post li::marker {
+  color: var(--c-accent-violet);
+}
+.cms-post strong {
+  color: #080808;
+  font-weight: 600;
+}
+.cms-post em {
+  color: var(--c-accent-violet);
+  font-style: italic;
+}
+.cms-post a {
+  color: var(--c-accent-violet);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cms-post code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: #0369a1;
+  background: #eef1f6;
+  border: 1px solid #d9dce6;
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.cms-post hr {
+  border-color: #d9dce6;
+  margin: 2rem 0;
+}
+.cms-post blockquote {
+  border-left: 2px solid var(--c-accent-violet);
+  padding-left: 1rem;
+  font-style: italic;
+  margin: 1.25rem 0;
+}
+.cms-post table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 1.5rem 0;
+  font-size: 0.88rem;
+  border: 1px solid #d9dce6;
+  border-radius: 12px;
+  overflow: hidden;
+  display: block;
+  overflow-x: auto;
+}
+.cms-post th,
+.cms-post td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #d9dce6;
+  text-align: left;
+}
+.cms-post th {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4b5564;
+}
+.cms-post-figure {
+  margin: 2rem auto;
+}
+/* biome-ignore lint/style/noDescendingSpecificity: never matches the same subtree as the earlier `.post` rules (CMS preview vs public styles) */
+.cms-post-figure img {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #d9dce6;
+}
+.cms-post-figure figcaption {
+  display: block;
+  margin-top: 0.6rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: #4b5564;
+}
+.cms-post-codeblock {
+  margin: 1.5rem 0;
+  overflow: hidden;
+  border: 1px solid #d9dce6;
+  border-radius: 12px;
+  background: #f4f6fa;
+}
+.cms-post-codehead {
+  border-bottom: 1px solid #d9dce6;
+  background: #eef1f6;
+  padding: 8px 14px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4b5564;
+}
+.cms-post-codeblock pre {
+  overflow-x: auto;
+  padding: 16px;
+  margin: 0;
+}
+.cms-post-codeblock code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #1b2030;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  white-space: pre;
+}
+
 /* Tag row: one line, seamless loop when the chips overflow. The track carries   the list twice while looping and slides half its width, so the junction is
    invisible. The second copy only exists while looping. */
 @keyframes tags-scroll {

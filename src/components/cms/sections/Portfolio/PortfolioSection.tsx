@@ -23,6 +23,8 @@ import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { PostBodyField } from '@/components/cms/shared/PostBodyField';
+import { PostPreviewModal } from '@/components/cms/shared/PostPreviewModal';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
@@ -32,6 +34,7 @@ import {
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
+import { useBodyImages } from '@/hooks/cms/useBodyImages';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
@@ -64,6 +67,12 @@ interface PortfolioFormData {
   author_id: string;
   hidden: boolean;
 }
+
+/**
+ * Framework cap is 10 MB per server-action request: covers plus body
+ * snapshots must fit together or nothing is sent.
+ */
+const MAX_PUBLISH_BYTES = 9 * 1024 * 1024;
 
 const emptyForm: PortfolioFormData = {
   title_en: '',
@@ -107,6 +116,8 @@ export default function PortfolioSection() {
     imageProcessing: { maxWidth: 1920, maxHeight: 1080, quality: 0.85 },
     generateBlurhash: true,
   });
+  const bodyImages = useBodyImages();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const isDirty =
     modifiedIds.size > 0 || newPosts.length > 0 || deletedIds.size > 0;
@@ -284,6 +295,10 @@ export default function PortfolioSection() {
           tempId: String(item.post.id),
           file,
           blurhashURL: post.blurhashURL,
+          bodyFiles: bodyImages.referencedPayload([
+            post.body_en,
+            post.body_it,
+          ]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
@@ -313,6 +328,10 @@ export default function PortfolioSection() {
           file: post.image_file || null,
           currentImageUrl: post.image,
           blurhashURL: post.blurhashURL,
+          bodyFiles: bodyImages.referencedPayload([
+            post.body_en,
+            post.body_it,
+          ]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
@@ -330,6 +349,23 @@ export default function PortfolioSection() {
       ];
     });
     const deleteIds = Array.from(deletedIds);
+
+    // Framework cap is 10 MB per server-action request: covers plus body
+    // snapshots must fit together, or nothing is sent.
+    const payloadBytes = [...creates, ...updates].reduce(
+      (total, item) =>
+        total +
+        (item.file?.size ?? 0) +
+        item.bodyFiles.reduce((sum, f) => sum + f.file.size, 0),
+      0
+    );
+    if (payloadBytes > MAX_PUBLISH_BYTES) {
+      setError(
+        'Total upload size is over ~9 MB (covers plus body images); publish fewer posts at a time'
+      );
+      setIsUpdating(false);
+      return;
+    }
 
     try {
       let retainedCreates = createTempIds;
@@ -382,6 +418,15 @@ export default function PortfolioSection() {
         );
         setModifiedIds(new Set(retainedUpdates));
         setDeletedIds(new Set(retainedDeletes));
+        // Drop staged body images no retained draft references anymore;
+        // a full success clears everything.
+        const retainedPosts = posts.filter(
+          (p) =>
+            retainedCreateSet.has(String(p.id)) || retainedModifiedSet.has(p.id)
+        );
+        bodyImages.reconcile(
+          retainedPosts.flatMap((p) => [p.body_en, p.body_it])
+        );
       }
 
       const revalidationMessage = revalidationWarning(batch);
@@ -406,7 +451,7 @@ export default function PortfolioSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [posts, newPosts, deletedIds, modifiedIds, fetchData, user]);
+  }, [posts, newPosts, deletedIds, modifiedIds, fetchData, user, bodyImages]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
@@ -415,6 +460,8 @@ export default function PortfolioSection() {
     setNewPosts([]);
     setDeletedIds(new Set());
     setError(null);
+    // Drafts are gone: every staged blob is residue.
+    bodyImages.revokeAll();
   };
 
   useSectionCallbacks('portfolio', handlePublish, handleRevert);
@@ -468,17 +515,30 @@ export default function PortfolioSection() {
           />
         </EditorGroup>
         <EditorGroup title={t('editor.groups.content')}>
-          <TranslationField
+          <PostBodyField
+            id="portfolio-body"
             label={t('editor.fields.content')}
-            enValue={formData.body_en}
-            itValue={formData.body_it}
-            onChangeEn={(v) => setFormData((p) => ({ ...p, body_en: v }))}
-            onChangeIt={(v) => setFormData((p) => ({ ...p, body_it: v }))}
-            type="textarea"
+            value={formLocale === 'en' ? formData.body_en : formData.body_it}
+            onChange={(v) =>
+              setFormData((p) =>
+                formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
+              )
+            }
             rows={8}
-            activeLocale={formLocale}
-            markerHighlight
+            stageImages={bodyImages.stageFiles}
+            stagingErrors={bodyImages.stagingErrors}
+            onPreview={() => setPreviewOpen(true)}
           />
+          {previewOpen && (
+            <PostPreviewModal
+              title={t('editor.fields.content')}
+              markdown={
+                formLocale === 'en' ? formData.body_en : formData.body_it
+              }
+              closeLabel={t('common.close')}
+              onClose={() => setPreviewOpen(false)}
+            />
+          )}
           <details className="rounded-lg border border-border-subtle bg-surface-base p-3 text-xs text-text-muted">
             <summary className="cursor-pointer font-medium text-text-main">
               {t('editor.formattingHelp')}
@@ -488,7 +548,13 @@ export default function PortfolioSection() {
                 <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
                   ****text****
                 </code>{' '}
-                {t('portfolio.syntaxHighlight')}
+                {t('editor.syntaxBold')}
+              </p>
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  *text*
+                </code>{' '}
+                {t('editor.syntaxViolet')}
               </p>
               <p>
                 <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
