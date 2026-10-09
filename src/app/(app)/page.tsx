@@ -8,6 +8,8 @@ import BlogSection from '@/components/cms/sections/Blog/BlogSection';
 import CareerSection from '@/components/cms/sections/Career/CareerSection';
 import ContactsSection from '@/components/cms/sections/Contacts/ContactsSection';
 import { RequestCopySection } from '@/components/cms/sections/Copy/CopySections';
+import { demoHeroSection, demoUser } from '@/libs/demo/fixtures';
+import { isDemoSession } from '@/libs/demo/session';
 import HeroSection from '@/components/cms/sections/Hero/HeroSection';
 import { LayoutSection } from '@/components/cms/sections/Layout/LayoutSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
@@ -96,6 +98,19 @@ export default function CMSPage() {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
+    // Offline showcase: fixture identity, no server round-trip. Real boot
+    // below is untouched.
+    if (isDemoSession()) {
+      const store = useCmsStore.getState();
+      store.setDemoMode(true);
+      store.setUser(demoUser);
+      store.setHeroSection(demoHeroSection);
+      store.setSidePanelSections(adminSections);
+      store.setActiveSection(adminSections[0] ?? 'hero');
+      setVisited([adminSections[0] ?? 'hero']);
+      setBooting(false);
+      return;
+    }
     void getCmsBootData()
       .then((boot) => {
         if (boot.status === 'error') throw new Error(boot.error);

@@ -6,6 +6,9 @@ import {
 import { updateSession } from '@/utils/supabase/middleware';
 
 const REDIRECT_HEADER = 'x-redirected';
+// Demo showcase cookie (mirrors src/libs/demo/session.ts — kept as a
+// literal so the edge bundle never imports client modules).
+const DEMO_COOKIE_NAME = 'cms_demo';
 
 // Precompiled patterns for performance
 const STATIC_ASSET_PATTERN = /\.[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)*$/;
@@ -86,6 +89,17 @@ export default async function proxy(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = validatePathname(stripLegacyCmsSegment(safePathname));
       return NextResponse.redirect(url, 307);
+    }
+
+    // Demo showcase mode: the `cms_demo=1` cookie (set by the login page,
+    // mirrored in src/libs/demo/session.ts) lets the dashboard shell load
+    // without a Supabase session. This opens NO data: every server action
+    // still enforces auth, and demo sections never call them.
+    if (
+      safePathname === '/' &&
+      request.cookies.get(DEMO_COOKIE_NAME)?.value === '1'
+    ) {
+      return NextResponse.next();
     }
 
     // Session guard for the whole CMS (login + OAuth routes are public).

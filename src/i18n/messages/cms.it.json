@@ -80,6 +80,7 @@
     "home": "Home",
     "logout": "Esci",
     "loggingOut": "Disconnessione...",
+    "demoExit": "Esci dalla demo",
     "myAccount": "Il mio Account"
   },
   "common": {
@@ -502,6 +503,7 @@
     "forgetRemembered": "Dimentica l'account ricordato",
     "rememberedHint": "Rimuove solo il promemoria su questo dispositivo. Non effettua il logout né cambia l'account GitHub.",
     "continueWithGitHub": "Continua con GitHub",
+    "demo": "Prova la demo",
     "usePasskey": "Accedi con passkey",
     "errorPasskeyNotFound": "Nessuna passkey trovata su questo dispositivo. Accedi con GitHub, poi aggiungine una dalla scheda Account.",
     "errorPasskeyCancelled": "Accesso con passkey annullato. Riprova quando vuoi.",

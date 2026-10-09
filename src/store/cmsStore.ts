@@ -44,8 +44,11 @@ interface CmsState {
   publishQueue: Record<string, PublishState>;
   sectionCallbacks: Record<string, SectionCallbacks>;
   isPublishingAll: boolean;
+  /** Offline showcase mode: fixture data, no server actions. */
+  demoMode: boolean;
 
   setUser: (user: CMSUser | null) => void;
+  setDemoMode: (demoMode: boolean) => void;
   setSidePanelSections: (sections: string[]) => void;
   setActiveSection: (section: string) => void;
   setHeroSection: (heroSection: HeroSettings | null) => void;
@@ -75,8 +78,10 @@ export const useCmsStore = create<CmsState>((set, get) => ({
   publishQueue: {},
   sectionCallbacks: {},
   isPublishingAll: false,
+  demoMode: false,
 
   setUser: (user) => set({ user }),
+  setDemoMode: (demoMode) => set({ demoMode }),
   setSidePanelSections: (sections) => set({ sidePanelSections: sections }),
   setActiveSection: (section) => set({ activeSection: section }),
   setHeroSection: (heroSection) => set({ heroSection }),

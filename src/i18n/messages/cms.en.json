@@ -80,6 +80,7 @@
     "home": "Home",
     "logout": "Logout",
     "loggingOut": "Logging out...",
+    "demoExit": "Exit demo",
     "myAccount": "My Account"
   },
   "common": {
@@ -502,6 +503,7 @@
     "forgetRemembered": "Forget remembered account",
     "rememberedHint": "This only removes the reminder on this device. It does not sign you out or switch GitHub accounts.",
     "continueWithGitHub": "Continue with GitHub",
+    "demo": "Try the demo",
     "usePasskey": "Sign in with passkey",
     "errorPasskeyNotFound": "No passkey found on this device. Sign in with GitHub, then add one from the Account tab.",
     "errorPasskeyCancelled": "Passkey sign-in was cancelled. Try again when ready.",

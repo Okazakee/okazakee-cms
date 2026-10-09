@@ -37,6 +37,7 @@ import {
 } from '@/components/layout/sidebarRowStyle';
 import ThemeToggle from '@/components/layout/ThemeToggle';
 import { useDialogFocus } from '@/hooks/cms/useDialogFocus';
+import { exitDemoSession } from '@/libs/demo/session';
 import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
 
@@ -60,6 +61,7 @@ const publicSiteUrl =
 // backdrop-filter blurs the backdrop rather than the panel.
 function UserBanner() {
   const user = useCmsStore((s) => s.user);
+  const demoMode = useCmsStore((s) => s.demoMode);
   return (
     // `p-3` matches SIDEBAR_ROW, so the avatar lands on the same left edge as
     // the icons in the rows above it.
@@ -79,8 +81,15 @@ function UserBanner() {
         </span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-text-main">
-          {user?.displayName}
+        <span className="flex items-center gap-2">
+          <span className="block truncate font-medium text-text-main">
+            {user?.displayName}
+          </span>
+          {demoMode && (
+            <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold tracking-widest text-amber-600 dark:text-amber-300">
+              DEMO
+            </span>
+          )}
         </span>
         {user?.role && (
           <span className="mt-1 block">
@@ -171,6 +180,8 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     publishAll,
     sectionCallbacks,
     error,
+    demoMode,
+    setDemoMode,
   } = useCmsStore();
 
   const isAdmin = user?.role === 'admin';
@@ -203,6 +214,13 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     setIsLoggingOut(true);
     setUser(null);
     setHeroSection(null);
+    if (demoMode) {
+      // No session exists in showcase mode: just drop the flag and leave.
+      exitDemoSession();
+      setDemoMode(false);
+      window.location.href = '/login';
+      return;
+    }
     const supabase = createClient();
     await supabase.auth.signOut();
     window.location.href = '/login';
@@ -516,7 +534,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             className={`${SIDEBAR_MOBILE_ROW} ${SIDEBAR_MOBILE_ROW_DESTRUCTIVE} disabled:opacity-50`}
           >
             <span className={SIDEBAR_MOBILE_LABEL}>
-              {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
+              {isLoggingOut
+                ? t('sidebar.loggingOut')
+                : demoMode
+                  ? t('sidebar.demoExit')
+                  : t('sidebar.logout')}
             </span>
           </button>
           <div className="mt-6">
@@ -646,7 +668,11 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
             >
               <LogOut className={SIDEBAR_ROW_ICON} />
               <span className={SIDEBAR_ROW_LABEL}>
-                {isLoggingOut ? t('sidebar.loggingOut') : t('sidebar.logout')}
+                {isLoggingOut
+                  ? t('sidebar.loggingOut')
+                  : demoMode
+                    ? t('sidebar.demoExit')
+                    : t('sidebar.logout')}
               </span>
             </button>
             <div className="mt-3">

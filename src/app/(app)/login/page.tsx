@@ -6,9 +6,12 @@ import { CircleUserRound, Fingerprint, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Suspense, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { editorSecondaryButtonClass } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { GithubIcon } from '@/components/common/BrandIcons';
+import { enterDemoSession } from '@/libs/demo/session';
+import { useCmsStore } from '@/store/cmsStore';
 import { createClient } from '@/utils/supabase/client';
 
 // Remembered identity from the last successful boot: lets a returning user
@@ -78,6 +81,7 @@ function readLastUser(): LastCmsUser | null {
 // Component that reads search params - must be wrapped in Suspense
 function LoginFormContent() {
   const t = useTranslations('cms');
+  const router = useRouter();
   // OAuth failures (?error) and sign-in action failures share one banner.
   // Keys only — raw provider/callback text is never rendered.
   const [queryErrorKey, setQueryErrorKey] = useState<LoginErrorKey | null>(
@@ -145,6 +149,13 @@ function LoginFormContent() {
       });
   };
 
+  // Offline showcase: fixture data only, no session, no server calls.
+  // Offered only with no remembered user (see the branch below).
+  const handleDemoLogin = () => {
+    enterDemoSession();
+    useCmsStore.getState().setDemoMode(true);
+    router.replace('/');
+  };
   // GitHub OAuth navigation starts here; the callback route owns every
   // post-auth step (allowlist enforcement, profile sync, canonical
   // redirect). Passkey sign-in (below) is the alternative path.
@@ -319,6 +330,13 @@ function LoginFormContent() {
               </div>
             )}
             {authButtons}
+            <button
+              type="button"
+              onClick={handleDemoLogin}
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center text-xs text-text-muted underline underline-offset-2 transition-colors hover:text-text-main focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-violet"
+            >
+              {t('login.demo')}
+            </button>
           </div>
         </div>
       )}
