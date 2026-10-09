@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import type {
@@ -12,7 +13,8 @@ import type {
   ResumeSkillGroup,
 } from '@/libs/resume/types';
 import { isLinkableContactIcon } from '@/libs/resume/types';
-import { Field, ListEditor, TextArea, TextInput } from './ResumeFields';
+import { Field, ListEditor, TextInput } from './ResumeFields';
+import { RichTextEditor } from './RichTextEditor';
 
 /** Friendlier row names than the raw icon keys where it matters. */
 const CONTACT_ROW_LABELS: Record<ResumeContactIcon, string> = {
@@ -43,6 +45,85 @@ const EMPTY_EDUCATION: ResumeEducation = {
   year: '',
 };
 const EMPTY_LANGUAGE: ResumeLanguage = { name: '', level: '' };
+
+/** Per-bullet rich editors: formatting comes from the toolbar, never typed. */
+function BulletEditor({
+  items,
+  onChange,
+}: {
+  items: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const t = useTranslations('cms.resume.builder');
+  const move = (index: number, delta: -1 | 1) => {
+    const target = index + delta;
+    if (target < 0 || target >= items.length) return;
+    const next = [...items];
+    const current = next[index];
+    const other = next[target];
+    if (current === undefined || other === undefined) return;
+    next[index] = other;
+    next[target] = current;
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2">
+      {items.map((bullet, index) => (
+        <div key={index} className="flex items-start gap-1">
+          <div className="min-w-0 flex-1">
+            <RichTextEditor
+              value={bullet}
+              minHeight={40}
+              onChange={(text) =>
+                onChange(items.map((b, i) => (i === index ? text : b)))
+              }
+            />
+          </div>
+          <div className="flex shrink-0 flex-col">
+            <button
+              type="button"
+              aria-label={t('moveUp')}
+              title={t('moveUp')}
+              disabled={index === 0}
+              onClick={() => move(index, -1)}
+              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised disabled:opacity-30"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('moveDown')}
+              title={t('moveDown')}
+              disabled={index === items.length - 1}
+              onClick={() => move(index, 1)}
+              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised disabled:opacity-30"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('removeEntry')}
+              title={t('removeEntry')}
+              onClick={() => onChange(items.filter((_, i) => i !== index))}
+              className="rounded-md p-1.5 text-red-400 transition-colors hover:bg-red-500/10"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...items, ''])}
+        className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-dashed border-border-subtle px-4 py-2 text-sm text-text-muted transition-colors hover:border-accent-violet hover:text-text-main"
+      >
+        <Plus className="h-4 w-4" />
+        {t('addBullet')}
+      </button>
+    </div>
+  );
+}
 
 export function ResumeLocaleForm({
   data,
@@ -119,10 +200,10 @@ export function ResumeLocaleForm({
             onChange={(summaryTitle) => patch({ summaryTitle })}
           />
         </Field>
-        <Field label={t('summaryLabel')} hint={t('richHint')}>
-          <TextArea
-            rows={5}
+        <Field label={t('summaryLabel')}>
+          <RichTextEditor
             value={data.summaryHtml}
+            minHeight={120}
             onChange={(summaryHtml) => patch({ summaryHtml })}
           />
         </Field>
@@ -202,13 +283,10 @@ export function ResumeLocaleForm({
                   />
                 </Field>
               </div>
-              <Field label={t('bulletsLabel')} hint={t('richHintLines')}>
-                <TextArea
-                  rows={4}
-                  value={item.bullets.join('\n')}
-                  onChange={(v) =>
-                    onPatch({ bullets: v.split('\n').map((b) => b.trim()) })
-                  }
+              <Field label={t('bulletsLabel')}>
+                <BulletEditor
+                  items={item.bullets}
+                  onChange={(bullets) => onPatch({ bullets })}
                 />
               </Field>
             </div>
@@ -267,13 +345,10 @@ export function ResumeLocaleForm({
                   </div>
                 )}
               />
-              <Field label={t('bulletsLabel')} hint={t('richHintLines')}>
-                <TextArea
-                  rows={3}
-                  value={item.bullets.join('\n')}
-                  onChange={(v) =>
-                    onPatch({ bullets: v.split('\n').map((b) => b.trim()) })
-                  }
+              <Field label={t('bulletsLabel')}>
+                <BulletEditor
+                  items={item.bullets}
+                  onChange={(bullets) => onPatch({ bullets })}
                 />
               </Field>
             </div>

@@ -311,8 +311,16 @@
   background-size: 100% 100%;
 }
 
-/* Tag row: one line, seamless loop when the chips overflow. The track carries
-   the list twice while looping and slides half its width, so the junction is
+/* Resume rich-text editor: no-wrap spans keep their resume meaning and get
+   a subtle marker so they are visible while editing. Everything else
+   renders with native browser styling. */
+.cms-rich-editor .nowrap {
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--c-accent-violet) 14%, transparent);
+  border-bottom: 1px dashed var(--c-accent-violet);
+}
+
+/* Tag row: one line, seamless loop when the chips overflow. The track carries   the list twice while looping and slides half its width, so the junction is
    invisible. The second copy only exists while looping. */
 @keyframes tags-scroll {
   to {
