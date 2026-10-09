@@ -143,7 +143,7 @@ export function ResumeLocaleForm({
 
   return (
     <div className="space-y-6">
-      <EditorGroup title={t('headerGroup')}>
+      <EditorGroup id="resume-header" title={t('headerGroup')}>
         <Field label={t('nameLabel')}>
           <TextInput value={data.name} onChange={(v) => patch({ name: v })} />
         </Field>
@@ -193,7 +193,7 @@ export function ResumeLocaleForm({
         </div>
       </EditorGroup>
 
-      <EditorGroup title={t('summaryGroup')}>
+      <EditorGroup id="resume-summary" title={t('summaryGroup')}>
         <Field label={t('sectionTitleLabel')}>
           <TextInput
             value={data.summaryTitle}
@@ -209,7 +209,7 @@ export function ResumeLocaleForm({
         </Field>
       </EditorGroup>
 
-      <EditorGroup title={t('skillsGroup')}>
+      <EditorGroup id="resume-skills" title={t('skillsGroup')}>
         <Field label={t('sectionTitleLabel')}>
           <TextInput
             value={data.skillsTitle}
@@ -248,7 +248,7 @@ export function ResumeLocaleForm({
         />
       </EditorGroup>
 
-      <EditorGroup title={t('experienceGroup')}>
+      <EditorGroup id="resume-experience" title={t('experienceGroup')}>
         <Field label={t('sectionTitleLabel')}>
           <TextInput
             value={data.experienceTitle}
@@ -294,7 +294,7 @@ export function ResumeLocaleForm({
         />
       </EditorGroup>
 
-      <EditorGroup title={t('projectsGroup')}>
+      <EditorGroup id="resume-projects" title={t('projectsGroup')}>
         <Field label={t('sectionTitleLabel')}>
           <TextInput
             value={data.projectsTitle}
@@ -356,7 +356,7 @@ export function ResumeLocaleForm({
         />
       </EditorGroup>
 
-      <EditorGroup title={t('educationGroup')}>
+      <EditorGroup id="resume-education" title={t('educationGroup')}>
           <Field label={t('sectionTitleLabel')}>
             <TextInput
               value={data.educationTitle}
@@ -394,7 +394,7 @@ export function ResumeLocaleForm({
           />
         </EditorGroup>
 
-        <EditorGroup title={t('languagesGroup')}>
+        <EditorGroup id="resume-languages" title={t('languagesGroup')}>
           <Field label={t('sectionTitleLabel')}>
             <TextInput
               value={data.languagesTitle}

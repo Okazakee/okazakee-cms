@@ -433,7 +433,8 @@
       "cssReset": "Reset to default",
       "previewTitle": "A4 preview",
       "previewOverflow": "Content overflows the two A4 pages and will be clipped. Shorten copy or move entries before publishing.",
-      "downloadHtml": "Download HTML"
+      "downloadHtml": "Download HTML",
+      "sectionNav": "Resume sections"
     }
   },
   "privacy": {

@@ -198,6 +198,33 @@ export function ResumeSection() {
   const publishedUrl =
     heroSection?.[tab === 'en' ? 'resume_en' : 'resume_it'] ?? null;
 
+  const navItems = [
+    { id: 'resume-header', label: tb('headerGroup') },
+    { id: 'resume-summary', label: tb('summaryGroup') },
+    { id: 'resume-skills', label: tb('skillsGroup') },
+    { id: 'resume-experience', label: tb('experienceGroup') },
+    { id: 'resume-projects', label: tb('projectsGroup') },
+    { id: 'resume-education', label: tb('educationGroup') },
+    { id: 'resume-languages', label: tb('languagesGroup') },
+    { id: 'resume-styling', label: tb('tabCss') },
+  ];
+
+  const scrollToSection = (id: string) => {
+    const target = document.getElementById(id);
+    if (!target) return;
+    const main = document.getElementById('cms-workspace');
+    if (main) {
+      const top =
+        target.getBoundingClientRect().top -
+        main.getBoundingClientRect().top +
+        main.scrollTop -
+        12;
+      main.scrollTo({ top, behavior: 'smooth' });
+    } else {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
     <fieldset disabled={busy} className="min-w-0 space-y-6">
       <SectionHeader
@@ -275,12 +302,31 @@ export function ResumeSection() {
         </button>
       </div>
 
+      <nav
+        aria-label={tb('sectionNav')}
+        className="sticky top-0 z-10 flex gap-1 overflow-x-auto rounded-xl bg-surface-base/95 py-1 backdrop-blur"
+      >
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => scrollToSection(item.id)}
+            className="min-h-9 shrink-0 rounded-full px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-raised hover:text-text-main"
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
       <ResumeLocaleForm
         data={draft[tab]}
         onChange={(next) => setDraft({ ...draft, [tab]: next })}
       />
 
-      <div className="rounded-2xl border border-border-subtle bg-surface-card">
+      <div
+        id="resume-styling"
+        className="rounded-2xl border border-border-subtle bg-surface-card"
+      >
         <button
           type="button"
           aria-expanded={cssOpen}

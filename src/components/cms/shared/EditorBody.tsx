@@ -19,6 +19,8 @@ interface EditorGroupProps {
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Anchor id for in-page section navigation. */
+  id?: string;
 }
 
 export function EditorGroup({
@@ -28,12 +30,14 @@ export function EditorGroup({
   actions,
   children,
   className = '',
+  id,
 }: EditorGroupProps) {
   const headingId = useId();
 
   return (
     <section
       aria-labelledby={headingId}
+      id={id}
       className={`rounded-2xl border border-border-subtle bg-surface-card p-4 sm:p-6 ${className}`}
     >
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">

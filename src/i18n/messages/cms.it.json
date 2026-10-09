@@ -433,7 +433,8 @@
       "cssReset": "Ripristina predefinito",
       "previewTitle": "Anteprima A4",
       "previewOverflow": "Il contenuto supera le due pagine A4 e verrà tagliato. Accorcia il testo o sposta voci prima di pubblicare.",
-      "downloadHtml": "Scarica HTML"
+      "downloadHtml": "Scarica HTML",
+      "sectionNav": "Sezioni resume"
     }
   },
   "privacy": {
