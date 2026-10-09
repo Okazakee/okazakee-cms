@@ -103,7 +103,7 @@ function splitTableRow(line: string): string[] {
   return trimmed.split(/(?<!\\)\|/).map((cell) => cell.trim());
 }
 
-function renderFigure(alt: string, src: string): string {
+function renderFigure(alt: string, src: string, captionHint: string): string {
   const dash = alt.indexOf('-');
   const caption = dash < 0 ? alt : alt.slice(0, dash);
   const hash = dash < 0 ? '' : alt.slice(dash + 1);
@@ -112,14 +112,18 @@ function renderFigure(alt: string, src: string): string {
   return (
     `<figure data-block="image" contenteditable="false"${pending ? ` data-pending="1" data-local-id="${escapeHtml(hash.slice('pending:'.length))}" data-hash=""` : ` data-hash="${escapeHtml(hash)}"`}>` +
     `<img src="${escapeHtml(src)}" alt="${escapeHtml(caption)}">` +
-    `<figcaption>${escapeHtml(caption)}</figcaption>` +
+    `<figcaption contenteditable="true" data-caption-hint="${escapeHtml(captionHint)}">${escapeHtml(caption)}</figcaption>` +
     `<button type="button" data-remove-image="1" aria-label="Remove image">×</button>` +
     `</figure>`
   );
 }
 
 /** Renders a full storage document as editor block HTML. */
-export function markdownToEditorHtml(markdown: string): string {
+export function markdownToEditorHtml(
+  markdown: string,
+  options?: { captionHint?: string }
+): string {
+  const captionHint = options?.captionHint ?? '';
   const lines = markdown.split('\n');
   const blocks: string[] = [];
   let paragraph: string[] = [];
@@ -225,7 +229,9 @@ export function markdownToEditorHtml(markdown: string): string {
       const refs = parseBodyImages(imageLine[1] ?? '');
       const ref = refs[0];
       blocks.push(
-        ref ? renderFigure(ref.alt, ref.url) : `<p data-block="paragraph">${escapeHtml(line)}</p>`
+        ref
+          ? renderFigure(ref.alt, ref.url, captionHint)
+          : `<p data-block="paragraph">${escapeHtml(line)}</p>`
       );
       i += 1;
       continue;

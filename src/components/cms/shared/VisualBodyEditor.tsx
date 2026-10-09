@@ -125,10 +125,12 @@ export function VisualBodyEditor({
   useEffect(() => {
     const editor = editorRef.current;
     if (editor && value !== lastEmitted.current) {
-      editor.innerHTML = markdownToEditorHtml(value);
+      editor.innerHTML = markdownToEditorHtml(value, {
+        captionHint: t('markdownCaptionHint'),
+      });
       lastEmitted.current = value;
     }
-  }, [value]);
+  }, [value, t]);
 
   const emit = useCallback(() => {
     const editor = editorRef.current;
@@ -457,7 +459,7 @@ export function VisualBodyEditor({
       const figureHtml =
         `<figure data-block="image" contenteditable="false" data-pending="1" data-local-id="${staged.localId}" data-hash="">` +
         `<img src="${staged.blobUrl}" alt="">` +
-        `<figcaption>${staged.alt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</figcaption>` +
+        `<figcaption contenteditable="true" data-caption-hint="${t('markdownCaptionHint')}">${staged.alt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</figcaption>` +
         `<button type="button" data-remove-image="1" aria-label="Remove image">×</button>` +
         `</figure>`;
       if (!editor || !selection || selection.rangeCount === 0) {
@@ -477,7 +479,7 @@ export function VisualBodyEditor({
       selection.collapseToEnd();
       emit();
     },
-    [emit]
+    [emit, t]
   );
 
   const handleFiles = useCallback(
@@ -583,10 +585,12 @@ export function VisualBodyEditor({
     // Snap the visible DOM back to the stored markdown.
     const editor = editorRef.current;
     if (editor && lastEmitted.current !== null) {
-      editor.innerHTML = markdownToEditorHtml(lastEmitted.current);
+      editor.innerHTML = markdownToEditorHtml(lastEmitted.current, {
+        captionHint: t('markdownCaptionHint'),
+      });
     }
     setFormat(IDLE_FORMAT);
-  }, []);
+  }, [t]);
 
   const handleClick = useCallback(
     (event: MouseEvent) => {

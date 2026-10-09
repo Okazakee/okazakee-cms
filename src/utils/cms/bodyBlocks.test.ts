@@ -47,13 +47,29 @@ describe('markdownToEditorHtml', () => {
 
   it('renders image lines as figures with hidden hash', () => {
     const html = markdownToEditorHtml(
-      '![My photo-abc123](https://h.test/f.webp)'
+      '![My photo-abc123](https://h.test/f.webp)',
+      { captionHint: 'Add a caption…' }
     );
     expect(html).toContain('<figure data-block="image"');
-    expect(html).toContain('<figcaption>My photo</figcaption>');
+    expect(html).toContain('<figcaption');
+    expect(html).toContain('contenteditable="true"');
+    expect(html).toContain('data-caption-hint="Add a caption…"');
     // The hash rides along invisibly for serialization, never as text.
     expect(html).toContain('data-hash="abc123"');
     expect(html).not.toContain('>abc123<');
+  });
+
+  it('keeps edited captions through serialization', () => {
+    const host = document.createElement('div');
+    host.innerHTML = markdownToEditorHtml(
+      '![Old cap-abc123](https://h.test/f.webp)'
+    );
+    const caption = host.querySelector('figcaption');
+    expect(caption?.getAttribute('contenteditable')).toBe('true');
+    if (caption) caption.textContent = 'New caption';
+    expect(editorDomToMarkdown(host)).toBe(
+      '![New caption-abc123](https://h.test/f.webp)'
+    );
   });
 });
 

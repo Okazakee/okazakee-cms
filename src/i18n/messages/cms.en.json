@@ -611,6 +611,7 @@
     "markdownTable": "Table",
     "markdownLink": "Link",
     "markdownLinkUrl": "https://…",
+    "markdownCaptionHint": "Add a caption…",
     "syntaxBold": "Bold (white text)",
     "syntaxViolet": "Violet highlight",
     "requestDetails": "Request details",
