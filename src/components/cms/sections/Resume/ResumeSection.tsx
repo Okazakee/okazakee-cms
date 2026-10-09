@@ -241,65 +241,71 @@ export function ResumeSection() {
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div
-        role="tablist"
-        aria-label={t('title')}
-        className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap"
-      >
-        {TABS.map((entry) => (
+      <div className="space-y-2">
+        <div
+          role="tablist"
+          aria-label={t('title')}
+          className="grid grid-cols-2 gap-2 sm:flex sm:justify-center"
+        >
+          {TABS.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              role="tab"
+              aria-selected={tab === entry}
+              onClick={() => setTab(entry)}
+              className={`inline-flex min-h-11 items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors sm:px-4 ${
+                tab === entry
+                  ? 'bg-accent-violet-deep text-white'
+                  : 'border border-border-subtle bg-surface-card text-text-muted hover:text-text-main'
+              }`}
+            >
+              {entry === 'en' ? tb('tabEn') : tb('tabIt')}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-2 sm:flex sm:justify-center">
           <button
-            key={entry}
             type="button"
-            role="tab"
-            aria-selected={tab === entry}
-            onClick={() => setTab(entry)}
-            className={`inline-flex min-h-11 items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors sm:px-4 ${
-              tab === entry
-                ? 'bg-accent-violet-deep text-white'
-                : 'border border-border-subtle bg-surface-card text-text-muted hover:text-text-main'
-            }`}
+            onClick={() => setPreviewOpen(true)}
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main sm:w-auto sm:px-4"
           >
-            {entry === 'en' ? tb('tabEn') : tb('tabIt')}
+            <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">{tb('previewTitle')}</span>
           </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setPreviewOpen(true)}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main sm:px-4"
-        >
-          <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="truncate">{tb('previewTitle')}</span>
-        </button>
-        <span aria-hidden="true" className="hidden w-px self-stretch bg-border-subtle sm:block" />
-        <button
-          type="button"
-          disabled={!publishedUrl}
-          onClick={() => publishedUrl && window.open(publishedUrl, '_blank', 'noopener')}
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
-        >
-          {t('openLabel')}
-        </button>
-        <button
-          type="button"
-          disabled={!publishedUrl}
-          onClick={() =>
-            publishedUrl &&
-            navigator.clipboard
-              .writeText(publishedUrl)
-              .catch(() => setError(t('errorCopy')))
-          }
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
-        >
-          {t('copyUrl')}
-        </button>
-        <button
-          type="button"
-          disabled={!publishedUrl}
-          onClick={() => publishedUrl && void downloadPdf(publishedUrl, tab)}
-          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
-        >
-          {t('download')}
-        </button>
+          <div className="grid grid-cols-3 gap-2 sm:flex">
+            <span aria-hidden="true" className="hidden w-px self-stretch bg-border-subtle sm:block" />
+            <button
+              type="button"
+              disabled={!publishedUrl}
+              onClick={() => publishedUrl && window.open(publishedUrl, '_blank', 'noopener')}
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
+            >
+              {t('openLabel')}
+            </button>
+            <button
+              type="button"
+              disabled={!publishedUrl}
+              onClick={() =>
+                publishedUrl &&
+                navigator.clipboard
+                  .writeText(publishedUrl)
+                  .catch(() => setError(t('errorCopy')))
+              }
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
+            >
+              {t('copyUrl')}
+            </button>
+            <button
+              type="button"
+              disabled={!publishedUrl}
+              onClick={() => publishedUrl && void downloadPdf(publishedUrl, tab)}
+              className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
+            >
+              {t('download')}
+            </button>
+          </div>
+        </div>
       </div>
 
       <nav
