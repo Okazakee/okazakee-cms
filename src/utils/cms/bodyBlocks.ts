@@ -35,11 +35,18 @@ export function renderInlineRuns(text: string): string {
   const n = text.length;
   while (i < n) {
     const rest = text.slice(i);
-    // Image (must precede link: `![` contains `[`).
+    // Image (must precede link: `![` contains `[`). Session-local sources
+    // can never resolve: mark them so the editor shows a removable stub.
     if (rest.startsWith('![')) {
       const image = /!\[([^\]]*)\]\(([^)\s]+)\)/.exec(rest);
       if (image) {
-        out += `<img data-inline="1" src="${escapeHtml(image[2] ?? '')}" alt="${escapeHtml(image[1] ?? '')}">`;
+        const src = image[2] ?? '';
+        const broken = /^(blob|data):/i.test(src);
+        out +=
+          `<img data-inline="1"${broken ? ' data-broken="1"' : ''} src="${escapeHtml(src)}" alt="${escapeHtml(image[1] ?? '')}"` +
+          (broken
+            ? ' title="Dead image: remove it and re-add with the Image button">'
+            : '>');
         i += image[0].length;
         continue;
       }
@@ -111,7 +118,7 @@ function renderFigure(alt: string, src: string, captionHint: string): string {
     src.startsWith('blob:') && hash.startsWith('pending:');
   return (
     `<figure data-block="image" contenteditable="false"${pending ? ` data-pending="1" data-local-id="${escapeHtml(hash.slice('pending:'.length))}" data-hash=""` : ` data-hash="${escapeHtml(hash)}"`}>` +
-    `<img src="${escapeHtml(src)}" alt="${escapeHtml(caption)}">` +
+    `<img src="${escapeHtml(src)}" alt="${escapeHtml(caption)}" draggable="false">` +
     `<figcaption contenteditable="true" data-caption-hint="${escapeHtml(captionHint)}">${escapeHtml(caption)}</figcaption>` +
     `<button type="button" data-remove-image="1" aria-label="Remove image">×</button>` +
     `</figure>`

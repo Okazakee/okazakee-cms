@@ -141,6 +141,7 @@ export function VisualBodyEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const lastEmitted = useRef<string | null>(null);
+  const internalDrag = useRef(false);
   const [format, setFormat] = useState<FormatState>(IDLE_FORMAT);
   const [linkBar, setLinkBar] = useState<{ href: string; fresh: boolean } | null>(
     null
@@ -485,7 +486,7 @@ export function VisualBodyEditor({
       const selection = window.getSelection();
       const figureHtml =
         `<figure data-block="image" contenteditable="false" data-pending="1" data-local-id="${staged.localId}" data-hash="">` +
-        `<img src="${staged.blobUrl}" alt="">` +
+        `<img src="${staged.blobUrl}" alt="" draggable="false">` +
         `<figcaption contenteditable="true" data-caption-hint="${t('markdownCaptionHint')}">${staged.alt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</figcaption>` +
         `<button type="button" data-remove-image="1" aria-label="Remove image">×</button>` +
         `</figure>`;
@@ -588,23 +589,62 @@ export function VisualBodyEditor({
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
       const editor = editorRef.current;
-      if (!editor || !stageImages) return;
+      if (!editor) return;
       const files = imageFilesFrom(event.dataTransfer?.files);
-      if (files.length === 0) return;
-      // Take over from the browser: a native drop would embed a raw
-      // `<img src="blob:…">` with no upload behind it.
+      if (files.length > 0 && stageImages) {
+        // Dropped files stage like picked ones, inserted at the drop point.
+        event.preventDefault();
+        event.stopPropagation();
+        const caret =
+          typeof document.caretRangeFromPoint === 'function'
+            ? document.caretRangeFromPoint(event.clientX, event.clientY)
+            : null;
+        void stageImages(files).then((staged) => {
+          insertStagedAtRange(staged, caret);
+        });
+        return;
+      }
+      if (internalDrag.current) {
+        // Text moved around inside the editor: native reorder is correct.
+        return;
+      }
+      // Anything else dropped in from outside (images, HTML fragments)
+      // would embed raw elements with no upload or caption behind them,
+      // so take over and insert plain text instead.
       event.preventDefault();
-      event.stopPropagation();
+      const text = event.dataTransfer?.getData('text/plain') ?? '';
+      if (!text) return;
+      const selection = window.getSelection();
       const caret =
         typeof document.caretRangeFromPoint === 'function'
           ? document.caretRangeFromPoint(event.clientX, event.clientY)
           : null;
-      void stageImages(files).then((staged) => {
-        insertStagedAtRange(staged, caret);
-      });
+      const target =
+        caret && editor.contains(caret.commonAncestorContainer)
+          ? caret
+          : selection && selection.rangeCount > 0
+            ? selection.getRangeAt(0)
+            : null;
+      if (!target || !editor.contains(target.commonAncestorContainer)) return;
+      target.deleteContents();
+      const node = document.createTextNode(text);
+      target.insertNode(node);
+      target.setStartAfter(node);
+      target.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(target);
+      emit();
     },
-    [stageImages, insertStagedAtRange]
+    [stageImages, insertStagedAtRange, emit]
   );
+
+  const handleDragStart = useCallback(() => {
+    internalDrag.current = true;
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    internalDrag.current = false;
+  }, []);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -684,6 +724,17 @@ export function VisualBodyEditor({
       if (remover && editor) {
         event.preventDefault();
         remover.closest('figure')?.remove();
+        emit();
+        refreshFormat();
+        return;
+      }
+      // Dead session-local images (raw blob: embeds from before the drop
+      // interception): one click removes the stub so it can be re-added
+      // properly. Publish validation blocks them either way.
+      const broken = target?.closest?.('img[data-broken]') ?? null;
+      if (broken && editor?.contains(broken)) {
+        event.preventDefault();
+        broken.remove();
         emit();
         refreshFormat();
       }
@@ -826,6 +877,8 @@ export function VisualBodyEditor({
         onPaste={handlePaste}
         onDrop={handleDrop}
         onDragOver={(event) => event.preventDefault()}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
         onKeyDown={handleKeyDown}
         onSelect={refreshFormat}
         onKeyUp={refreshFormat}

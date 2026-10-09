@@ -25,6 +25,12 @@ describe('renderInlineRuns', () => {
     );
   });
 
+  it('flags session-local images as removable stubs', () => {
+    const html = renderInlineRuns('![](blob:dead-beef)');
+    expect(html).toContain('data-broken="1"');
+    expect(html).toContain('src="blob:dead-beef"');
+  });
+
   it('leaves unmatched markers and escapes literal', () => {
     expect(renderInlineRuns('a **** b <c>')).toBe('a **** b &lt;c&gt;');
   });

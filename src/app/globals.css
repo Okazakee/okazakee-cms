@@ -493,6 +493,16 @@
   content: attr(data-caption-hint);
   color: var(--c-text-dim);
 }
+/* Dead session-local embeds (raw blob:/data: imgs predating interception):
+   red dashed stub, one click removes it. */
+.cms-visual-body img[data-broken] {
+  display: block;
+  max-width: 100%;
+  border: 2px dashed #ef4444;
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+}
 .cms-visual-body figure[data-block='image'] [data-remove-image] {
   position: absolute;
   top: 8px;
