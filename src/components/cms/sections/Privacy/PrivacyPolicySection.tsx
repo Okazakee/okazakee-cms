@@ -13,6 +13,7 @@ import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoPrivacy } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 
 export default function PrivacyPolicySection() {
@@ -35,6 +36,16 @@ export default function PrivacyPolicySection() {
   const fetchData = useCallback(async () => {
     const current = beginLoad();
     setIsLoading(true);
+    // Offline showcase: fixture copy, no server round-trip.
+    if (useCmsStore.getState().demoMode) {
+      if (!current()) return;
+      setEnMarkdown(demoPrivacy.en);
+      setItMarkdown(demoPrivacy.it);
+      setOriginal({ en: demoPrivacy.en, it: demoPrivacy.it });
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     try {
       const r = await i18nActions({ type: 'GET' });
       if (!current()) return;
@@ -65,6 +76,12 @@ export default function PrivacyPolicySection() {
     useCmsStore.getState().setError(null);
     const errors: string[] = [];
     const submitted = { en: enMarkdown, it: itMarkdown };
+    // Offline showcase: commit locally.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      setOriginal(submitted);
+      return;
+    }
     try {
       for (const locale of ['en', 'it'] as const) {
         if (submitted[locale] === original[locale]) continue;

@@ -14,6 +14,7 @@ import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoSiteSettings } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { SiteSettings } from '@/types/fetchedData.types';
 
@@ -63,6 +64,14 @@ export function LayoutSection() {
   const fetchSettings = useCallback(async () => {
     const current = beginLoad();
     setIsLoading(true);
+    // Offline showcase: fixture settings, no server round-trip.
+    if (useCmsStore.getState().demoMode) {
+      if (!current()) return;
+      commitSettings({ ...demoSiteSettings });
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     try {
       const result = await siteSettingsActions({ type: 'GET' });
       if (!current()) return;
@@ -87,6 +96,34 @@ export function LayoutSection() {
     setBusy(true);
     setError(null);
     useCmsStore.getState().setError(null);
+    // Offline showcase: commit uploads as object URLs plus VAT locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const next: SiteSettings = {
+          header_logo_dark: removals.dark
+            ? null
+            : darkUpload.previewUrl ?? settings.header_logo_dark,
+          header_logo_light: removals.light
+            ? null
+            : lightUpload.previewUrl ?? settings.header_logo_light,
+          footer_vat_number: vatNumber === '' ? null : vatNumber,
+        };
+        commitSettings(next);
+        darkUpload.clearFile();
+        lightUpload.clearFile();
+        setRemovals({ dark: false, light: false });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t('common.saveFailed');
+        setError(message);
+        useCmsStore.getState().setError(message);
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const vatDirty = vatNumber !== (settings.footer_vat_number ?? '');
       const acceptResult = (result: SiteSettingsResult) => {

@@ -120,6 +120,47 @@ export default function HeroSection() {
     setError(null);
     useCmsStore.getState().setError(null);
 
+    // Offline showcase: materialize the portrait as an object URL and
+    // commit the shape locally; translations save through the demo hook.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        if (imgUpload.file) {
+          const url = URL.createObjectURL(imgUpload.file);
+          setHeroSection(
+            mergeHeroSettings(useCmsStore.getState().heroSection, {
+              mainImage: url,
+              blurhashURL:
+                imgUpload.blurhash ??
+                useCmsStore.getState().heroSection?.blurhashURL ??
+                null,
+            })
+          );
+          imgUpload.clearFile();
+          imgUpload.setFileFromUrl(url);
+        }
+        if (displayDirty) {
+          setHeroSection(
+            mergeHeroSettings(useCmsStore.getState().heroSection, { shape })
+          );
+        }
+        const transErrors = await saveTranslations();
+        if (transErrors.length > 0) {
+          const message = transErrors.join('\n');
+          setError(message);
+          useCmsStore.getState().setError(message);
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t('hero.errorUpdateHero');
+        setError(message);
+        useCmsStore.getState().setError(message);
+      } finally {
+        setIsUpdating(false);
+      }
+      return;
+    }
+
     try {
       let revalidationMessage: string | null = null;
       if (imgUpload.file) {

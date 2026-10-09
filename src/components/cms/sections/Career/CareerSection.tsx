@@ -34,6 +34,7 @@ import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoCareer } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { CareerEntry, RemoteType } from '@/types/fetchedData.types';
 
@@ -117,6 +118,14 @@ export default function CareerSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture entries, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setEntries(JSON.parse(JSON.stringify(demoCareer)));
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await careerActions({ type: 'GET' });
         if (!current()) return;
@@ -251,6 +260,28 @@ export default function CareerSection() {
     const errors: string[] = [];
     setIsUpdating(true);
     setError(null);
+
+    // Offline showcase: remap temp ids, materialize staged logos as object
+    // URLs, drop deletes, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let nextFakeId =
+        Math.max(0, ...entries.map((e) => e.id)) + 1;
+      const next = entries
+        .filter((e) => !deletedIds.has(e.id))
+        .map((e) => ({
+          ...e,
+          id: e.id < 0 ? nextFakeId++ : e.id,
+          logo: e.logo_file ? URL.createObjectURL(e.logo_file) : e.logo,
+          logo_file: null,
+        }));
+      setEntries(next);
+      setModifiedIds(new Set());
+      setNewEntries([]);
+      setDeletedIds(new Set());
+      setIsUpdating(false);
+      return;
+    }
 
     // Pending creates may have been edited after creation: always derive the
     // payload from the latest `entries` entry, never the stale newEntries copy.
@@ -391,7 +422,12 @@ export default function CareerSection() {
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setEntries(JSON.parse(JSON.stringify(demoCareer)));
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewEntries([]);
     setDeletedIds(new Set());

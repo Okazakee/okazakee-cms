@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { requestEntriesActions } from '@/app/actions/cms/sections/requestEntriesActions';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
+import { demoRequests } from '@/libs/demo/fixtures';
+import { useCmsStore } from '@/store/cmsStore';
 import type {
   RequestEntry,
   RequestEntryFilter,
@@ -42,6 +44,17 @@ export function useRequestEntries(): RequestEntriesState {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const beginLoad = useLatestRequest();
+  const demoMode = useCmsStore((state) => state.demoMode);
+
+  const applyDemoFilter = useCallback((nextFilter: RequestEntryFilter) => {
+    setEntries(
+      demoRequests.filter((entry) =>
+        nextFilter === 'active' ? !entry.archived : entry.archived
+      )
+    );
+    setIsLoading(false);
+    setError(null);
+  }, []);
 
   const load = useCallback(
     async (nextFilter: RequestEntryFilter) => {
@@ -80,44 +93,86 @@ export function useRequestEntries(): RequestEntriesState {
   );
 
   useEffect(() => {
+    if (demoMode) {
+      applyDemoFilter(filter);
+      return;
+    }
     void load(filter);
-  }, [filter, load]);
+  }, [filter, load, demoMode, applyDemoFilter]);
 
   const setFilter = useCallback((next: RequestEntryFilter) => {
     setFilterState(next);
   }, []);
 
-  const setArchived = useCallback(async (id: string, archived: boolean) => {
-    const rowId = Number.parseInt(id, 10);
-    setError(null);
-    const result = await requestEntriesActions({
-      type: 'ARCHIVE',
-      id: rowId,
-      archived,
-    });
-    if (!result.success) {
-      const message = result.error ?? 'Failed to update the request';
-      setError(message);
-      return message;
-    }
-    // The row left this filter's slice: drop it locally rather than
-    // refetching a list that no longer contains it.
-    setEntries((previous) => previous.filter((entry) => entry.id !== id));
-    return null;
-  }, []);
+  const setArchived = useCallback(
+    async (id: string, archived: boolean) => {
+      if (useCmsStore.getState().demoMode) {
+        // Offline showcase: flip locally; the row leaves this filter slice.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        setError(null);
+        setEntries((previous) =>
+          previous
+            .map((entry) =>
+              entry.id === id
+                ? {
+                    ...entry,
+                    archived,
+                    archivedAt: archived
+                      ? new Date().toISOString()
+                      : null,
+                  }
+                : entry
+            )
+            .filter((entry) => entry.id !== id)
+        );
+        return null;
+      }
+      const rowId = Number.parseInt(id, 10);
+      setError(null);
+      const result = await requestEntriesActions({
+        type: 'ARCHIVE',
+        id: rowId,
+        archived,
+      });
+      if (!result.success) {
+        const message = result.error ?? 'Failed to update the request';
+        setError(message);
+        return message;
+      }
+      // The row left this filter's slice: drop it locally rather than
+      // refetching a list that no longer contains it.
+      setEntries((previous) => previous.filter((entry) => entry.id !== id));
+      return null;
+    },
+    []
+  );
 
-  const remove = useCallback(async (id: string) => {
-    const rowId = Number.parseInt(id, 10);
-    setError(null);
-    const result = await requestEntriesActions({ type: 'DELETE', id: rowId });
-    if (!result.success) {
-      const message = result.error ?? 'Failed to delete the request';
-      setError(message);
-      return message;
-    }
-    setEntries((previous) => previous.filter((entry) => entry.id !== id));
-    return null;
-  }, []);
+  const remove = useCallback(
+    async (id: string) => {
+      if (useCmsStore.getState().demoMode) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        setError(null);
+        setEntries((previous) =>
+          previous.filter((entry) => entry.id !== id)
+        );
+        return null;
+      }
+      const rowId = Number.parseInt(id, 10);
+      setError(null);
+      const result = await requestEntriesActions({
+        type: 'DELETE',
+        id: rowId,
+      });
+      if (!result.success) {
+        const message = result.error ?? 'Failed to delete the request';
+        setError(message);
+        return message;
+      }
+      setEntries((previous) => previous.filter((entry) => entry.id !== id));
+      return null;
+    },
+    []
+  );
 
   const clearError = useCallback(() => setError(null), []);
 

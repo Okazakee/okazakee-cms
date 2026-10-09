@@ -24,6 +24,7 @@ import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoSkills } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Skill, SkillsCategory } from '@/types/fetchedData.types';
 import { isValidHttpUrl } from '@/utils/cms/validation';
@@ -87,6 +88,19 @@ export default function SkillsSection() {
   const fetchData = useCallback(async () => {
     const current = beginLoad();
     setIsLoading(true);
+    // Offline showcase: fixture categories, no server round-trip.
+    if (useCmsStore.getState().demoMode) {
+      if (!current()) return;
+      const loaded = demoSkills.map((cat) => ({
+        ...cat,
+        skills: cat.skills.map((s) => ({ ...s, isEditing: false })),
+      }));
+      setCategories(loaded);
+      setOriginalCategories(JSON.parse(JSON.stringify(loaded)));
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     try {
       const result = await skillsActions({ type: 'GET' });
       if (!current()) return;
@@ -115,6 +129,50 @@ export default function SkillsSection() {
     const errors: string[] = [];
     setIsUpdating(true);
     setError(null);
+
+    // Offline showcase: remap temp ids to fake committed ids, drop
+    // deletes, persist the visible order, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let nextFakeId =
+        Math.max(
+          0,
+          ...categories.map((c) => c.id),
+          ...categories.flatMap((c) => c.skills.map((s) => s.id))
+        ) + 1;
+      const catIdMap = new Map<number, number>();
+      for (const c of newCategories) catIdMap.set(c.tempId, nextFakeId++);
+      const next = categories
+        .filter((c) => !deletedCategories.has(c.id))
+        .map((c, catIndex) => {
+          const id = c.id < 0 ? (catIdMap.get(c.id) ?? c.id) : c.id;
+          return {
+            ...c,
+            id,
+            position: catIndex,
+            skills: c.skills
+              .filter((s) => !deletedSkills.has(s.id))
+              .map((s, skillIndex) => ({
+                ...s,
+                id: s.id < 0 ? nextFakeId++ : s.id,
+                category_id: id,
+                position: skillIndex,
+              })),
+          };
+        });
+      setCategories(next);
+      setOriginalCategories(JSON.parse(JSON.stringify(next)));
+      setModifiedSkills(new Set());
+      setNewSkills([]);
+      setDeletedSkills(new Set());
+      setModifiedCategories(new Set());
+      setNewCategories([]);
+      setDeletedCategories(new Set());
+      setCategoryOrderChanged(false);
+      setSkillOrderChanged(false);
+      setIsUpdating(false);
+      return;
+    }
 
     const categoryTempIds = newCategories.map((c) => String(c.tempId));
     const categoryTempSet = new Set(categoryTempIds);
@@ -405,7 +463,12 @@ export default function SkillsSection() {
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the last committed snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setCategories(JSON.parse(JSON.stringify(originalCategories)));
+    } else {
+      fetchData();
+    }
     setModifiedSkills(new Set());
     setNewSkills([]);
     setDeletedSkills(new Set());

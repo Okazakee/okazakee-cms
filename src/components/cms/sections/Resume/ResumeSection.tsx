@@ -11,6 +11,7 @@ import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { DEFAULT_RESUME_CSS } from '@/libs/resume/defaultCss';
+import { demoResumeSources } from '@/libs/demo/fixtures';
 import { renderResumeHtml } from '@/libs/resume/template';
 import type { ResumeData, ResumeLocale } from '@/libs/resume/types';
 import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
@@ -45,6 +46,19 @@ export function ResumeSection() {
   useEffect(() => {
     if (mounted.current) return;
     mounted.current = true;
+    // Offline showcase: fixture sources, no Storage round-trip. Publish
+    // below fakes the export (no Chromium in demo).
+    if (useCmsStore.getState().demoMode) {
+      const initial = {
+        en: JSON.parse(JSON.stringify(demoResumeSources.en)),
+        it: JSON.parse(JSON.stringify(demoResumeSources.it)),
+        css: demoResumeSources.css,
+      };
+      setDraft(initial);
+      setSaved(initial);
+      setLoading(false);
+      return;
+    }
     void resumeActions({ type: 'GET' })
       .then((result) => {
         if (!result.success) throw new Error(result.error);
@@ -85,6 +99,22 @@ export function ResumeSection() {
     setBusy(true);
     setError(null);
     useCmsStore.getState().setError(null);
+    // Offline showcase: the export step is faked, drafts simply commit.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        setSaved(draft);
+      } catch (cause) {
+        const message =
+          cause instanceof Error ? cause.message : t('errorSave');
+        setError(message);
+        useCmsStore.getState().setError(message);
+        throw cause;
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const result = await resumeActions({ type: 'PUBLISH', data: draft });
       if (!result.success) throw new Error(result.error || t('errorSave'));

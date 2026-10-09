@@ -9,17 +9,9 @@
  */
 import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
 import type { HeroSettings } from '@/types/fetchedData.types';
+import type { RequestEntry } from '@/types/requestEntry.types';
 import type { ResumeData } from '@/libs/resume/types';
 import type { CMSUser } from '@/app/actions/cms/getUser';
-
-function demoSvg(label: string, bg: string, fg = '#ffffff'): string {
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">` +
-    `<rect width="640" height="360" fill="${bg}"/>` +
-    `<text x="320" y="190" font-family="sans-serif" font-size="42" fill="${fg}" text-anchor="middle">${label}</text>` +
-    `</svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
 
 export const DEMO_BLURHASH = FALLBACK_BLURHASH;
 
@@ -35,7 +27,7 @@ export const demoUser: CMSUser = {
 };
 
 export const demoHeroSection: HeroSettings = {
-  mainImage: demoSvg('DD', '#7c3aed'),
+  mainImage: '/demo/avatar.svg',
   blurhashURL: FALLBACK_BLURHASH,
   resume_en: null,
   resume_it: null,
@@ -92,7 +84,7 @@ export const demoSkills = [
       {
         id: 11,
         title: 'React',
-        icon: demoSvg('R', '#61dafb', '#000000'),
+        icon: '/demo/skill-react.svg',
         invert: false,
         category_id: 1,
         blurhashURL: FALLBACK_BLURHASH,
@@ -102,7 +94,7 @@ export const demoSkills = [
       {
         id: 12,
         title: 'TypeScript',
-        icon: demoSvg('TS', '#3178c6'),
+        icon: '/demo/skill-ts.svg',
         invert: false,
         category_id: 1,
         blurhashURL: FALLBACK_BLURHASH,
@@ -119,7 +111,7 @@ export const demoSkills = [
       {
         id: 21,
         title: 'PostgreSQL',
-        icon: demoSvg('PG', '#4169e1'),
+        icon: '/demo/skill-pg.svg',
         invert: false,
         category_id: 2,
         blurhashURL: FALLBACK_BLURHASH,
@@ -136,7 +128,7 @@ export const demoCareer = [
     title: 'Senior Demo Engineer',
     company: 'Fakescale Inc',
     website_url: 'https://example.com',
-    logo: demoSvg('FS', '#10b981'),
+    logo: '/demo/logo-fs.svg',
     blurhashURL: FALLBACK_BLURHASH,
     location_en: 'Demo City (Remote)',
     location_it: 'Città Demo (Remoto)',
@@ -153,7 +145,7 @@ export const demoCareer = [
     title: 'Junior Placeholder',
     company: 'Lorem Labs',
     website_url: 'https://example.com',
-    logo: demoSvg('LL', '#f59e0b'),
+    logo: '/demo/logo-ll.svg',
     blurhashURL: FALLBACK_BLURHASH,
     location_en: 'Nowhere, Earth (OnSite)',
     location_it: 'Nessun Luogo (In sede)',
@@ -179,7 +171,7 @@ const demoPostBody = (title: string): string =>
     'const demo = true;',
     '```',
     '',
-    `![Demo figure-${FALLBACK_BLURHASH}](${demoSvg('FIG', '#8b5cf6')})`,
+    `![Demo figure-${FALLBACK_BLURHASH}](${'/demo/blog-fig.svg'})`,
     '',
     'Read [more](https://example.com) here.',
   ].join('\n');
@@ -191,7 +183,7 @@ export const demoBlogPosts = [
     title: 'Demo post one',
     title_en: 'Demo post one',
     title_it: 'Articolo demo uno',
-    image: demoSvg('B1', '#0ea5e9'),
+    image: '/demo/cover-blog-1.svg',
     description_en: 'First *fake* article.',
     description_it: 'Primo articolo *finto*.',
     body_en: demoPostBody('Hello demo'),
@@ -208,7 +200,7 @@ export const demoBlogPosts = [
     title: 'Demo post two',
     title_en: 'Demo post two',
     title_it: 'Articolo demo due',
-    image: demoSvg('B2', '#ec4899'),
+    image: '/demo/cover-blog-2.svg',
     description_en: 'Second *fake* article.',
     description_it: 'Secondo articolo *finto*.',
     body_en: demoPostBody('Again demo'),
@@ -227,7 +219,7 @@ export const demoPortfolioPosts = [
     created_at: '2024-03-01T00:00:00.000Z',
     title_en: 'Demo project',
     title_it: 'Progetto demo',
-    image: demoSvg('P1', '#10b981'),
+    image: '/demo/cover-portfolio-1.svg',
     description_en: 'A *showcase* project that does nothing.',
     description_it: 'Un progetto *vetrina* che non fa nulla.',
     body_en: demoPostBody('Project demo'),
@@ -246,7 +238,7 @@ export const demoContacts = [
     id: 1,
     position: 0,
     label: 'Email',
-    icon: demoSvg('E', '#64748b'),
+    icon: '/demo/contact-email.svg',
     link: 'mailto:demo@example.com',
     bg_color: '#64748b',
   },
@@ -254,7 +246,7 @@ export const demoContacts = [
     id: 2,
     position: 1,
     label: 'GitHub',
-    icon: demoSvg('G', '#24292e'),
+    icon: '/demo/contact-github.svg',
     link: 'https://example.com',
     bg_color: '#24292e',
   },
@@ -270,51 +262,67 @@ export const demoSiteSettings = {
 
 export const demoUsers = [
   {
-    id: 'demo-user',
-    role: 'admin',
+    id: 1,
     email: 'demo@example.com',
-    propic: demoSvg('DD', '#7c3aed'),
+    github_user_id: null,
+    github_username: null,
+    role: 'admin',
+    invited_at: null,
+    created_at: '2024-01-01T00:00:00.000Z',
+    profile: {
+      id: 'demo-user',
+      display_name: 'Demo Dana',
+      avatar_url: '/demo/avatar.svg',
+    },
   },
   {
-    id: 'demo-editor',
-    role: 'editor',
+    id: 2,
     email: 'editor@example.com',
-    propic: demoSvg('ED', '#0ea5e9'),
+    github_user_id: null,
+    github_username: null,
+    role: 'editor',
+    invited_at: null,
+    created_at: '2024-02-01T00:00:00.000Z',
+    profile: {
+      id: 'demo-editor',
+      display_name: 'Demo Eddie',
+      avatar_url: '/demo/avatar-editor.svg',
+    },
   },
 ];
 
-export const demoRequests = [
+export const demoRequests: RequestEntry[] = [
   {
-    id: 1,
-    created_at: '2024-07-01T00:00:00.000Z',
+    id: '1',
+    createdAt: '2024-07-01T00:00:00.000Z',
     locale: 'en',
     name: 'Fake Client',
     email: 'client@example.com',
     company: 'Example Co',
     website: 'https://example.com',
-    project_type: 'Website',
+    type: 'Website',
     budget: '€1–5k',
     timeline: 'Flexible',
     request: 'I would like a *demo* website, please.',
     consent: true,
     archived: false,
-    archived_at: null,
+    archivedAt: null,
   },
   {
-    id: 2,
-    created_at: '2024-07-02T00:00:00.000Z',
+    id: '2',
+    createdAt: '2024-07-02T00:00:00.000Z',
     locale: 'it',
     name: 'Cliente Finto',
     email: 'cliente@example.com',
     company: '',
     website: '',
-    project_type: 'Mobile app',
+    type: 'Mobile app',
     budget: '€5–15k',
     timeline: 'ASAP',
     request: 'Vorrei un\u2019app *demo*, grazie.',
     consent: true,
     archived: true,
-    archived_at: '2024-07-03T00:00:00.000Z',
+    archivedAt: '2024-07-03T00:00:00.000Z',
   },
 ];
 

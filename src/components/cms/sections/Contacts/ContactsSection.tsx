@@ -27,6 +27,7 @@ import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoContacts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
 import { isValidHttpUrl } from '@/utils/cms/validation';
@@ -83,6 +84,14 @@ export default function ContactsSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture contacts, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setContacts(JSON.parse(JSON.stringify(demoContacts)));
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await contactsActions({ type: 'GET' });
         if (!current()) return;
@@ -169,6 +178,27 @@ export default function ContactsSection() {
     const errors: string[] = [];
     setIsUpdating(true);
     setError(null);
+
+    // Offline showcase: remap temp ids, drop deletes, persist the visible
+    // order as positions, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let nextFakeId = Math.max(0, ...contacts.map((c) => c.id)) + 1;
+      const next = contacts
+        .filter((c) => !deletedIds.has(c.id))
+        .map((c, index) => ({
+          ...c,
+          id: c.id < 0 ? nextFakeId++ : c.id,
+          position: index,
+        }));
+      setContacts(next);
+      setNewContacts([]);
+      setModifiedIds(new Set());
+      setDeletedIds(new Set());
+      setOrderChanged(false);
+      setIsUpdating(false);
+      return;
+    }
 
     // Absolute positions from the current full-list order, so newly added
     // contacts interleave correctly instead of being re-indexed from zero.
@@ -317,7 +347,12 @@ export default function ContactsSection() {
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setContacts(JSON.parse(JSON.stringify(demoContacts)));
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewContacts([]);
     setDeletedIds(new Set());

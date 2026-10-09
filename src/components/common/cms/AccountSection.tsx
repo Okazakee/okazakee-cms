@@ -30,6 +30,7 @@ import { createClient } from '@/utils/supabase/client';
 export default function AccountSection() {
   const t = useTranslations('cms');
   const { user, setUser } = useCmsStore();
+  const demoMode = useCmsStore((state) => state.demoMode);
   const [error, setError] = useState<string | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -54,6 +55,11 @@ export default function AccountSection() {
 
   useEffect(() => {
     if (!user) return;
+    // No Supabase session exists in the showcase: skip the list entirely.
+    if (useCmsStore.getState().demoMode) {
+      setPasskeysLoading(false);
+      return;
+    }
     let cancelled = false;
     createClient()
       .auth.passkey.list()
@@ -113,6 +119,35 @@ export default function AccountSection() {
   const handleAvatarChange = async (file: File) => {
     setIsUploadingAvatar(true);
     setError(null);
+
+    // Offline showcase: point the demo profile at an object URL.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        const processed = await processImageToWebP(file, {
+          maxWidth: 256,
+          maxHeight: 256,
+          quality: 0.85,
+        });
+        if (!processed.success || !processed.file) {
+          throw new Error(processed.error || 'Failed to process image');
+        }
+        const store = useCmsStore.getState();
+        if (store.user) {
+          store.setUser({
+            ...store.user,
+            avatarUrl: URL.createObjectURL(processed.file),
+          });
+        }
+      } catch (err) {
+        console.error('Error uploading avatar:', err);
+        setError(
+          err instanceof Error ? err.message : t('account.errorUploadAvatar')
+        );
+      } finally {
+        setIsUploadingAvatar(false);
+      }
+      return;
+    }
 
     try {
       // Process image to WebP before upload
@@ -187,6 +222,26 @@ export default function AccountSection() {
 
     setSavingName(true);
     setError(null);
+
+    // Offline showcase: rename the demo profile locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const store = useCmsStore.getState();
+        if (store.user) {
+          store.setUser({ ...store.user, displayName: editedName.trim() });
+        }
+        setEditingName(false);
+      } catch (err) {
+        console.error('Error updating display name:', err);
+        setError(
+          err instanceof Error ? err.message : t('account.errorUpdateName')
+        );
+      } finally {
+        setSavingName(false);
+      }
+      return;
+    }
 
     const formData = new FormData();
     formData.append('displayName', editedName.trim());
@@ -444,11 +499,13 @@ export default function AccountSection() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
-        <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-text-white">
-          <Fingerprint className="h-5 w-5 text-text-dim" />
-          {t('account.passkeysTitle')}
-        </h2>
+      {/* Passkeys need a real Supabase session: hidden in the showcase. */}
+      {!demoMode && (
+        <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
+          <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-text-white">
+            <Fingerprint className="h-5 w-5 text-text-dim" />
+            {t('account.passkeysTitle')}
+          </h2>
         <p className="mb-4 text-sm text-text-muted">
           {t('account.passkeysDesc')}
         </p>
@@ -546,8 +603,11 @@ export default function AccountSection() {
           </button>
         )}
       </section>
+      )}
 
-      <section className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6">
+      {/* Account deletion is meaningless without a real identity. */}
+      {!demoMode && (
+        <section className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6">
         <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-red-400">
           <Trash2 className="h-5 w-5" />
           {t('account.dangerZoneTitle')}
@@ -609,6 +669,7 @@ export default function AccountSection() {
           </button>
         )}
       </section>
+      )}
     </div>
   );
 }

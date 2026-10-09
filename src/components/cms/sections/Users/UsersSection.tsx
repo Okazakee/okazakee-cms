@@ -37,6 +37,7 @@ import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoUsers } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import { processImageToWebP } from '@/utils/imageProcessor';
 
@@ -84,6 +85,13 @@ export default function UsersSection() {
     const current = beginLoad();
     setIsLoading(true);
     setError(null);
+    // Offline showcase: fixture roster, no server round-trip.
+    if (useCmsStore.getState().demoMode) {
+      if (!current()) return;
+      setUsers(JSON.parse(JSON.stringify(demoUsers)));
+      setIsLoading(false);
+      return;
+    }
     try {
       const r = await usersActions({ type: 'GET' });
       if (!current()) return;
@@ -111,6 +119,58 @@ export default function UsersSection() {
     }
     setIsSubmitting(true);
     setError(null);
+    // Offline showcase: append a fake row locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const input = newUserInput.trim();
+        setUsers((prev) => {
+          const nextId = Math.max(0, ...prev.map((u) => u.id)) + 1;
+          const row: AllowedUser =
+            addType === 'github'
+              ? {
+                  id: nextId,
+                  email: null,
+                  github_username: input,
+                  role: newUserRole,
+                  invited_at: null,
+                  created_at: new Date().toISOString(),
+                  profile: null,
+                }
+              : addType === 'dummy'
+                ? {
+                    id: nextId,
+                    email: null,
+                    github_username: null,
+                    role: newUserRole,
+                    invited_at: null,
+                    created_at: new Date().toISOString(),
+                    profile: {
+                      id: `demo-dummy-${nextId}`,
+                      display_name: input,
+                      avatar_url: null,
+                    },
+                  }
+                : {
+                    id: nextId,
+                    email: input,
+                    github_username: null,
+                    role: newUserRole,
+                    invited_at: new Date().toISOString(),
+                    created_at: new Date().toISOString(),
+                    profile: null,
+                  };
+          return [...prev, row];
+        });
+        setNewUserInput('');
+        setIsAdding(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
     try {
       let result: Awaited<ReturnType<typeof usersActions>>;
       if (addType === 'email')
@@ -145,6 +205,20 @@ export default function UsersSection() {
   const handleUpdateRole = async (id: number, newRole: 'admin' | 'editor') => {
     setError(null);
     setUpdatingRoleFor(id);
+    // Offline showcase: flip the row locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        setUsers((prev) =>
+          prev.map((u) => (u.id === id ? { ...u, role: newRole } : u))
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('users.errorUpdateRole'));
+      } finally {
+        setUpdatingRoleFor(null);
+      }
+      return;
+    }
     try {
       const r = await usersActions({ type: 'UPDATE_ROLE', id, role: newRole });
       if (!r.success) throw new Error(r.error);
@@ -161,6 +235,22 @@ export default function UsersSection() {
     removalLock.current = true;
     setRemoving(true);
     setError(null);
+    // Offline showcase: drop the row locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const targetId = removeTarget.id;
+        setUsers((prev) => prev.filter((u) => u.id !== targetId));
+        setRemoveTarget(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('users.errorRemoveUser'));
+        setRemoveTarget(null);
+      } finally {
+        removalLock.current = false;
+        setRemoving(false);
+      }
+      return;
+    }
     try {
       const r = await usersActions({ type: 'REMOVE', id: removeTarget.id });
       if (!r.success) throw new Error(r.error);
@@ -180,6 +270,33 @@ export default function UsersSection() {
   const handleAvatarChange = async (profileId: string, file: File) => {
     setUploadingAvatarFor(profileId);
     setError(null);
+    // Offline showcase: point the row at an object URL locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        const processed = await processImageToWebP(file, {
+          maxWidth: 256,
+          maxHeight: 256,
+          quality: 0.85,
+        });
+        if (!processed.success || !processed.file)
+          throw new Error(processed.error || 'Failed');
+        const url = URL.createObjectURL(processed.file);
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.profile?.id === profileId
+              ? { ...u, profile: { ...u.profile, avatar_url: url } }
+              : u
+          )
+        );
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : t('users.errorUploadAvatar')
+        );
+      } finally {
+        setUploadingAvatarFor(null);
+      }
+      return;
+    }
     try {
       const processed = await processImageToWebP(file, {
         maxWidth: 256,
@@ -209,6 +326,27 @@ export default function UsersSection() {
     if (!editedName.trim()) return;
     setSavingNameFor(profileId);
     setError(null);
+    // Offline showcase: rename the row locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const name = editedName.trim();
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.profile?.id === profileId
+              ? { ...u, profile: { ...u.profile, display_name: name } }
+              : u
+          )
+        );
+        setEditingNameFor(null);
+        setEditedName('');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('users.errorUpdateName'));
+      } finally {
+        setSavingNameFor(null);
+      }
+      return;
+    }
     try {
       const r = await updateUserDisplayName(profileId, editedName.trim());
       if (!r.success) throw new Error(r.error);

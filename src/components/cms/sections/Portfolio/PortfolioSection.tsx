@@ -40,6 +40,7 @@ import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoPortfolioPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { PortfolioPost } from '@/types/fetchedData.types';
 import {
@@ -132,6 +133,25 @@ export default function PortfolioSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture posts, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setPosts(
+          JSON.parse(JSON.stringify(demoPortfolioPosts)).map(
+            (p: EditablePost) => ({ ...p, image_file: null })
+          )
+        );
+        setAuthors([
+          {
+            id: 'demo-user',
+            display_name: 'Demo Dana',
+            avatar_url: null,
+          },
+        ]);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await portfolioActions({ type: 'GET' });
         if (!current()) return;
@@ -282,6 +302,28 @@ export default function PortfolioSection() {
     const errors: string[] = [];
     setIsUpdating(true);
     setError(null);
+
+    // Offline showcase: remap temp ids, materialize staged covers as
+    // object URLs, drop deletes, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const retained = posts.filter((p) => !deletedIds.has(p.id));
+      let nextFakeId = Math.max(0, ...retained.map((p) => p.id)) + 1;
+      setPosts(
+        retained.map((p) => ({
+          ...p,
+          id: p.id < 0 ? nextFakeId++ : p.id,
+          image: p.image_file ? URL.createObjectURL(p.image_file) : p.image,
+          image_file: null,
+        }))
+      );
+      setNewPosts([]);
+      setModifiedIds(new Set());
+      setDeletedIds(new Set());
+      bodyImages.reconcile(retained.flatMap((p) => [p.body_en, p.body_it]));
+      setIsUpdating(false);
+      return;
+    }
 
     // Pending creates may have been edited after creation: always derive the
     // payload from the latest `posts` entry, never the stale newPosts snapshot.
@@ -455,7 +497,16 @@ export default function PortfolioSection() {
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setPosts(
+        JSON.parse(JSON.stringify(demoPortfolioPosts)).map(
+          (p: EditablePost) => ({ ...p, image_file: null })
+        )
+      );
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewPosts([]);
     setDeletedIds(new Set());
