@@ -122,7 +122,14 @@ export function normalizeResumeContacts(
     const stored = byIcon.get(icon);
     const seed = fallbackByIcon.get(icon) ?? { icon, text: '' };
     if (!stored) return { ...seed };
-    const next: ResumeContact = { icon, text: stored.text };
+    // The VAT row stores the bare number; older sources may still carry
+    // the locale prefix ("VAT "/"P.IVA ") — strip it so the editor and
+    // the renderer (which re-applies it) stay in sync.
+    const text =
+      icon === 'document'
+        ? stored.text.replace(/^(VAT|P\.IVA)\s+/i, '')
+        : stored.text;
+    const next: ResumeContact = { icon, text };
     if (isLinkableContactIcon(icon)) {
       next.href =
         typeof stored.href === 'string' && stored.href !== ''

@@ -112,9 +112,17 @@ function contactIcon(icon: ResumeContactIcon): string {
   return `<svg ${attrs}>${inner}</svg>`;
 }
 
-function renderContact(contact: ResumeContact): string {
+function renderContact(
+  contact: ResumeContact,
+  locale: ResumeLocale
+): string {
+  // The VAT row stores the bare number; the locale prefix is fixed copy.
+  const text =
+    contact.icon === 'document'
+      ? `${locale === 'it' ? 'P.IVA ' : 'VAT '}${contact.text.trim()}`
+      : contact.text;
+  const body = `${contactIcon(contact.icon)}${escapeHtml(text)}`;
   const safeHref = contact.href ? sanitizeHref(contact.href) : null;
-  const body = `${contactIcon(contact.icon)}${escapeHtml(contact.text)}`;
   if (!safeHref) return `<span>${body}</span>`;
   const external = /^https?:/i.test(safeHref);
   const target = external ? ' target="_blank"' : '';
@@ -174,7 +182,7 @@ export function renderResumeHtml(
 ): string {
   const { locale, docTitle } = options;
   const footer = resumeFooter(data, locale);
-  const contacts = data.contacts.map(renderContact).join('');
+  const contacts = data.contacts.map((c) => renderContact(c, locale)).join('');
   const skills = data.skills
     .map(
       (group) =>

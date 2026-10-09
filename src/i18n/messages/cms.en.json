@@ -390,7 +390,6 @@
       "nameLabel": "Full name",
       "headlineLabel": "Headline",
       "contactHref": "Link URL",
-      "contactHrefHint": "https://… / mailto:… / tel:… — empty renders plain text",
       "summaryGroup": "Summary",
       "sectionTitleLabel": "Section heading",
       "summaryLabel": "Summary",

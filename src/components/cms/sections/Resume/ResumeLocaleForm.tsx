@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import type {
+  ResumeContactIcon,
   ResumeData,
   ResumeEducation,
   ResumeExperience,
@@ -12,6 +13,17 @@ import type {
 } from '@/libs/resume/types';
 import { isLinkableContactIcon } from '@/libs/resume/types';
 import { Field, ListEditor, TextArea, TextInput } from './ResumeFields';
+
+/** Friendlier row names than the raw icon keys where it matters. */
+const CONTACT_ROW_LABELS: Record<ResumeContactIcon, string> = {
+  location: 'location',
+  phone: 'phone',
+  email: 'email',
+  github: 'github',
+  linkedin: 'linkedin',
+  website: 'website',
+  document: 'vat number',
+};
 const EMPTY_SKILL: ResumeSkillGroup = { label: '', tags: [] };
 const EMPTY_JOB: ResumeExperience = {
   title: '',
@@ -65,7 +77,7 @@ export function ResumeLocaleForm({
               className="grid gap-2 rounded-xl border border-border-subtle bg-surface-base p-3 sm:grid-cols-[110px_1fr]"
             >
               <span className="self-center font-mono text-xs text-text-muted">
-                {contact.icon}
+                {CONTACT_ROW_LABELS[contact.icon]}
               </span>
               <div className="space-y-2">
                 <TextInput
@@ -97,7 +109,6 @@ export function ResumeLocaleForm({
               </div>
             </div>
           ))}
-          <p className="text-xs text-text-muted">{t('contactHrefHint')}</p>
         </div>
       </EditorGroup>
 

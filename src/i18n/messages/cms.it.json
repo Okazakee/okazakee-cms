@@ -390,7 +390,6 @@
       "nameLabel": "Nome completo",
       "headlineLabel": "Titolo professionale",
       "contactHref": "URL link",
-      "contactHrefHint": "https://… / mailto:… / tel:… — vuoto = solo testo",
       "summaryGroup": "Profilo",
       "sectionTitleLabel": "Titolo sezione",
       "summaryLabel": "Testo profilo",

@@ -23,7 +23,7 @@ export const DEFAULT_EN: ResumeData = {
       href: 'https://linkedin.com/in/okazakee',
     },
     { icon: 'website', text: 'okazakee.dev', href: 'https://okazakee.dev' },
-    { icon: 'document', text: 'VAT IT02863310815' },
+    { icon: 'document', text: 'IT02863310815' },
   ],
   summaryTitle: 'Professional Summary',
   summaryHtml:
@@ -225,7 +225,7 @@ export const DEFAULT_IT: ResumeData = {
       href: 'https://linkedin.com/in/okazakee',
     },
     { icon: 'website', text: 'okazakee.dev', href: 'https://okazakee.dev' },
-    { icon: 'document', text: 'P.IVA IT02863310815' },
+    { icon: 'document', text: 'IT02863310815' },
   ],
   summaryTitle: 'Profilo Professionale',
   summaryHtml:

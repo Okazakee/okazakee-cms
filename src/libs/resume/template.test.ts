@@ -97,6 +97,20 @@ describe('renderResumeHtml', () => {
     expect(it).toContain('Pagina 2 / 2');
   });
 
+  it('derives the VAT prefix per locale from the bare number', () => {
+    const en = renderResumeHtml(DEFAULT_EN, DEFAULT_RESUME_CSS, {
+      locale: 'en',
+      docTitle: 't',
+    });
+    expect(en).toContain('VAT IT02863310815');
+    expect(en).not.toContain('P.IVA');
+    const it = renderResumeHtml(DEFAULT_IT, DEFAULT_RESUME_CSS, {
+      locale: 'it',
+      docTitle: 't',
+    });
+    expect(it).toContain('P.IVA IT02863310815');
+  });
+
   it('derives the page-2 header title from the headline', () => {
     expect(
       resumeContinuationTitle(
