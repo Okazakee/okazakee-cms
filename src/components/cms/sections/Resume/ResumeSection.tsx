@@ -1,5 +1,6 @@
 'use client';
 
+import { Eye } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { resumeActions } from '@/app/actions/cms/sections/resumeActions';
@@ -16,7 +17,7 @@ import type { ResumeData, ResumeLocale } from '@/libs/resume/types';
 import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
 import { TextArea } from './ResumeFields';
 import { ResumeLocaleForm } from './ResumeLocaleForm';
-import { ResumePreview } from './ResumePreview';
+import { ResumePreviewModal } from './ResumePreviewModal';
 
 type ResumeDraft = {
   en: ResumeData;
@@ -24,17 +25,18 @@ type ResumeDraft = {
   css: string;
 };
 
-type ResumeTab = ResumeLocale | 'css';
-
-const TABS: ResumeTab[] = ['en', 'it', 'css'];
+const TABS: ResumeLocale[] = ['en', 'it'];
 
 export function ResumeSection() {
   const t = useTranslations('cms.resume');
   const tb = useTranslations('cms.resume.builder');
+  const tc = useTranslations('cms.common');
   const heroSection = useCmsStore((state) => state.heroSection);
   const [draft, setDraft] = useState<ResumeDraft | null>(null);
   const [saved, setSaved] = useState<ResumeDraft | null>(null);
-  const [tab, setTab] = useState<ResumeTab>('en');
+  const [tab, setTab] = useState<ResumeLocale>('en');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [cssOpen, setCssOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -115,12 +117,13 @@ export function ResumeSection() {
 
   const previewHtml = useMemo(() => {
     if (!draft) return '';
-    const locale = tab === 'css' ? 'en' : tab;
-    return renderResumeHtml(draft[locale], effectiveCss, {
-      locale,
-      docTitle: locale === 'en' ? 'Resume' : 'Curriculum',
+    return renderResumeHtml(draft[tab], effectiveCss, {
+      locale: tab,
+      docTitle: tab === 'en' ? 'Resume' : 'Curriculum',
     });
   }, [draft, effectiveCss, tab]);
+
+  const closePreview = useCallback(() => setPreviewOpen(false), []);
 
   const downloadHtml = useCallback(
     (locale: ResumeLocale) => {
@@ -225,64 +228,78 @@ export function ResumeSection() {
                 : 'border border-border-subtle bg-surface-card text-text-muted hover:text-text-main'
             }`}
           >
-            {entry === 'en'
-              ? tb('tabEn')
-              : entry === 'it'
-                ? tb('tabIt')
-                : tb('tabCss')}
+            {entry === 'en' ? tb('tabEn') : tb('tabIt')}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setPreviewOpen(true)}
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main"
+        >
+          <Eye className="h-4 w-4" aria-hidden="true" />
+          {tb('previewTitle')}
+        </button>
       </div>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
-        <div className="min-w-0">
-          {tab === 'css' ? (
-            <EditorGroup title={tb('cssLabel')} description={tb('cssHint')}>
-              <TextArea
-                mono
-                rows={24}
-                value={draft.css}
-                onChange={(css) => setDraft({ ...draft, css })}
-              />
-              {draft.css.trim() !== '' && (
-                <button
-                  type="button"
-                  onClick={() => setDraft({ ...draft, css: '' })}
-                  className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-4 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
-                >
-                  {tb('cssReset')}
-                </button>
-              )}
-            </EditorGroup>
-          ) : (
-            <ResumeLocaleForm
-              data={draft[tab]}
-              onChange={(next) => setDraft({ ...draft, [tab]: next })}
-            />
-          )}
-        </div>
+      <ResumeLocaleForm
+        data={draft[tab]}
+        onChange={(next) => setDraft({ ...draft, [tab]: next })}
+      />
 
-        <div className="min-w-0 xl:sticky xl:top-4">
-          <EditorGroup
-            title={tb('previewTitle')}
-            actions={
+      <div className="rounded-2xl border border-border-subtle bg-surface-card">
+        <button
+          type="button"
+          aria-expanded={cssOpen}
+          onClick={() => setCssOpen((open) => !open)}
+          className="flex min-h-11 w-full items-center justify-between gap-3 p-4 text-left sm:p-6"
+        >
+          <span>
+            <span className="block text-lg font-bold text-text-white">
+              {tb('tabCss')}
+            </span>
+            <span className="mt-1 block text-sm text-text-muted">
+              {tb('cssHint')}
+            </span>
+          </span>
+          <span
+            aria-hidden="true"
+            className={`shrink-0 text-text-muted transition-transform ${cssOpen ? 'rotate-180' : ''}`}
+          >
+            ▾
+          </span>
+        </button>
+        {cssOpen && (
+          <div className="space-y-4 px-4 pb-4 sm:px-6 sm:pb-6">
+            <TextArea
+              mono
+              rows={18}
+              value={draft.css}
+              onChange={(css) => setDraft({ ...draft, css })}
+            />
+            {draft.css.trim() !== '' && (
               <button
                 type="button"
-                onClick={() => downloadHtml(tab === 'css' ? 'en' : tab)}
-                className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
+                onClick={() => setDraft({ ...draft, css: '' })}
+                className="min-h-11 rounded-lg border border-border-subtle bg-surface-base px-4 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
               >
-                {tb('downloadHtml')}
+                {tb('cssReset')}
               </button>
-            }
-          >
-            <ResumePreview
-              html={previewHtml}
-              title={tb('previewTitle')}
-              overflowMessage={tb('previewOverflow')}
-            />
-          </EditorGroup>
-        </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {previewOpen && (
+        <ResumePreviewModal
+          html={previewHtml}
+          title={tb('previewTitle')}
+          overflowMessage={tb('previewOverflow')}
+          downloadLabel={tb('downloadHtml')}
+          closeLabel={tc('close')}
+          onDownloadHtml={() => downloadHtml(tab)}
+          onClose={closePreview}
+        />
+      )}
 
       {published.length > 0 && (
         <EditorGroup
