@@ -357,6 +357,7 @@ export default function HeroSection() {
               enPlaceholder={t('hero.namePlaceholder')}
               itPlaceholder={t('hero.namePlaceholder')}
               activeLocale={activeLocale}
+              highlightable
             />
           )}
         </EditorGroup>
@@ -399,6 +400,7 @@ export default function HeroSection() {
                       enPlaceholder={t('hero.rolePlaceholder')}
                       itPlaceholder={t('hero.rolePlaceholder')}
                       activeLocale={activeLocale}
+                      highlightable
                     />
                   </div>
                   <div className="self-end pb-1">
@@ -437,6 +439,7 @@ export default function HeroSection() {
               activeLocale={activeLocale}
               type="textarea"
               rows={8}
+              highlightable
             />
           )}
         </EditorGroup>

@@ -595,6 +595,7 @@
     "preview": "Preview",
     "fileUrl": "File URL",
     "formattingHelp": "Formatting help",
+    "highlightButton": "Highlight",
     "requestDetails": "Request details",
     "otherLocaleError": "Check the other language for errors."
   }

@@ -1,8 +1,14 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useId } from 'react';
+import { useId, useRef } from 'react';
+import type { Ref, RefObject } from 'react';
+import { HighlightToolbar } from './HighlightToolbar';
 import { ValidationMessage } from './ValidationMessage';
+
+type HighlightableRef = RefObject<
+  HTMLTextAreaElement | HTMLInputElement | null
+>;
 
 interface TranslationFieldProps {
   label: string;
@@ -18,6 +24,8 @@ interface TranslationFieldProps {
   itPlaceholder?: string;
   required?: boolean;
   activeLocale?: 'en' | 'it';
+  /** Shows the `****` violet-highlight toolbar above the field(s). */
+  highlightable?: boolean;
 }
 
 export function TranslationField({
@@ -34,11 +42,19 @@ export function TranslationField({
   itPlaceholder,
   required,
   activeLocale,
+  highlightable = false,
 }: TranslationFieldProps) {
   const t = useTranslations('cms');
   const fieldId = useId();
+  const enRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
+  const itRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const inputClass =
     'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
+
+  const renderToolbar = (targetRef: HighlightableRef, onChange: (v: string) => void) =>
+    highlightable ? (
+      <HighlightToolbar targetRef={targetRef} onChange={onChange} />
+    ) : null;
 
   if (activeLocale) {
     const value = activeLocale === 'en' ? enValue : itValue;
@@ -47,6 +63,7 @@ export function TranslationField({
     const otherError = activeLocale === 'en' ? itError : enError;
     const placeholder = activeLocale === 'en' ? enPlaceholder : itPlaceholder;
     const id = `${fieldId}-${activeLocale}`;
+    const fieldRef = activeLocale === 'en' ? enRef : itRef;
 
     return (
       <div>
@@ -62,9 +79,11 @@ export function TranslationField({
             {activeLocale === 'en' ? t('common.english') : t('common.italian')}
           </span>
         </div>
+        {renderToolbar(fieldRef, onChange)}
         {type === 'textarea' ? (
           <textarea
             id={id}
+            ref={fieldRef as Ref<HTMLTextAreaElement>}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             className={inputClass}
@@ -74,6 +93,7 @@ export function TranslationField({
         ) : (
           <input
             id={id}
+            ref={fieldRef as Ref<HTMLInputElement>}
             type={type}
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -108,9 +128,11 @@ export function TranslationField({
               {label} — {t('common.english')}
             </span>
           </label>
+          {renderToolbar(enRef, onChangeEn)}
           {type === 'textarea' ? (
             <textarea
               id={idEn}
+              ref={enRef as Ref<HTMLTextAreaElement>}
               value={enValue}
               onChange={(e) => onChangeEn(e.target.value)}
               className={inputClass}
@@ -120,6 +142,7 @@ export function TranslationField({
           ) : (
             <input
               id={idEn}
+              ref={enRef as Ref<HTMLInputElement>}
               type={type}
               value={enValue}
               onChange={(e) => onChangeEn(e.target.value)}
@@ -135,9 +158,11 @@ export function TranslationField({
               {label} — {t('common.italian')}
             </span>
           </label>
+          {renderToolbar(itRef, onChangeIt)}
           {type === 'textarea' ? (
             <textarea
               id={idIt}
+              ref={itRef as Ref<HTMLTextAreaElement>}
               value={itValue}
               onChange={(e) => onChangeIt(e.target.value)}
               className={inputClass}
@@ -147,6 +172,7 @@ export function TranslationField({
           ) : (
             <input
               id={idIt}
+              ref={itRef as Ref<HTMLInputElement>}
               type={type}
               value={itValue}
               onChange={(e) => onChangeIt(e.target.value)}

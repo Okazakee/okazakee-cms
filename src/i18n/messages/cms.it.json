@@ -595,6 +595,7 @@
     "preview": "Anteprima",
     "fileUrl": "URL del file",
     "formattingHelp": "Guida alla formattazione",
+    "highlightButton": "Evidenzia",
     "requestDetails": "Dettagli della richiesta",
     "otherLocaleError": "Controlla gli errori nell'altra lingua."
   }
