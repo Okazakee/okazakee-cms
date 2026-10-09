@@ -320,6 +320,21 @@
   border-bottom: 1px dashed var(--c-accent-violet);
 }
 
+/* Marker editor (`****text****` violet syntax): runs render violet with the
+   markers hidden, exactly like the public site shows them. Newlines in the
+   stored text stay visible via pre-wrap (set with utilities). */
+.cms-marker-editor [data-marker] {
+  background: color-mix(in srgb, var(--c-accent-violet) 18%, transparent);
+  color: var(--c-accent-violet-light);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.cms-marker-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--c-text-dim);
+  pointer-events: none;
+}
+
 /* Tag row: one line, seamless loop when the chips overflow. The track carries   the list twice while looping and slides half its width, so the junction is
    invisible. The second copy only exists while looping. */
 @keyframes tags-scroll {

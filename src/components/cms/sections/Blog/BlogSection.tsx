@@ -439,7 +439,7 @@ export default function BlogSection() {
             type="textarea"
             rows={8}
             activeLocale={formLocale}
-            highlightable
+            markerHighlight
           />
           <details className="rounded-lg border border-border-subtle bg-surface-base p-3 text-xs text-text-muted">
             <summary className="cursor-pointer font-medium text-text-main">

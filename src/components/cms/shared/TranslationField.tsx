@@ -1,14 +1,9 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useId, useRef } from 'react';
-import type { Ref, RefObject } from 'react';
-import { HighlightToolbar } from './HighlightToolbar';
+import { useId } from 'react';
+import { MarkerEditor } from './MarkerEditor';
 import { ValidationMessage } from './ValidationMessage';
-
-type HighlightableRef = RefObject<
-  HTMLTextAreaElement | HTMLInputElement | null
->;
 
 interface TranslationFieldProps {
   label: string;
@@ -24,8 +19,11 @@ interface TranslationFieldProps {
   itPlaceholder?: string;
   required?: boolean;
   activeLocale?: 'en' | 'it';
-  /** Shows the `****` violet-highlight toolbar above the field(s). */
-  highlightable?: boolean;
+  /**
+   * Shows the `****` violet-highlight runs as violet spans (markers
+   * hidden) in a visual editor instead of a raw textarea/input.
+   */
+  markerHighlight?: boolean;
 }
 
 export function TranslationField({
@@ -42,19 +40,51 @@ export function TranslationField({
   itPlaceholder,
   required,
   activeLocale,
-  highlightable = false,
+  markerHighlight = false,
 }: TranslationFieldProps) {
   const t = useTranslations('cms');
   const fieldId = useId();
-  const enRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
-  const itRef = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const inputClass =
     'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
 
-  const renderToolbar = (targetRef: HighlightableRef, onChange: (v: string) => void) =>
-    highlightable ? (
-      <HighlightToolbar targetRef={targetRef} onChange={onChange} />
-    ) : null;
+  const renderField = (
+    id: string,
+    value: string,
+    onChange: (v: string) => void,
+    placeholder?: string
+  ) => {
+    if (markerHighlight && (type === 'text' || type === 'textarea')) {
+      return (
+        <MarkerEditor
+          id={id}
+          value={value}
+          onChange={onChange}
+          multiline={type === 'textarea'}
+          minHeight={type === 'textarea' ? rows * 22 : 42}
+          placeholder={placeholder}
+        />
+      );
+    }
+    return type === 'textarea' ? (
+      <textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={inputClass}
+        rows={rows}
+        placeholder={placeholder}
+      />
+    ) : (
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={inputClass}
+        placeholder={placeholder}
+      />
+    );
+  };
 
   if (activeLocale) {
     const value = activeLocale === 'en' ? enValue : itValue;
@@ -63,7 +93,6 @@ export function TranslationField({
     const otherError = activeLocale === 'en' ? itError : enError;
     const placeholder = activeLocale === 'en' ? enPlaceholder : itPlaceholder;
     const id = `${fieldId}-${activeLocale}`;
-    const fieldRef = activeLocale === 'en' ? enRef : itRef;
 
     return (
       <div>
@@ -79,28 +108,7 @@ export function TranslationField({
             {activeLocale === 'en' ? t('common.english') : t('common.italian')}
           </span>
         </div>
-        {renderToolbar(fieldRef, onChange)}
-        {type === 'textarea' ? (
-          <textarea
-            id={id}
-            ref={fieldRef as Ref<HTMLTextAreaElement>}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className={inputClass}
-            rows={rows}
-            placeholder={placeholder}
-          />
-        ) : (
-          <input
-            id={id}
-            ref={fieldRef as Ref<HTMLInputElement>}
-            type={type}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            className={inputClass}
-            placeholder={placeholder}
-          />
-        )}
+        {renderField(id, value, onChange, placeholder)}
         <ValidationMessage message={error} show />
         {otherError && (
           <ValidationMessage
@@ -128,28 +136,7 @@ export function TranslationField({
               {label} — {t('common.english')}
             </span>
           </label>
-          {renderToolbar(enRef, onChangeEn)}
-          {type === 'textarea' ? (
-            <textarea
-              id={idEn}
-              ref={enRef as Ref<HTMLTextAreaElement>}
-              value={enValue}
-              onChange={(e) => onChangeEn(e.target.value)}
-              className={inputClass}
-              rows={rows}
-              placeholder={enPlaceholder}
-            />
-          ) : (
-            <input
-              id={idEn}
-              ref={enRef as Ref<HTMLInputElement>}
-              type={type}
-              value={enValue}
-              onChange={(e) => onChangeEn(e.target.value)}
-              className={inputClass}
-              placeholder={enPlaceholder}
-            />
-          )}
+          {renderField(idEn, enValue, onChangeEn, enPlaceholder)}
           <ValidationMessage message={enError} show />
         </div>
         <div>
@@ -158,28 +145,7 @@ export function TranslationField({
               {label} — {t('common.italian')}
             </span>
           </label>
-          {renderToolbar(itRef, onChangeIt)}
-          {type === 'textarea' ? (
-            <textarea
-              id={idIt}
-              ref={itRef as Ref<HTMLTextAreaElement>}
-              value={itValue}
-              onChange={(e) => onChangeIt(e.target.value)}
-              className={inputClass}
-              rows={rows}
-              placeholder={itPlaceholder}
-            />
-          ) : (
-            <input
-              id={idIt}
-              ref={itRef as Ref<HTMLInputElement>}
-              type={type}
-              value={itValue}
-              onChange={(e) => onChangeIt(e.target.value)}
-              className={inputClass}
-              placeholder={itPlaceholder}
-            />
-          )}
+          {renderField(idIt, itValue, onChangeIt, itPlaceholder)}
           <ValidationMessage message={itError} show />
         </div>
       </div>
