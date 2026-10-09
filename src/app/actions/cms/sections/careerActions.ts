@@ -34,6 +34,7 @@ import type {
 } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import { CAREER_ASSET_ROOT } from '@/libs/cms/storage/paths';
 import type { CareerEntry } from '@/types/fetchedData.types';
 import { isValidBlurhash } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
@@ -294,7 +295,7 @@ async function batchPublishCareer(
         uploaded = await uploadImmutablePreparedImage(
           admin,
           bucket,
-          'Website Assets/career',
+          CAREER_ASSET_ROOT,
           item.data.company || 'company',
           prepared.image
         );
@@ -369,7 +370,7 @@ async function batchPublishCareer(
         uploaded = await uploadImmutablePreparedImage(
           admin,
           bucket,
-          'Website Assets/career',
+          CAREER_ASSET_ROOT,
           item.data.company || `company-${item.id}`,
           prepared.image
         );
@@ -757,7 +758,7 @@ async function uploadCareerLogo(
     // DB update cannot leave the row pointing at a deleted object. The
     // previous DB-referenced logo is removed AFTER the commit.
     const fileBase = buildUniqueAssetPath(
-      'Website Assets/career',
+      CAREER_ASSET_ROOT,
       existingCareer.company || 'company'
     );
     const fileName = `${fileBase}.${format === 'png' ? 'png' : 'webp'}`;

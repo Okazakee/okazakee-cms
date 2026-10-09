@@ -12,12 +12,16 @@
  * in staging is an orphan from a failed create and is safe to delete.
  *
  * Legacy `Website Assets/blog|portfolio|avatars/...` paths are still readable
- * (old rows, old tests) but no new upload may target them.
+ * (old rows, old tests) but no new upload may target them. Career logos
+ * moved to the root `career/` folder; the legacy `Website Assets/career/`
+ * objects were relocated one-to-one.
  */
 
 export const BLOG_ASSET_ROOT = 'blog';
 
 export const PORTFOLIO_ASSET_ROOT = 'portfolio';
+
+export const CAREER_ASSET_ROOT = 'career';
 
 export const BLOG_STAGING_PREFIX = 'blog/staging';
 
