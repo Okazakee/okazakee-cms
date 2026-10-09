@@ -34,4 +34,10 @@ describe('MarkdownPreview', () => {
     expect(html).toContain('<h2');
     expect(html).toContain('const a = 1;');
   });
+
+  it('never nests figures inside paragraphs', () => {
+    const html = render('Some text\n\n![Cap-h](https://h.test/f.webp)');
+    expect(html).toContain('<figure');
+    expect(html).not.toMatch(/<p[^>]*>(\s|<[^/])*?<figure/);
+  });
 });
