@@ -244,7 +244,7 @@ export function ResumeSection() {
       <div
         role="tablist"
         aria-label={t('title')}
-        className="flex flex-wrap gap-2"
+        className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap"
       >
         {TABS.map((entry) => (
           <button
@@ -253,7 +253,7 @@ export function ResumeSection() {
             role="tab"
             aria-selected={tab === entry}
             onClick={() => setTab(entry)}
-            className={`min-h-11 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            className={`inline-flex min-h-11 items-center justify-center rounded-lg px-2 py-2 text-sm font-medium transition-colors sm:px-4 ${
               tab === entry
                 ? 'bg-accent-violet-deep text-white'
                 : 'border border-border-subtle bg-surface-card text-text-muted hover:text-text-main'
@@ -265,17 +265,17 @@ export function ResumeSection() {
         <button
           type="button"
           onClick={() => setPreviewOpen(true)}
-          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main sm:px-4"
         >
-          <Eye className="h-4 w-4" aria-hidden="true" />
-          {tb('previewTitle')}
+          <Eye className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">{tb('previewTitle')}</span>
         </button>
         <span aria-hidden="true" className="hidden w-px self-stretch bg-border-subtle sm:block" />
         <button
           type="button"
           disabled={!publishedUrl}
           onClick={() => publishedUrl && window.open(publishedUrl, '_blank', 'noopener')}
-          className="min-h-11 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
         >
           {t('openLabel')}
         </button>
@@ -288,7 +288,7 @@ export function ResumeSection() {
               .writeText(publishedUrl)
               .catch(() => setError(t('errorCopy')))
           }
-          className="min-h-11 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
         >
           {t('copyUrl')}
         </button>
@@ -296,7 +296,7 @@ export function ResumeSection() {
           type="button"
           disabled={!publishedUrl}
           onClick={() => publishedUrl && void downloadPdf(publishedUrl, tab)}
-          className="min-h-11 rounded-lg border border-border-subtle bg-surface-card px-4 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg border border-border-subtle bg-surface-card px-2 py-2 text-sm font-medium text-text-muted transition-colors hover:text-text-main disabled:opacity-40 sm:px-4"
         >
           {t('download')}
         </button>
@@ -311,7 +311,7 @@ export function ResumeSection() {
             key={item.id}
             type="button"
             onClick={() => scrollToSection(item.id)}
-            className="min-h-9 shrink-0 rounded-full border border-border-subtle bg-surface-card px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-raised hover:text-text-main"
+            className="min-h-10 shrink-0 rounded-full border border-border-subtle bg-surface-card px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-surface-raised hover:text-text-main"
           >
             {item.label}
           </button>

@@ -59,7 +59,7 @@ export function ResumePreviewModal({
               className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border-subtle bg-surface-card px-3 py-2 text-sm text-text-main transition-colors hover:bg-surface-raised"
             >
               <Download className="h-4 w-4" aria-hidden="true" />
-              {downloadLabel}
+              <span className="hidden sm:inline">{downloadLabel}</span>
             </button>
             <button
               type="button"

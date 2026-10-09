@@ -87,7 +87,7 @@ function BulletEditor({
               title={t('moveUp')}
               disabled={index === 0}
               onClick={() => move(index, -1)}
-              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised disabled:opacity-30"
+              className="rounded-md p-2 text-text-muted transition-colors hover:bg-surface-raised disabled:opacity-30"
             >
               <ArrowUp className="h-4 w-4" />
             </button>
@@ -97,7 +97,7 @@ function BulletEditor({
               title={t('moveDown')}
               disabled={index === items.length - 1}
               onClick={() => move(index, 1)}
-              className="rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised disabled:opacity-30"
+              className="rounded-md p-2 text-text-muted transition-colors hover:bg-surface-raised disabled:opacity-30"
             >
               <ArrowDown className="h-4 w-4" />
             </button>
@@ -106,7 +106,7 @@ function BulletEditor({
               aria-label={t('removeEntry')}
               title={t('removeEntry')}
               onClick={() => onChange(items.filter((_, i) => i !== index))}
-              className="rounded-md p-1.5 text-red-400 transition-colors hover:bg-red-500/10"
+              className="rounded-md p-2 text-red-400 transition-colors hover:bg-red-500/10"
             >
               <Trash2 className="h-4 w-4" />
             </button>
