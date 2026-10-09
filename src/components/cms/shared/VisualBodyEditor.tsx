@@ -79,6 +79,29 @@ type FormatState = {
   code: boolean;
 };
 
+export type VisualBodyTool =
+  | 'bold'
+  | 'violet'
+  | 'link'
+  | 'heading'
+  | 'list'
+  | 'quote'
+  | 'table'
+  | 'image'
+  | 'code';
+
+const ALL_TOOLS: VisualBodyTool[] = [
+  'bold',
+  'violet',
+  'link',
+  'heading',
+  'list',
+  'quote',
+  'table',
+  'image',
+  'code',
+];
+
 const IDLE_FORMAT: FormatState = {
   bold: false,
   violet: false,
@@ -102,13 +125,17 @@ export function VisualBodyEditor({
   minHeight,
   placeholder,
   stageImages,
+  tools = ALL_TOOLS,
 }: {
   id: string;
   value: string;
   onChange: (next: string) => void;
   minHeight: number;
   placeholder?: string;
-  stageImages: (files: FileList | File[]) => Promise<StagedBodyImage[]>;
+  /** Required when 'image' is in tools: stages picked files as blobs. */
+  stageImages?: (files: FileList | File[]) => Promise<StagedBodyImage[]>;
+  /** Subset of toolbar buttons; defaults to the full post set. */
+  tools?: VisualBodyTool[];
 }) {
   const t = useTranslations('cms.editor');
   const editorRef = useRef<HTMLDivElement>(null);
@@ -484,7 +511,7 @@ export function VisualBodyEditor({
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
-      if (!files || files.length === 0) return;
+      if (!files || files.length === 0 || !stageImages) return;
       const staged = await stageImages(files);
       for (const item of staged) insertImageFigure(item);
     },
@@ -614,76 +641,94 @@ export function VisualBodyEditor({
         aria-label={t('markdownToolbar')}
         className="flex flex-wrap items-center gap-1 border-b border-border-subtle bg-surface-card px-2 py-1"
       >
-        <ToolButton
-          label={t('markdownBold')}
-          active={format.bold}
-          onPress={() => press(() => toggleInline('STRONG'))}
-        >
-          <Bold className="h-4 w-4" aria-hidden="true" />
-          {t('markdownBold')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownViolet')}
-          active={format.violet}
-          onPress={() => press(() => toggleInline('EM'))}
-        >
-          <Italic className="h-4 w-4" aria-hidden="true" />
-          {t('markdownViolet')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownLink')}
-          active={format.link}
-          onPress={() => press(pressLink)}
-        >
-          <Link2 className="h-4 w-4" aria-hidden="true" />
-          {t('markdownLink')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownHeading')}
-          active={format.heading > 0}
-          onPress={() => press(cycleHeading)}
-        >
-          <Heading className="h-4 w-4" aria-hidden="true" />
-          {t('markdownHeading')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownList')}
-          active={format.list}
-          onPress={() => press(toggleList)}
-        >
-          <List className="h-4 w-4" aria-hidden="true" />
-          {t('markdownList')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownQuote')}
-          active={format.quote}
-          onPress={() => press(toggleQuote)}
-        >
-          <Quote className="h-4 w-4" aria-hidden="true" />
-          {t('markdownQuote')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownTable')}
-          onPress={() => press(insertTable)}
-        >
-          <Table2 className="h-4 w-4" aria-hidden="true" />
-          {t('markdownTable')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownImage')}
-          onPress={() => fileRef.current?.click()}
-        >
-          <ImagePlus className="h-4 w-4" aria-hidden="true" />
-          {t('markdownImage')}
-        </ToolButton>
-        <ToolButton
-          label={t('markdownCode')}
-          active={format.code}
-          onPress={() => press(toggleCode)}
-        >
-          <Braces className="h-4 w-4" aria-hidden="true" />
-          {t('markdownCode')}
-        </ToolButton>
+        {tools.includes('bold') && (
+                  <ToolButton
+                    label={t('markdownBold')}
+                    active={format.bold}
+                    onPress={() => press(() => toggleInline('STRONG'))}
+                  >
+                    <Bold className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownBold')}
+                  </ToolButton>
+        )}
+        {tools.includes('violet') && (
+                  <ToolButton
+                    label={t('markdownViolet')}
+                    active={format.violet}
+                    onPress={() => press(() => toggleInline('EM'))}
+                  >
+                    <Italic className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownViolet')}
+                  </ToolButton>
+        )}
+        {tools.includes('link') && (
+                  <ToolButton
+                    label={t('markdownLink')}
+                    active={format.link}
+                    onPress={() => press(pressLink)}
+                  >
+                    <Link2 className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownLink')}
+                  </ToolButton>
+        )}
+        {tools.includes('heading') && (
+                  <ToolButton
+                    label={t('markdownHeading')}
+                    active={format.heading > 0}
+                    onPress={() => press(cycleHeading)}
+                  >
+                    <Heading className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownHeading')}
+                  </ToolButton>
+        )}
+        {tools.includes('list') && (
+                  <ToolButton
+                    label={t('markdownList')}
+                    active={format.list}
+                    onPress={() => press(toggleList)}
+                  >
+                    <List className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownList')}
+                  </ToolButton>
+        )}
+        {tools.includes('quote') && (
+                  <ToolButton
+                    label={t('markdownQuote')}
+                    active={format.quote}
+                    onPress={() => press(toggleQuote)}
+                  >
+                    <Quote className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownQuote')}
+                  </ToolButton>
+        )}
+        {tools.includes('table') && (
+                  <ToolButton
+                    label={t('markdownTable')}
+                    onPress={() => press(insertTable)}
+                  >
+                    <Table2 className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownTable')}
+                  </ToolButton>
+        )}
+        {tools.includes('image') && stageImages && (
+                  <ToolButton
+                    label={t('markdownImage')}
+                    onPress={() => fileRef.current?.click()}
+                  >
+                    <ImagePlus className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownImage')}
+                  </ToolButton>
+        )}
+        {tools.includes('code') && (
+                  <ToolButton
+                    label={t('markdownCode')}
+                    active={format.code}
+                    onPress={() => press(toggleCode)}
+                  >
+                    <Braces className="h-4 w-4" aria-hidden="true" />
+                    {t('markdownCode')}
+                  </ToolButton>
+        )}
       </div>
       {linkBar && (
         <div className="flex items-center gap-2 border-b border-border-subtle bg-surface-card px-2 py-1">
@@ -732,19 +777,21 @@ export function VisualBodyEditor({
         style={{ minHeight }}
         className="cms-visual-body focus:border-0 w-full rounded-none border-0 px-3 py-2 text-sm leading-relaxed text-text-main outline-none"
       />
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        aria-hidden="true"
-        tabIndex={-1}
-        onChange={(event) => {
-          void handleFiles(event.target.files);
-          event.target.value = '';
-        }}
-      />
+      {stageImages && (
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
+          onChange={(event) => {
+            void handleFiles(event.target.files);
+            event.target.value = '';
+          }}
+        />
+      )}
     </div>
   );
 }

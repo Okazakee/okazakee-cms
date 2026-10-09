@@ -9,6 +9,7 @@ import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
+import { VisualBodyEditor } from '@/components/cms/shared/VisualBodyEditor';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
@@ -123,9 +124,6 @@ export default function PrivacyPolicySection() {
 
   useSectionCallbacks('privacy-policy', handlePublish, handleRevert);
 
-  const textareaClass =
-    'w-full min-h-80 px-4 py-3 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none font-mono text-sm resize-y';
-
   if (isLoading)
     return (
       <div className="flex items-center justify-center py-12">
@@ -160,20 +158,28 @@ export default function PrivacyPolicySection() {
           />
         }
       >
-        <textarea
-          aria-label={t('privacy.bodyLabel')}
+        <VisualBodyEditor
+          id="privacy-body"
           value={activeLocale === 'en' ? enMarkdown : itMarkdown}
-          onChange={(e) => {
-            if (activeLocale === 'en') setEnMarkdown(e.target.value);
-            else setItMarkdown(e.target.value);
+          onChange={(v) => {
+            if (activeLocale === 'en') setEnMarkdown(v);
+            else setItMarkdown(v);
           }}
-          className={textareaClass}
-          rows={20}
+          minHeight={320}
           placeholder={
             activeLocale === 'en'
               ? '# Privacy Policy'
               : '# Informativa sulla Privacy'
           }
+          tools={[
+            'bold',
+            'violet',
+            'link',
+            'heading',
+            'list',
+            'quote',
+            'code',
+          ]}
         />
       </EditorGroup>
 
