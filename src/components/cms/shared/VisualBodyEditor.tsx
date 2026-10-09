@@ -480,7 +480,7 @@ export function VisualBodyEditor({
   );
 
   const insertImageFigure = useCallback(
-    (staged: StagedBodyImage) => {
+    (staged: StagedBodyImage, atRange?: Range | null) => {
       const editor = editorRef.current;
       const selection = window.getSelection();
       const figureHtml =
@@ -494,7 +494,7 @@ export function VisualBodyEditor({
         emit();
         return;
       }
-      const range = selection.getRangeAt(0);
+      const range = atRange ?? selection.getRangeAt(0);
       if (!editor.contains(range.commonAncestorContainer)) return;
       range.deleteContents();
       const wrapper = document.createElement('div');
@@ -502,12 +502,37 @@ export function VisualBodyEditor({
       const figure = wrapper.firstElementChild;
       if (!figure) return;
       range.insertNode(figure);
-      selection.selectAllChildren(figure);
-      selection.collapseToEnd();
+      range.setStartAfter(figure);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
       emit();
     },
     [emit, t]
   );
+
+  const insertStagedAtRange = useCallback(
+    (staged: StagedBodyImage[], range: Range | null) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const live =
+        range && editor.contains(range.commonAncestorContainer)
+          ? range
+          : null;
+      for (const item of staged) insertImageFigure(item, live);
+      // Sequential inserts advance the shared range past each figure.
+    },
+    [insertImageFigure]
+  );
+
+  const imageFilesFrom = (
+    list: FileList | File[] | null | undefined
+  ): File[] => {
+    if (!list) return [];
+    return Array.from(list).filter((file) =>
+      file.type.startsWith('image/')
+    );
+  };
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -524,6 +549,17 @@ export function VisualBodyEditor({
     if (!editor || !selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
     if (!editor.contains(range.commonAncestorContainer)) return;
+    // Pasted image files (screenshots) go through the staging pipeline
+    // like picked files: a native raw-img insert would store a dead
+    // `blob:` URL with no upload behind it.
+    const pastedImages = imageFilesFrom(event.clipboardData?.files);
+    if (pastedImages.length > 0 && stageImages) {
+      event.preventDefault();
+      void stageImages(pastedImages).then((staged) => {
+        insertStagedAtRange(staged, range);
+      });
+      return;
+    }
     const inPre = !!findAncestor(selection.anchorNode, editor, (element) =>
       isMark(element.tagName, ['PRE'])
     );
@@ -548,6 +584,27 @@ export function VisualBodyEditor({
       // ignore
     }
   }, []);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent) => {
+      const editor = editorRef.current;
+      if (!editor || !stageImages) return;
+      const files = imageFilesFrom(event.dataTransfer?.files);
+      if (files.length === 0) return;
+      // Take over from the browser: a native drop would embed a raw
+      // `<img src="blob:…">` with no upload behind it.
+      event.preventDefault();
+      event.stopPropagation();
+      const caret =
+        typeof document.caretRangeFromPoint === 'function'
+          ? document.caretRangeFromPoint(event.clientX, event.clientY)
+          : null;
+      void stageImages(files).then((staged) => {
+        insertStagedAtRange(staged, caret);
+      });
+    },
+    [stageImages, insertStagedAtRange]
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -767,6 +824,8 @@ export function VisualBodyEditor({
         onInput={emit}
         onBlur={handleBlur}
         onPaste={handlePaste}
+        onDrop={handleDrop}
+        onDragOver={(event) => event.preventDefault()}
         onKeyDown={handleKeyDown}
         onSelect={refreshFormat}
         onKeyUp={refreshFormat}

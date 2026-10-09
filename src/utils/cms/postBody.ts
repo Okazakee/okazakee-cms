@@ -145,8 +145,14 @@ export function hasPendingRefs(
 
 /**
  * Structural validation for image lines. Legacy committed lines always
- * pass through (never break an unrelated edit); only unbalanced syntax
- * and unresolvable pending refs block a publish.
+ * pass through (never break an unrelated edit) EXCEPT two shapes that
+ * crash the public renderer or reference dead session objects:
+ * - empty alt text (`![](…)`: markdown-to-jsx yields alt=undefined and
+ *   PostFigure throws);
+ * - `blob:`/`data:` sources without a `pending:` marker (never uploaded;
+ *   blob: dies with the editing session).
+ * Only unbalanced syntax, unresolvable pending refs and those two shapes
+ * block a publish.
  */
 export type BodyImageIssue = {
   line: number;
@@ -176,6 +182,21 @@ export function validateBodyImages(
         issues.push({
           line: index + 1,
           message: 'Image was removed before publish; re-insert it',
+        });
+        continue;
+      }
+      if (!ref.pending && /^(blob|data):/i.test(ref.url)) {
+        issues.push({
+          line: index + 1,
+          message:
+            'Image was never uploaded (add it again with the Image button)',
+        });
+        continue;
+      }
+      if (ref.alt.trim() === '') {
+        issues.push({
+          line: index + 1,
+          message: 'Image needs alt text for the caption',
         });
       }
     }

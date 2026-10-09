@@ -72,6 +72,18 @@ describe('validateBodyImages', () => {
     expect(issues.map((i) => i.line)).toEqual([2, 3]);
   });
 
+  it('blocks session-local and alt-less images', () => {
+    expect(
+      validateBodyImages('![cap-pending:a](blob:u)', new Set(['a']))
+    ).toEqual([]);
+    const dead = validateBodyImages('![](blob:session-uuid)', new Set());
+    expect(dead).toHaveLength(1);
+    expect(dead[0]?.message).toContain('never uploaded');
+    const noAlt = validateBodyImages('![](https://h.test/x.webp)', new Set());
+    expect(noAlt).toHaveLength(1);
+    expect(noAlt[0]?.message).toContain('alt text');
+  });
+
   it('passes legacy committed lines untouched', () => {
     expect(
       validateBodyImages(
