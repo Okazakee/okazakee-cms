@@ -16,6 +16,14 @@ import {
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import {
+  applyBodyImageRewrites,
+  bodyUploadStaged,
+  cleanupOrphanedBodyImages,
+  removeBodyUploads,
+  uploadBodyImages,
+  validateBodyImagePayload,
+} from '@/app/actions/cms/utils/postBodyFiles';
+import {
   batchFailureSummary,
   batchHadCommits,
   batchSucceeded,
@@ -30,12 +38,14 @@ import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
-import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import {
   PORTFOLIO_STAGING_PREFIX,
   portfolioPostPrefix,
 } from '@/libs/cms/storage/paths';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { BodyImageUpload } from '@/utils/cms/postBody';
+import { hasPendingRefs } from '@/utils/cms/postBody';
 import { type PostButton, validatePostButtons } from '@/utils/cms/postButtons';
 import { createClient } from '@/utils/supabase/server';
 
@@ -67,6 +77,8 @@ type PortfolioOperation =
         blurhashURL?: string;
         /** Client-generated temporary id; echoed back in `created`/`createdIds`. */
         tempId?: string;
+        /** Blob-staged body images; uploaded to the post folder after INSERT. */
+        bodyFiles?: BodyImageUpload[];
       }>;
       updates: Array<{
         id: number;
@@ -74,6 +86,8 @@ type PortfolioOperation =
         file?: File | null;
         currentImageUrl?: string;
         blurhashURL?: string;
+        /** Blob-staged body images; uploaded straight into the post folder. */
+        bodyFiles?: BodyImageUpload[];
       }>;
       deletes: number[];
     };
@@ -262,6 +276,15 @@ export async function portfolioActions(
   }
 }
 
+/** Storage origin for body orphan cleanup; null skips it (best-effort). */
+function readStorageOrigin(): string | null {
+  try {
+    return getCmsStorageOrigin();
+  } catch {
+    return null;
+  }
+}
+
 async function batchPublishPortfolio(
   operation: Extract<PortfolioOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<PortfolioResult> {
@@ -279,6 +302,21 @@ async function batchPublishPortfolio(
           kind: 'create',
           tempId,
           error: validation.error ?? 'Invalid data',
+        });
+        continue;
+      }
+
+      // Blob-staged body images resolve here; unresolved refs must fail
+      // before the cover upload so nothing is written for a broken draft.
+      const bodyPayloadError = validateBodyImagePayload(item.bodyFiles, [
+        validation.data.body_en,
+        validation.data.body_it,
+      ]);
+      if (bodyPayloadError) {
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: bodyPayloadError,
         });
         continue;
       }
@@ -320,6 +358,58 @@ async function batchPublishPortfolio(
         continue;
       }
 
+      // The row id exists only after the INSERT, so staged body images are
+      // uploaded into the per-post folder now and the markdown is rewritten
+      // to the committed URLs. Any failure rolls the row back: a created
+      // row must never keep `pending:` refs behind.
+      let bodyStaged: string[] = [];
+      try {
+        const bodyUpload = await uploadBodyImages(
+          admin,
+          bucket,
+          portfolioPostPrefix(data.id as number),
+          validation.data.title_en || 'untitled',
+          item.bodyFiles
+        );
+        bodyStaged = bodyUpload.staged;
+        const rewrittenBodies = applyBodyImageRewrites(
+          {
+            body_en: validation.data.body_en,
+            body_it: validation.data.body_it,
+          },
+          bodyUpload.rewrites
+        );
+        if (
+          rewrittenBodies.body_en !== validation.data.body_en ||
+          rewrittenBodies.body_it !== validation.data.body_it
+        ) {
+          const { error: bodyError } = await admin
+            .from('portfolio_posts')
+            .update({
+              body_en: rewrittenBodies.body_en,
+              body_it: rewrittenBodies.body_it,
+            })
+            .eq('id', data.id);
+          if (bodyError) throw bodyError;
+        }
+      } catch (error) {
+        await admin.from('portfolio_posts').delete().eq('id', data.id);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
+        await removeBodyUploads(admin, bucket, [
+          ...bodyStaged,
+          ...bodyUploadStaged(error),
+        ]);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Body image publish failed',
+        });
+        continue;
+      }
+
       // The row id exists only after the INSERT, so the staged upload is
       // moved into its per-post folder now. The row keeps the staging URL
       // when the move fails (still valid; the next update moves it).
@@ -356,14 +446,84 @@ async function batchPublishPortfolio(
         continue;
       }
 
+      const bodyPayloadError = validateBodyImagePayload(item.bodyFiles, [
+        validation.data.body_en,
+        validation.data.body_it,
+      ]);
+      if (bodyPayloadError) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: bodyPayloadError,
+        });
+        continue;
+      }
+
       let uploaded: { publicUrl: string; path: string } | null = null;
       const updateData: UpdatePortfolioData = { ...validation.data };
-      // Trusted replacement source: previous object URL comes from the DB.
+      // Trusted replacement source: the previous row (cover + bodies) is
+      // read from the DB, never trusted from the client payload.
       let previousImage: string | null = null;
+      let oldBodies: Array<string | undefined> = [];
+      let bodyStaged: string[] = [];
+
+      const { data: currentRow, error: fetchError } = await admin
+        .from('portfolio_posts')
+        .select('image, body_en, body_it')
+        .eq('id', item.id)
+        .single();
+
+      if (fetchError || !currentRow) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: fetchError?.message ?? 'Portfolio post not found',
+        });
+        continue;
+      }
+      previousImage = (currentRow.image as string | null) ?? null;
+      oldBodies = [
+        currentRow.body_en as string | undefined,
+        currentRow.body_it as string | undefined,
+      ];
+
+      if (item.bodyFiles && item.bodyFiles.length > 0) {
+        try {
+          const bodyUpload = await uploadBodyImages(
+            admin,
+            bucket,
+            portfolioPostPrefix(item.id),
+            validation.data.title_en || `portfolio-${item.id}`,
+            item.bodyFiles
+          );
+          bodyStaged = bodyUpload.staged;
+          const rewritten = applyBodyImageRewrites(
+            { body_en: updateData.body_en, body_it: updateData.body_it },
+            bodyUpload.rewrites
+          );
+          updateData.body_en = rewritten.body_en;
+          updateData.body_it = rewritten.body_it;
+        } catch (error) {
+          await removeBodyUploads(admin, bucket, [
+            ...bodyStaged,
+            ...bodyUploadStaged(error),
+          ]);
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Body image upload failed',
+          });
+          continue;
+        }
+      }
 
       if (item.file) {
         const prepared = await prepareImageUpload(item.file, item.blurhashURL);
         if (!prepared.success) {
+          await removeBodyUploads(admin, bucket, bodyStaged);
           markFailed(evidence, {
             kind: 'update',
             id: item.id,
@@ -371,22 +531,6 @@ async function batchPublishPortfolio(
           });
           continue;
         }
-
-        const { data: currentRow, error: fetchError } = await admin
-          .from('portfolio_posts')
-          .select('image')
-          .eq('id', item.id)
-          .single();
-
-        if (fetchError) {
-          markFailed(evidence, {
-            kind: 'update',
-            id: item.id,
-            error: fetchError.message,
-          });
-          continue;
-        }
-        previousImage = (currentRow?.image as string | null) ?? null;
 
         uploaded = await uploadImmutablePreparedImage(
           admin,
@@ -410,6 +554,7 @@ async function batchPublishPortfolio(
         if (uploaded) {
           await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
+        await removeBodyUploads(admin, bucket, bodyStaged);
         markFailed(evidence, {
           kind: 'update',
           id: item.id,
@@ -424,6 +569,21 @@ async function batchPublishPortfolio(
           previousImage,
           bucket,
           uploaded.path
+        );
+      }
+
+      // Body objects the new markdown dropped (same-prefix only, covers
+      // always kept). Best-effort, never fails the publish.
+      const storageOrigin = readStorageOrigin();
+      if (storageOrigin) {
+        await cleanupOrphanedBodyImages(
+          admin,
+          bucket,
+          storageOrigin,
+          portfolioPostPrefix(item.id),
+          oldBodies,
+          [updateData.body_en, updateData.body_it],
+          [previousImage, uploaded?.publicUrl]
         );
       }
 
@@ -608,6 +768,13 @@ async function createPortfolio(
     }
 
     const { id: userId } = await requireAllowedPostWriter();
+    // Legacy single-shot path has no body-file upload: refuse staged refs.
+    if (hasPendingRefs(data.body_en, data.body_it)) {
+      return {
+        success: false,
+        error: 'Body images must be published through batch publish',
+      };
+    }
     const insertData = {
       ...validation.data,
       blurhashURL: validation.data.blurhashURL ?? '',
@@ -654,6 +821,13 @@ async function updatePortfolio(
     const validation = validatePortfolioData(data);
     if (!validation.isValid) {
       return { success: false, error: validation.error };
+    }
+    // Legacy single-shot path has no body-file upload: refuse staged refs.
+    if (hasPendingRefs(data.body_en, data.body_it)) {
+      return {
+        success: false,
+        error: 'Body images must be published through batch publish',
+      };
     }
 
     const admin = getAdminClient();

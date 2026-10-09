@@ -82,8 +82,28 @@ export function validateBodyImagePayload(
 }
 
 /**
- * Uploads staged body images into the post folder. Throws on the first
- * failure — callers remove every returned staged path and commit nothing.
+ * Upload failure that still carries the objects staged before the throw,
+ * so callers can roll every one of them back instead of orphaning the
+ * ones that succeeded.
+ */
+export class BodyUploadError extends Error {
+  staged: string[];
+  constructor(message: string, staged: string[]) {
+    super(message);
+    this.name = 'BodyUploadError';
+    this.staged = staged;
+  }
+}
+
+/** Staged paths carried by a BodyUploadError (empty for other errors). */
+export function bodyUploadStaged(error: unknown): string[] {
+  return error instanceof BodyUploadError ? error.staged : [];
+}
+
+/**
+ * Uploads staged body images into the post folder. Throws BodyUploadError
+ * on the first failure — callers remove every staged path it carries and
+ * commit nothing.
  */
 export async function uploadBodyImages(
   admin: SupabaseClient,
@@ -94,27 +114,34 @@ export async function uploadBodyImages(
 ): Promise<{ rewrites: Map<string, string>; staged: string[] }> {
   const rewrites = new Map<string, string>();
   const staged: string[] = [];
-  for (const item of files ?? []) {
-    const prepared = await prepareImageUpload(
-      item.file,
-      item.blurhash,
-      BODY_IMAGE_OPTIONS
-    );
-    if (!prepared.success) {
-      throw new Error(prepared.error ?? 'Body image processing failed');
+  try {
+    for (const item of files ?? []) {
+      const prepared = await prepareImageUpload(
+        item.file,
+        item.blurhash,
+        BODY_IMAGE_OPTIONS
+      );
+      if (!prepared.success) {
+        throw new Error(prepared.error ?? 'Body image processing failed');
+      }
+      const alt = sanitizeImageAlt(item.alt, label);
+      const upload = await uploadImmutablePreparedImage(
+        admin,
+        bucket,
+        prefix,
+        alt,
+        prepared.image
+      );
+      staged.push(upload.path);
+      rewrites.set(
+        item.localId,
+        committedImageMarkdown(alt, prepared.image.blurhash, upload.publicUrl)
+      );
     }
-    const alt = sanitizeImageAlt(item.alt, label);
-    const upload = await uploadImmutablePreparedImage(
-      admin,
-      bucket,
-      prefix,
-      alt,
-      prepared.image
-    );
-    staged.push(upload.path);
-    rewrites.set(
-      item.localId,
-      committedImageMarkdown(alt, prepared.image.blurhash, upload.publicUrl)
+  } catch (error) {
+    throw new BodyUploadError(
+      error instanceof Error ? error.message : 'Body image upload failed',
+      staged
     );
   }
   return { rewrites, staged };
