@@ -15,6 +15,7 @@ import { renderResumePdfs } from '@/libs/resume/pdf';
 import { loadResumeSources, saveResumeSources } from '@/libs/resume/sources';
 import { renderResumeHtml } from '@/libs/resume/template';
 import type { ResumeData } from '@/libs/resume/types';
+import { normalizeResumeContacts } from '@/libs/resume/types';
 import {
   validateResumeCss,
   validateResumeData,
@@ -65,11 +66,21 @@ async function getResumeSources(): Promise<MutationResult> {
       .eq('id', 1)
       .maybeSingle(),
   ]);
+  const en = sources.en ?? DEFAULT_EN;
+  const it = sources.it ?? DEFAULT_IT;
   return {
     success: true,
     data: {
-      en: sources.en ?? DEFAULT_EN,
-      it: sources.it ?? DEFAULT_IT,
+      // Stored sources predate the fixed header schema or were hand-edited:
+      // project them back onto the exact rows before the editor sees them.
+      en: {
+        ...en,
+        contacts: normalizeResumeContacts(en.contacts, DEFAULT_EN.contacts),
+      },
+      it: {
+        ...it,
+        contacts: normalizeResumeContacts(it.contacts, DEFAULT_IT.contacts),
+      },
       css: sources.css ?? '',
       resume_en: heroRow.data?.resume_en ?? null,
       resume_it: heroRow.data?.resume_it ?? null,

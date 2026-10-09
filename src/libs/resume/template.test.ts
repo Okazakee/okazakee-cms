@@ -7,6 +7,7 @@ import {
   sanitizeHref,
   sanitizeRichText,
 } from './template';
+import { normalizeResumeContacts } from './types';
 import { validateResumeCss, validateResumeData } from './validation';
 
 describe('escapeHtml', () => {
@@ -79,6 +80,22 @@ describe('renderResumeHtml', () => {
     expect(html).toContain('Pagina 1 / 2');
   });
 
+  it('derives footer data from name, website and locale', () => {
+    const en = renderResumeHtml(DEFAULT_EN, DEFAULT_RESUME_CSS, {
+      locale: 'en',
+      docTitle: 't',
+    });
+    expect(en).toContain('Cristian Di Carlo · okazakee.dev');
+    expect(en).toContain('Page 1 / 2');
+    expect(en).toContain('Page 2 / 2');
+    const it = renderResumeHtml(DEFAULT_IT, DEFAULT_RESUME_CSS, {
+      locale: 'it',
+      docTitle: 't',
+    });
+    expect(it).toContain('Pagina 1 / 2');
+    expect(it).toContain('Pagina 2 / 2');
+  });
+
   it('honours a CSS override and escapes hostile text', () => {
     const hostile = {
       ...DEFAULT_EN,
@@ -113,15 +130,37 @@ describe('validateResumeData', () => {
     expect(paths).toContain('en.contacts');
   });
 
-  it('flags unknown contact icons', () => {
-    const issues = validateResumeData(
-      {
-        ...DEFAULT_EN,
-        contacts: [{ icon: 'fax', text: 'x' }],
-      },
-      'en'
+  it('rejects tampered contact rows and links on text-only rows', () => {
+    const swapped = {
+      ...DEFAULT_EN,
+      contacts: [...DEFAULT_EN.contacts].reverse(),
+    };
+    expect(
+      validateResumeData(swapped, 'en').map((issue) => issue.path)
+    ).toContain('en.contacts[0].icon');
+    const linkedLocation = {
+      ...DEFAULT_EN,
+      contacts: DEFAULT_EN.contacts.map((contact) =>
+        contact.icon === 'location'
+          ? { ...contact, href: 'https://x.test' }
+          : contact
+      ),
+    };
+    expect(
+      validateResumeData(linkedLocation, 'en').map((issue) => issue.path)
+    ).toContain('en.contacts[0].href');
+  });
+
+  it('normalizes stored contacts onto the fixed schema', () => {
+    const normalized = normalizeResumeContacts(
+      [{ icon: 'phone', text: 'changed', href: 'tel:1' }],
+      DEFAULT_EN.contacts
     );
-    expect(issues.map((issue) => issue.path)).toContain('en.contacts[0].icon');
+    expect(normalized.map((c) => c.icon)).toEqual(
+      DEFAULT_EN.contacts.map((c) => c.icon)
+    );
+    expect(normalized[1]?.text).toBe('changed');
+    expect(normalized[0]?.href).toBeUndefined();
   });
 });
 
@@ -140,7 +179,7 @@ describe('resume seeds', () => {
       expect(seed.projects).toHaveLength(5);
       expect(seed.education).toHaveLength(3);
       expect(seed.skills).toHaveLength(4);
-      expect(seed.contacts.length).toBeGreaterThanOrEqual(6);
+      expect(seed.contacts.length).toBe(7);
       expect(seed.languages).toHaveLength(2);
     }
   });

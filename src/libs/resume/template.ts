@@ -126,6 +126,32 @@ export type RenderResumeOptions = {
   docTitle: string;
 };
 
+/** The document always renders exactly these two fixed pages. */
+const TOTAL_PAGES = 2;
+
+/**
+ * Derived footer data (never user-edited): the left cell mirrors the
+ * header name plus the website contact text, and page labels follow the
+ * document locale.
+ */
+export function resumeFooter(
+  data: ResumeData,
+  locale: ResumeLocale
+): { left: string; pages: [string, string] } {
+  const website =
+    data.contacts.find((c) => c.icon === 'website')?.text.trim() ||
+    'okazakee.dev';
+  const left = `${data.name} · ${website}`;
+  const word = locale === 'it' ? 'Pagina' : 'Page';
+  return {
+    left,
+    pages: [
+      `${word} 1 / ${TOTAL_PAGES}`,
+      `${word} 2 / ${TOTAL_PAGES}`,
+    ],
+  };
+}
+
 /**
  * Renders the full standalone HTML document. Webfonts include the print
  * fallbacks (Noto Sans / Noto Sans Mono) so server-side Chromium PDFs use
@@ -137,6 +163,7 @@ export function renderResumeHtml(
   options: RenderResumeOptions
 ): string {
   const { locale, docTitle } = options;
+  const footer = resumeFooter(data, locale);
   const contacts = data.contacts.map(renderContact).join('');
   const skills = data.skills
     .map(
@@ -202,7 +229,7 @@ ${contacts}
 <section><div class="section-title">${escapeHtml(data.skillsTitle)}</div><div class="skills-grid">${skills}</div></section>
 <section><div class="section-title">${escapeHtml(data.experienceTitle)}</div>${experience}</section>
 </main>
-<div class="page-footer"><span>${escapeHtml(data.footerLeft)}</span><span>${escapeHtml(data.pageOneLabel)}</span></div>
+<div class="page-footer"><span>${escapeHtml(footer.left)}</span><span>${escapeHtml(footer.pages[0])}</span></div>
 </div>
 <div class="page">
 <div class="continuation-header"><span class="continuation-name">${escapeHtml(data.name)}</span><span class="continuation-title">${escapeHtml(data.continuationTitle)}</span></div>
@@ -213,7 +240,7 @@ ${contacts}
 <section><div class="section-title">${escapeHtml(data.languagesTitle)}</div>${languages}</section>
 </div>
 </main>
-<div class="page-footer"><span>${escapeHtml(data.footerLeft)}</span><span>${escapeHtml(data.pageTwoLabel)}</span></div>
+<div class="page-footer"><span>${escapeHtml(footer.left)}</span><span>${escapeHtml(footer.pages[1])}</span></div>
 </div>
 </body>
 </html>

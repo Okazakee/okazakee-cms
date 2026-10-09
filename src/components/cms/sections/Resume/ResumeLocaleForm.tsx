@@ -3,8 +3,6 @@
 import { useTranslations } from 'next-intl';
 import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import type {
-  ResumeContact,
-  ResumeContactIcon,
   ResumeData,
   ResumeEducation,
   ResumeExperience,
@@ -12,19 +10,8 @@ import type {
   ResumeProject,
   ResumeSkillGroup,
 } from '@/libs/resume/types';
+import { isLinkableContactIcon } from '@/libs/resume/types';
 import { Field, ListEditor, TextArea, TextInput } from './ResumeFields';
-
-const CONTACT_ICONS: ResumeContactIcon[] = [
-  'location',
-  'phone',
-  'email',
-  'github',
-  'linkedin',
-  'website',
-  'document',
-];
-
-const EMPTY_CONTACT: ResumeContact = { icon: 'website', text: '' };
 const EMPTY_SKILL: ResumeSkillGroup = { label: '', tags: [] };
 const EMPTY_JOB: ResumeExperience = {
   title: '',
@@ -70,53 +57,48 @@ export function ResumeLocaleForm({
         <Field label={t('headlineLabel')}>
           <TextInput value={data.title} onChange={(v) => patch({ title: v })} />
         </Field>
-        <ListEditor
-          {...listLabels}
-          addLabel={t('addContact')}
-          items={data.contacts}
-          onChange={(contacts) => patch({ contacts })}
-          onCreate={() => ({ ...EMPTY_CONTACT })}
-          renderItem={(item, onPatch) => (
-            <div className="space-y-2">
-              <div className="grid gap-2 sm:grid-cols-[140px_1fr]">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-text-muted">
-                    {t('iconLabel')}
-                  </span>
-                  <select
-                    value={item.icon}
-                    onChange={(e) =>
-                      onPatch({
-                        icon: e.target.value as ResumeContactIcon,
+        {/* Fixed header schema: text (and link where one exists) only. */}
+        <div className="space-y-3">
+          {data.contacts.map((contact, index) => (
+            <div
+              key={contact.icon}
+              className="grid gap-2 rounded-xl border border-border-subtle bg-surface-base p-3 sm:grid-cols-[110px_1fr]"
+            >
+              <span className="self-center font-mono text-xs text-text-muted">
+                {contact.icon}
+              </span>
+              <div className="space-y-2">
+                <TextInput
+                  value={contact.text}
+                  onChange={(text) =>
+                    onChange({
+                      ...data,
+                      contacts: data.contacts.map((current, i) =>
+                        i === index ? { ...current, text } : current
+                      ),
+                    })
+                  }
+                />
+                {isLinkableContactIcon(contact.icon) && (
+                  <TextInput
+                    mono
+                    value={contact.href ?? ''}
+                    onChange={(href) =>
+                      onChange({
+                        ...data,
+                        contacts: data.contacts.map((current, i) =>
+                          i === index ? { ...current, href } : current
+                        ),
                       })
                     }
-                    className="w-full rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main outline-none focus:border-accent-violet"
-                  >
-                    {CONTACT_ICONS.map((icon) => (
-                      <option key={icon} value={icon}>
-                        {icon}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <Field label={t('contactText')}>
-                  <TextInput
-                    value={item.text}
-                    onChange={(text) => onPatch({ text })}
+                    placeholder="https://… / mailto:… / tel:…"
                   />
-                </Field>
+                )}
               </div>
-              <Field label={t('contactHref')} hint={t('contactHrefHint')}>
-                <TextInput
-                  mono
-                  value={item.href ?? ''}
-                  onChange={(href) => onPatch({ href })}
-                  placeholder="https://… / mailto:… / tel:…"
-                />
-              </Field>
             </div>
-          )}
-        />
+          ))}
+          <p className="text-xs text-text-muted">{t('contactHrefHint')}</p>
+        </div>
       </EditorGroup>
 
       <EditorGroup title={t('summaryGroup')}>
@@ -360,33 +342,14 @@ export function ResumeLocaleForm({
         </EditorGroup>
       </div>
 
+      {/* Page footers are derived (name + website, locale page labels). */}
       <EditorGroup title={t('footerGroup')}>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label={t('continuationLabel')}>
-            <TextInput
-              value={data.continuationTitle}
-              onChange={(continuationTitle) => patch({ continuationTitle })}
-            />
-          </Field>
-          <Field label={t('footerLeftLabel')}>
-            <TextInput
-              value={data.footerLeft}
-              onChange={(footerLeft) => patch({ footerLeft })}
-            />
-          </Field>
-          <Field label={t('pageOneLabel')}>
-            <TextInput
-              value={data.pageOneLabel}
-              onChange={(pageOneLabel) => patch({ pageOneLabel })}
-            />
-          </Field>
-          <Field label={t('pageTwoLabel')}>
-            <TextInput
-              value={data.pageTwoLabel}
-              onChange={(pageTwoLabel) => patch({ pageTwoLabel })}
-            />
-          </Field>
-        </div>
+        <Field label={t('continuationLabel')}>
+          <TextInput
+            value={data.continuationTitle}
+            onChange={(continuationTitle) => patch({ continuationTitle })}
+          />
+        </Field>
       </EditorGroup>
     </div>
   );

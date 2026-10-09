@@ -206,9 +206,6 @@ export const DEFAULT_EN: ResumeData = {
     { name: 'English', level: 'C1 – Technical fluency' },
   ],
   continuationTitle: 'Full-Stack & Mobile Engineer',
-  footerLeft: 'Cristian Di Carlo · okazakee.dev',
-  pageOneLabel: 'Page 1 / 2',
-  pageTwoLabel: 'Page 2 / 2',
 };
 
 export const DEFAULT_IT: ResumeData = {
@@ -412,7 +409,4 @@ export const DEFAULT_IT: ResumeData = {
     { name: 'Inglese', level: 'C1 – Padronanza tecnica' },
   ],
   continuationTitle: 'Ingegnere Full-Stack & Mobile',
-  footerLeft: 'Cristian Di Carlo · okazakee.dev',
-  pageOneLabel: 'Pagina 1 / 2',
-  pageTwoLabel: 'Pagina 2 / 2',
 };

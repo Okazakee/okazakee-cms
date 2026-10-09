@@ -5,7 +5,12 @@
  * before Chromium ever renders them instead of silently spilling to a
  * third page.
  */
-import { isResumeLocale, type ResumeData } from './types';
+import {
+  FIXED_CONTACT_ICONS,
+  isLinkableContactIcon,
+  isResumeLocale,
+  type ResumeData,
+} from './types';
 
 export type ResumeIssue = {
   path: string;
@@ -14,7 +19,6 @@ export type ResumeIssue = {
 
 const MAX_SHORT = 200;
 const MAX_TEXT = 2000;
-const MAX_CONTACTS = 12;
 const MAX_GROUPS = 8;
 const MAX_TAGS = 30;
 const MAX_ENTRIES = 12;
@@ -80,35 +84,40 @@ export function validateResumeData(
     'educationTitle',
     'languagesTitle',
     'continuationTitle',
-    'footerLeft',
-    'pageOneLabel',
-    'pageTwoLabel',
   ]) {
     checkShort(issues, `${path}.${key}`, d[key], MAX_SHORT, true);
   }
 
-  if (checkList(issues, `${path}.contacts`, d.contacts, MAX_CONTACTS, true)) {
-    (d.contacts as unknown[]).forEach((item, i) => {
+  // Fixed header schema: exact rows in exact order, no more, no less.
+  if (!Array.isArray(d.contacts)) {
+    issues.push({ path: `${path}.contacts`, message: 'At least one entry' });
+  } else {
+    if (d.contacts.length !== FIXED_CONTACT_ICONS.length) {
+      issues.push({
+        path: `${path}.contacts`,
+        message: `Must have exactly ${FIXED_CONTACT_ICONS.length} entries`,
+      });
+    }
+    d.contacts.forEach((item, i) => {
       const c = item as Record<string, unknown>;
       const at = `${path}.contacts[${i}]`;
+      const expectedIcon = FIXED_CONTACT_ICONS[i];
       if (
         typeof c !== 'object' ||
         c === null ||
-        ![
-          'location',
-          'phone',
-          'email',
-          'github',
-          'linkedin',
-          'website',
-          'document',
-        ].includes(String((c as Record<string, unknown>).icon))
+        c.icon !== expectedIcon
       ) {
-        issues.push({ path: `${at}.icon`, message: 'Unknown icon' });
+        issues.push({
+          path: `${at}.icon`,
+          message: `Must be "${expectedIcon ?? '?'}"`,
+        });
+        return;
       }
-      checkShort(issues, `${at}.text`, c?.text, MAX_SHORT, true);
-      if (c?.href !== undefined && c.href !== '') {
+      checkShort(issues, `${at}.text`, c.text, MAX_SHORT, true);
+      if (expectedIcon && isLinkableContactIcon(expectedIcon)) {
         checkShort(issues, `${at}.href`, c.href, MAX_TEXT, true);
+      } else if (typeof c.href === 'string' && c.href.trim() !== '') {
+        issues.push({ path: `${at}.href`, message: 'Link not allowed' });
       }
     });
   }
