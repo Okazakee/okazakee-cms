@@ -35,6 +35,7 @@ import { careerActions } from '@/app/actions/cms/sections/careerActions';
 import { contactsActions } from '@/app/actions/cms/sections/contactsActions';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
+import { portfolioActions } from '@/app/actions/cms/sections/portfolioActions';
 import { skillsActions } from '@/app/actions/cms/sections/skillsActions';
 import {
   updateMyProfile,
@@ -88,6 +89,11 @@ const blogCreate = (title: string, tempId: string) => ({
 
 beforeEach(() => {
   h.invalidate.mockClear();
+  // Storage hardening: actions resolve the bucket + origin from env per call.
+  // Loopback-dev pairing routes writes to website-dev with a matching origin
+  // so fake public URLs parse for owned-bucket cleanup tests.
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://fake.supabase.co');
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
 });
 
 describe('blog BATCH_PUBLISH evidence', () => {
@@ -140,7 +146,7 @@ describe('blog BATCH_PUBLISH evidence', () => {
 
   it('on DB failure after upload removes the NEW object but never the trusted OLD one', async () => {
     const oldUrl =
-      'https://fake.supabase.co/storage/v1/object/public/website/Website%20Assets/blog/old.webp';
+      'https://fake.supabase.co/storage/v1/object/public/website-dev/Website%20Assets/blog/old.webp';
     h.fake = makeFake(
       {
         cms_allowed_users: EDITOR,
@@ -224,6 +230,65 @@ describe('contacts BATCH_PUBLISH reorder split', () => {
     expect(data.reordered).toEqual([2]);
     expect(data.failed).toHaveLength(1);
   });
+  it('accepts extensionless SVG URLs and rejects named or unsafe icons', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, contacts: [] });
+    const result = await contactsActions({
+      type: 'BATCH_PUBLISH',
+      creates: [
+        'https://cdn.example.test/icon',
+        'Mail',
+        'javascript:alert(1)',
+        'data:image/svg+xml,<svg/>',
+      ].map((icon, position) => ({
+        tempId: String(position),
+        label: 'Contact',
+        icon,
+        link: 'mailto:hello@example.test',
+        bg_color: '#ffffff',
+        position,
+      })),
+      updates: [],
+      deletes: [],
+      reorder: [],
+    });
+    expect(result.success).toBe(false);
+    expect(result.data).toMatchObject({ created: ['0'] });
+    expect(h.fake.state.tables.contacts).toHaveLength(1);
+  });
+  it('interleaves a created contact and densely orders surviving contacts', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      contacts: [
+        { id: 1, position: 0 },
+        { id: 2, position: 1 },
+      ],
+    });
+    const result = await contactsActions({
+      type: 'BATCH_PUBLISH',
+      creates: [
+        {
+          tempId: 'new',
+          label: 'New',
+          icon: 'https://cdn.example.test/new-icon',
+          link: 'https://example.test',
+          bg_color: '#ffffff',
+          position: 0,
+        },
+      ],
+      updates: [],
+      deletes: [2],
+      reorder: [{ id: 1, position: 1 }],
+    });
+    expect(result.success).toBe(true);
+    const evidence = result.data as { createdIds: Record<string, number> };
+    expect(h.fake.state.tables.contacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: evidence.createdIds.new, position: 0 }),
+        expect.objectContaining({ id: 1, position: 1 }),
+      ])
+    );
+    expect(h.fake.state.tables.contacts).toHaveLength(2);
+  });
 });
 
 describe('skills BATCH_PUBLISH temp category mapping', () => {
@@ -248,7 +313,8 @@ describe('skills BATCH_PUBLISH temp category mapping', () => {
       deleteSkills: [],
       updateCategories: [],
       deleteCategories: [],
-      categoryOrder: [],
+      categoryOrder: [{ id: 'cat-1', position: 0 }],
+      skillOrder: [{ id: 'skill:temp-1', position: 0 }],
     });
 
     expect(result.success).toBe(true);
@@ -260,6 +326,10 @@ describe('skills BATCH_PUBLISH temp category mapping', () => {
     expect(data.tempIdToRealId['cat-1']).toBe(1);
     expect(data.created).toEqual(['cat-1', 'skill:temp-1']);
     expect(data.createdIds['skill:temp-1']).toBe(1);
+    expect(data.tempIdToRealId['skill:temp-1']).toBe(1);
+    expect(result.data).toMatchObject({ reordered: [1, 'skill:1'] });
+    expect(h.fake.state.tables.skills_categories[0].position).toBe(0);
+    expect(h.fake.state.tables.skills[0].position).toBe(0);
     expect(h.fake.state.tables.skills[0]).not.toHaveProperty('tempId');
     expect(h.fake.state.tables.skills[0].category_id).toBe(1);
   });
@@ -319,10 +389,67 @@ describe('i18n CAS and delta merge', () => {
     i18n_translations: [
       {
         language: 'en',
-        translations: { hero: { title: 'Old', sub: 'keep' }, other: 1 },
+        translations: {
+          'hero-section': { title: 'Old', sub: 'keep' },
+          other: 1,
+        },
         privacy_policy: 'old',
       },
     ],
+  });
+
+  it.each([
+    'skills-section',
+    'career-section',
+    'posts-section',
+    'contacts-section',
+    'privacyPolicy',
+    'header',
+    'footer',
+    'errors',
+    '',
+  ])('rejects frozen namespace %s before writing', async (sectionKey) => {
+    h.fake = makeFake(seedTranslations());
+    for (const operation of [
+      {
+        type: 'UPDATE_SECTION' as const,
+        locale: 'en',
+        sectionKey,
+        sectionData: { title: 'Forbidden' },
+      },
+      {
+        type: 'UPDATE_SECTIONS' as const,
+        sectionKey,
+        sections: { en: { title: 'Forbidden' } },
+      },
+    ]) {
+      const result = await i18nActions(operation);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('owned by the public website');
+    }
+    expect(
+      h.fake.state.log.filter(
+        (entry) =>
+          entry.table === 'i18n_translations' && entry.mode === 'update'
+      )
+    ).toHaveLength(0);
+    expect(h.invalidate).not.toHaveBeenCalled();
+  });
+
+  it('keeps request form translations editable', async () => {
+    h.fake = makeFake(seedTranslations());
+    const result = await i18nActions({
+      type: 'UPDATE_SECTION',
+      locale: 'en',
+      sectionKey: 'request-form',
+      sectionData: { title: 'Project request' },
+    });
+    expect(result.success).toBe(true);
+    expect(h.fake.state.tables.i18n_translations[0].translations).toMatchObject(
+      {
+        'request-form': { title: 'Project request' },
+      }
+    );
   });
 
   it('merges a section delta without clobbering concurrent keys', async () => {
@@ -331,14 +458,14 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: { title: 'New' },
     });
 
     expect(result.success).toBe(true);
     const stored = h.fake.state.tables.i18n_translations[0]
       .translations as Record<string, Record<string, unknown>>;
-    expect(stored.hero).toEqual({ title: 'New', sub: 'keep' });
+    expect(stored['hero-section']).toEqual({ title: 'New', sub: 'keep' });
     expect(stored.other).toBe(1);
   });
 
@@ -356,7 +483,7 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: { title: 'Retried' },
     });
 
@@ -381,7 +508,7 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: { title: 'Never' },
     });
 
@@ -395,7 +522,7 @@ describe('i18n CAS and delta merge', () => {
       i18n_translations: [
         {
           language: 'en',
-          translations: { hero: { list: ['a', 'b'] } },
+          translations: { 'hero-section': { list: ['a', 'b'] } },
           privacy_policy: 'x',
         },
       ],
@@ -407,14 +534,14 @@ describe('i18n CAS and delta merge', () => {
     const result = await i18nActions({
       type: 'UPDATE_SECTION',
       locale: 'en',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sectionData: malicious,
     });
 
     expect(result.success).toBe(true);
     const stored = h.fake.state.tables.i18n_translations[0]
       .translations as Record<string, unknown>;
-    const hero = stored.hero as Record<string, unknown>;
+    const hero = stored['hero-section'] as Record<string, unknown>;
     expect(hero.list).toEqual(['a', 'B']);
     expect(Object.hasOwn(hero, '__proto__')).toBe(false);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
@@ -425,7 +552,7 @@ describe('i18n CAS and delta merge', () => {
 
     const result = await i18nActions({
       type: 'UPDATE_SECTIONS',
-      sectionKey: 'hero',
+      sectionKey: 'hero-section',
       sections: { en: { title: 'EN' }, it: { title: 'IT' } },
     });
 
@@ -518,7 +645,7 @@ describe('acknowledged partial commits survive exceptions', () => {
         {
           tempId: 'first',
           label: 'First',
-          icon: 'Mail',
+          icon: 'https://cdn.example.test/mail',
           link: 'mailto:first@example.test',
           bg_color: '#ffffff',
           position: 0,
@@ -526,7 +653,7 @@ describe('acknowledged partial commits survive exceptions', () => {
         {
           tempId: 'second',
           label: 'Second',
-          icon: 'Mail',
+          icon: 'https://cdn.example.test/mail',
           link: 'mailto:second@example.test',
           bg_color: '#ffffff',
           position: 1,
@@ -571,6 +698,7 @@ describe('skills entity-scoped evidence', () => {
       deleteSkills: [],
       deleteCategories: [],
       categoryOrder: [],
+      skillOrder: [],
       updateCategories: [{ id: 1, data: { name: 'New' } }],
       updateSkills: [{ id: 1, data: { title: 'New' } }],
     });
@@ -588,11 +716,99 @@ describe('skills entity-scoped evidence', () => {
       deleteSkills: [],
       deleteCategories: [],
       categoryOrder: [],
+      skillOrder: [],
       updateCategories: [],
       updateSkills: [{ id: 999, data: { title: 'New' } }],
     });
     expect(result.success).toBe(false);
     expect(result.data).toMatchObject({ updated: [], failed: [{ id: 999 }] });
+  });
+
+  it('persists the link and the dense per-category positions', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      skills: [
+        { id: 1, title: 'TypeScript', category_id: 1 },
+        { id: 2, title: 'Rust', category_id: 1 },
+        { id: 3, title: 'Bun', category_id: 2 },
+      ],
+    });
+
+    const result = await skillsActions({
+      type: 'BATCH_PUBLISH',
+      newCategories: [],
+      newSkills: [],
+      deleteSkills: [],
+      deleteCategories: [],
+      categoryOrder: [],
+      skillOrder: [
+        { id: 2, position: 0 },
+        { id: 1, position: 1 },
+        { id: 3, position: 0 },
+      ],
+      updateCategories: [],
+      updateSkills: [
+        { id: 1, data: { title: 'TypeScript', link: 'https://ts.dev/' } },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      reordered: ['skill:2', 'skill:1', 'skill:3'],
+      updated: [1],
+    });
+    expect(h.fake.state.tables.skills).toEqual([
+      expect.objectContaining({
+        id: 1,
+        link: 'https://ts.dev/',
+        position: 1,
+      }),
+      expect.objectContaining({ id: 2, position: 0 }),
+      expect.objectContaining({ id: 3, position: 0 }),
+    ]);
+  });
+
+  it('stores a blank link as null and rejects a non-http scheme', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      skills: [{ id: 1, title: 'TypeScript', category_id: 1 }],
+    });
+
+    const cleared = await skillsActions({
+      type: 'UPDATE',
+      id: 1,
+      data: { link: '   ' },
+    });
+    expect(cleared.success).toBe(true);
+    expect(h.fake.state.tables.skills[0].link).toBeNull();
+
+    const rejected = await skillsActions({
+      type: 'UPDATE',
+      id: 1,
+      data: { link: 'javascript:alert(1)' },
+    });
+    expect(rejected.success).toBe(false);
+    expect(h.fake.state.tables.skills[0].link).toBeNull();
+  });
+
+  it('fails a skill reorder for an unknown temp id instead of reporting a commit', async () => {
+    h.fake = makeFake({ cms_allowed_users: ADMIN, skills: [] });
+    const result = await skillsActions({
+      type: 'BATCH_PUBLISH',
+      newCategories: [],
+      newSkills: [],
+      deleteSkills: [],
+      deleteCategories: [],
+      categoryOrder: [],
+      skillOrder: [{ id: 'skill:ghost', position: 0 }],
+      updateCategories: [],
+      updateSkills: [],
+    });
+    expect(result.success).toBe(false);
+    expect(result.data).toMatchObject({
+      reordered: [],
+      failed: [{ kind: 'reorder', id: 'skill:ghost' }],
+    });
   });
 });
 
@@ -633,6 +849,28 @@ describe('asset commit and cleanup authority', () => {
       careerId: 1,
       file: webpFile(),
       currentLogoUrl: 'https://attacker.test/website/resumes/unrelated.pdf',
+    });
+    expect(result.success).toBe(true);
+    expect(h.fake.state.removed).toEqual([]);
+  });
+  it('never deletes a same-origin cross-bucket URL (prod object from a dev write)', async () => {
+    // Old prod URL is readable but must be a cleanup no-op: the dev bucket
+    // owns nothing at that path, so deleting would remove a prod object.
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      blog_posts: [
+        {
+          id: 1,
+          title_en: 'Existing',
+          image:
+            'https://fake.supabase.co/storage/v1/object/public/website/Website%20Assets/blog/old.webp',
+        },
+      ],
+    });
+    const result = await blogActions({
+      type: 'UPLOAD_IMAGE',
+      blogId: 1,
+      file: webpFile(),
     });
     expect(result.success).toBe(true);
     expect(h.fake.state.removed).toEqual([]);
@@ -750,76 +988,205 @@ describe('auth allowlist boundary', () => {
   });
 });
 
-const publicCopyRow = {
-  id: 1,
-  language: 'en',
-  translations: { 'posts-section': { button: 'Read more' } },
-  privacy_policy: '# Privacy',
-};
+describe('draft visibility and author picker', () => {
+  it('serves drafts to allowlisted CMS readers through the admin boundary', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [
+        { id: 1, title_en: 'Draft', hidden: true },
+        { id: 2, title_en: 'Live', hidden: false },
+      ],
+      portfolio_posts: [{ id: 7, title_en: 'Draft work', hidden: true }],
+    });
+    const blog = await blogActions({ type: 'GET' });
+    expect(blog.success).toBe(true);
+    expect(
+      (blog.data as Array<{ title_en: string }>).map((row) => row.title_en)
+    ).toEqual(expect.arrayContaining(['Draft', 'Live']));
+    const portfolio = await portfolioActions({ type: 'GET' });
+    expect(portfolio.success).toBe(true);
+    expect(
+      (portfolio.data as Array<{ title_en: string }>).map((row) => row.title_en)
+    ).toEqual(expect.arrayContaining(['Draft work']));
+  });
 
-describe('public preview copy authorization', () => {
-  it.each([ADMIN, EDITOR])(
-    'allows allowlisted roles to read only public copy columns',
-    async (allowedUser) => {
-      h.fake = makeFake({
-        cms_allowed_users: [allowedUser],
-        i18n_translations: [publicCopyRow],
-      });
-      const result = await i18nActions({ type: 'GET_PUBLIC' });
+  it('rejects unallowlisted readers before touching post tables', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: [],
+      blog_posts: [{ id: 1, title_en: 'Draft', hidden: true }],
+      portfolio_posts: [{ id: 7, title_en: 'Draft work', hidden: true }],
+    });
+    expect((await blogActions({ type: 'GET' })).success).toBe(false);
+    expect((await portfolioActions({ type: 'GET' })).success).toBe(false);
+    expect(
+      h.fake.state.log.filter(
+        (entry) =>
+          (entry.table === 'blog_posts' || entry.table === 'portfolio_posts') &&
+          entry.mode === 'select'
+      )
+    ).toEqual([]);
+  });
+
+  it('exposes only the picker columns for authors, never allowlist emails', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      user_profiles: [
+        {
+          id: 'user-1',
+          email: 'author@example.com',
+          display_name: 'Author',
+          avatar_url: null,
+        },
+      ],
+    });
+    for (const result of [
+      await blogActions({ type: 'GET_AUTHORS' }),
+      await portfolioActions({ type: 'GET_AUTHORS' }),
+    ]) {
       expect(result.success).toBe(true);
       expect(result.data).toEqual([
-        { language: 'en', translations: publicCopyRow.translations },
+        { id: 'user-1', display_name: 'Author', avatar_url: null },
       ]);
-      expect(h.invalidate).not.toHaveBeenCalled();
     }
-  );
+  });
 
-  it.each([
-    {
-      tables: { cms_allowed_users: [] },
-      user: { id: 'user-1', email: 'admin@example.com' },
-    },
-    { tables: { cms_allowed_users: ADMIN }, user: null },
-  ])(
-    'rejects outsiders and anonymous users before reading copy',
-    async ({ tables, user }) => {
-      h.fake = makeFake(
-        { ...tables, i18n_translations: [publicCopyRow] },
-        { user }
-      );
-      expect((await i18nActions({ type: 'GET_PUBLIC' })).success).toBe(false);
-      expect(
-        h.fake.state.log.filter((entry) => entry.table === 'i18n_translations')
-      ).toEqual([]);
-    }
-  );
+  it('refuses author enumeration to unallowlisted callers', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: [],
+      user_profiles: [{ id: 'user-1', display_name: 'Author' }],
+    });
+    expect((await blogActions({ type: 'GET_AUTHORS' })).success).toBe(false);
+    expect((await portfolioActions({ type: 'GET_AUTHORS' })).success).toBe(
+      false
+    );
+    expect(
+      h.fake.state.log.filter(
+        (entry) => entry.table === 'user_profiles' && entry.mode === 'select'
+      )
+    ).toEqual([]);
+  });
+});
 
-  it.each([
-    { type: 'GET' },
-    {
-      type: 'UPDATE_SECTION',
-      locale: 'en',
-      sectionKey: 'header',
-      sectionData: { theme: 'Changed' },
-    },
-    {
-      type: 'UPDATE_SECTIONS',
-      sectionKey: 'header',
-      sections: { en: { theme: 'Changed' } },
-    },
-    { type: 'UPDATE_PRIVACY', locale: 'en', markdown: 'Changed' },
-  ] as const)(
-    'does not grant editors administrative access for $type',
-    async (operation) => {
-      h.fake = makeFake({
-        cms_allowed_users: EDITOR,
-        i18n_translations: [structuredClone(publicCopyRow)],
-      });
-      expect((await i18nActions(operation)).success).toBe(false);
-      expect(h.fake.state.tables.i18n_translations).toEqual([publicCopyRow]);
-      expect(
-        h.fake.state.log.filter((entry) => entry.table === 'i18n_translations')
-      ).toEqual([]);
-    }
-  );
+describe('per-post storage layout', () => {
+  it('finalizes a blog create from staging into its per-post folder', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [],
+    });
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [blogCreate('Staged', 's1')],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const staged = h.fake.state.uploads.find((p) =>
+      p.startsWith('blog/staging/')
+    );
+    expect(staged).toBeDefined();
+    const final = h.fake.state.uploads.find((p) => p.startsWith('blog/1/'));
+    expect(final).toBeDefined();
+    // Staged object is removed after the copy; the row points at the copy.
+    expect(h.fake.state.removed).toContain(staged);
+    const row = h.fake.state.tables.blog_posts[0] as Record<string, unknown>;
+    expect(row.image).toContain('/website-dev/blog/1/');
+  });
+
+  it('uploads a blog update directly into its per-post folder', async () => {
+    const oldUrl =
+      'https://fake.supabase.co/storage/v1/object/public/website-dev/blog/7/old.webp';
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [{ id: 7, image: oldUrl, title_en: 'Old' }],
+    });
+    h.fake.state.objects[`website-dev/blog/7/old.webp`] = 'old-bytes';
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [{ id: 7, data: { title_en: 'New' }, file: webpFile() }],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const upload = h.fake.state.uploads[0];
+    expect(upload.startsWith('blog/7/')).toBe(true);
+    expect(h.fake.state.removed).toContain('blog/7/old.webp');
+  });
+
+  it('removes the per-post folder when a blog post is deleted', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      blog_posts: [
+        {
+          id: 9,
+          image:
+            'https://fake.supabase.co/storage/v1/object/public/website-dev/blog/9/cover.webp',
+          title_en: 'Gone',
+        },
+      ],
+    });
+    h.fake.state.objects[`website-dev/blog/9/cover.webp`] = 'cover';
+    h.fake.state.objects[`website-dev/blog/9/body.webp`] = 'body';
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [],
+      deletes: [9],
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      Object.keys(h.fake.state.objects).filter((k) =>
+        k.startsWith('website-dev/blog/9/')
+      )
+    ).toEqual([]);
+  });
+
+  it('finalizes a portfolio create from staging into its per-post folder', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: EDITOR,
+      portfolio_posts: [],
+    });
+
+    const result = await portfolioActions({
+      type: 'BATCH_PUBLISH',
+      creates: [
+        {
+          data: {
+            title_en: 'P',
+            title_it: 'P',
+            image: '',
+            description_en: 'd',
+            description_it: 'd',
+            body_en: 'b',
+            body_it: 'b',
+            blurhashURL: '',
+            post_tags: '',
+            author_id: 'user-1',
+          },
+          file: webpFile(),
+          tempId: 'p1',
+        },
+      ],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      h.fake.state.uploads.some((p) => p.startsWith('portfolio/staging/'))
+    ).toBe(true);
+    expect(h.fake.state.uploads.some((p) => p.startsWith('portfolio/1/'))).toBe(
+      true
+    );
+    const row = h.fake.state.tables.portfolio_posts[0] as Record<
+      string,
+      unknown
+    >;
+    expect(row.image).toContain('/website-dev/portfolio/1/');
+  });
 });

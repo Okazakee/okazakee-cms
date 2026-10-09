@@ -1,43 +1,48 @@
 'use client';
 
-import {
-  Calendar,
-  Edit3,
-  Eye,
-  FileText,
-  Info,
-  Plus,
-  Trash2,
-} from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { Calendar, EyeOff, FileText, Plus } from 'lucide-react';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type Author,
   blogActions,
 } from '@/app/actions/cms/sections/blogActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { PostBodyField } from '@/components/cms/shared/PostBodyField';
+import { PostPreviewModal } from '@/components/cms/shared/PostPreviewModal';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
+import { TagEditor } from '@/components/cms/shared/TagEditor';
+import { Toggle } from '@/components/cms/shared/Toggle';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
 import { ListPostImage } from '@/components/common/cms/ListPostImage';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { BlogPreview } from '@/components/common/cms/previews/BlogPreview';
-import { PostPreview } from '@/components/common/cms/previews/PostPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
+import { useBodyImages } from '@/hooks/cms/useBodyImages';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoBlogPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { BlogPost } from '@/types/fetchedData.types';
 
@@ -58,6 +63,12 @@ interface BlogFormData {
   author_id: string;
   hidden: boolean;
 }
+
+/**
+ * Framework cap is 10 MB per server-action request: covers plus body
+ * snapshots must fit together or nothing is sent.
+ */
+const MAX_PUBLISH_BYTES = 9 * 1024 * 1024;
 
 const emptyForm: BlogFormData = {
   title_en: '',
@@ -82,13 +93,11 @@ export default function BlogSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isPostPreviewOpen, setIsPostPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [mode, setMode] = useState<FormMode>('list');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<BlogFormData>(emptyForm);
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const activeLocale = useLocale() === 'it' ? 'it' : 'en';
   const [formLocale, setFormLocale] = useState<'en' | 'it'>('en');
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
   const [newPosts, setNewPosts] = useState<
@@ -102,24 +111,11 @@ export default function BlogSection() {
     imageProcessing: { maxWidth: 1920, maxHeight: 1080, quality: 0.85 },
     generateBlurhash: true,
   });
-
-  const {
-    translations,
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    canEditTranslations,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('posts-section');
+  const bodyImages = useBodyImages();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const isDirty =
-    modifiedIds.size > 0 ||
-    newPosts.length > 0 ||
-    deletedIds.size > 0 ||
-    transDirty;
+    modifiedIds.size > 0 || newPosts.length > 0 || deletedIds.size > 0;
   useSectionDirty('blog', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -131,6 +127,25 @@ export default function BlogSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture posts, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setPosts(
+          JSON.parse(JSON.stringify(demoBlogPosts)).map(
+            (p: EditablePost) => ({ ...p, image_file: null })
+          )
+        );
+        setAuthors([
+          {
+            id: 'demo-user',
+            display_name: 'Demo Dana',
+            avatar_url: null,
+          },
+        ]);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await blogActions({ type: 'GET' });
         if (!current()) return;
@@ -244,10 +259,41 @@ export default function BlogSection() {
     setPosts((prev) => prev.filter((p) => p.id !== id));
   };
 
+  // List quick toggle: stages a visibility flip like any other edit, so
+  // Publish commits it through the normal evidence flow.
+  const toggleHidden = (id: number) => {
+    setPosts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p))
+    );
+    setModifiedIds((prev) => new Set(prev).add(id));
+  };
+
   const handlePublish = useCallback(async () => {
     const errors: string[] = [];
     setIsUpdating(true);
     setError(null);
+
+    // Offline showcase: remap temp ids, materialize staged covers as
+    // object URLs, drop deletes, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const retained = posts.filter((p) => !deletedIds.has(p.id));
+      let nextFakeId = Math.max(0, ...retained.map((p) => p.id)) + 1;
+      setPosts(
+        retained.map((p) => ({
+          ...p,
+          id: p.id < 0 ? nextFakeId++ : p.id,
+          image: p.image_file ? URL.createObjectURL(p.image_file) : p.image,
+          image_file: null,
+        }))
+      );
+      setNewPosts([]);
+      setModifiedIds(new Set());
+      setDeletedIds(new Set());
+      bodyImages.reconcile(retained.flatMap((p) => [p.body_en, p.body_it]));
+      setIsUpdating(false);
+      return;
+    }
 
     // Pending creates may have been edited after creation: always derive the
     // payload from the latest `posts` entry, never the stale newPosts snapshot.
@@ -261,6 +307,10 @@ export default function BlogSection() {
           tempId: String(item.post.id),
           file,
           blurhashURL: post.blurhashURL,
+          bodyFiles: bodyImages.referencedPayload([
+            post.body_en,
+            post.body_it,
+          ]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
@@ -289,6 +339,10 @@ export default function BlogSection() {
           file: post.image_file || null,
           currentImageUrl: post.image,
           blurhashURL: post.blurhashURL,
+          bodyFiles: bodyImages.referencedPayload([
+            post.body_en,
+            post.body_it,
+          ]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
@@ -305,6 +359,23 @@ export default function BlogSection() {
       ];
     });
     const deleteIds = Array.from(deletedIds);
+
+    // Framework cap is 10 MB per server-action request: covers plus body
+    // snapshots must fit together, or nothing is sent.
+    const payloadBytes = [...creates, ...updates].reduce(
+      (total, item) =>
+        total +
+        (item.file?.size ?? 0) +
+        item.bodyFiles.reduce((sum, f) => sum + f.file.size, 0),
+      0
+    );
+    if (payloadBytes > MAX_PUBLISH_BYTES) {
+      setError(
+        'Total upload size is over ~9 MB (covers plus body images); publish fewer posts at a time'
+      );
+      setIsUpdating(false);
+      return;
+    }
 
     try {
       let retainedCreates = createTempIds;
@@ -359,11 +430,15 @@ export default function BlogSection() {
         );
         setModifiedIds(new Set(retainedUpdates));
         setDeletedIds(new Set(retainedDeletes));
-      }
-
-      if (transDirty) {
-        const te = await saveTranslations();
-        errors.push(...te);
+        // Drop staged body images no retained draft references anymore;
+        // a full success clears everything.
+        const retainedPosts = posts.filter(
+          (p) =>
+            retainedCreateSet.has(String(p.id)) || retainedModifiedSet.has(p.id)
+        );
+        bodyImages.reconcile(
+          retainedPosts.flatMap((p) => [p.body_en, p.body_it])
+        );
       }
 
       const revalidationMessage = revalidationWarning(batch);
@@ -373,8 +448,7 @@ export default function BlogSection() {
       const remaining =
         retainedCreates.length +
         retainedUpdates.length +
-        retainedDeletes.length +
-        (transDirty && !batch.success ? 1 : 0);
+        retainedDeletes.length;
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -389,31 +463,29 @@ export default function BlogSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [
-    posts,
-    newPosts,
-    deletedIds,
-    modifiedIds,
-    transDirty,
-    saveTranslations,
-    fetchData,
-    user,
-  ]);
+  }, [posts, newPosts, deletedIds, modifiedIds, fetchData, user, bodyImages]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setPosts(
+        JSON.parse(JSON.stringify(demoBlogPosts)).map(
+          (p: EditablePost) => ({ ...p, image_file: null })
+        )
+      );
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewPosts([]);
     setDeletedIds(new Set());
-    revertTranslations();
     setError(null);
+    // Drafts are gone: every staged blob is residue.
+    bodyImages.revokeAll();
   };
 
   useSectionCallbacks('blog', handlePublish, handleRevert);
-
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
 
   if (isLoading)
     return (
@@ -426,39 +498,28 @@ export default function BlogSection() {
     const isEditing = mode === 'edit';
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-main ">
-            {isEditing ? t('blog.editPost') : t('blog.createNewPost')}
-          </h2>
-          <div className="flex items-center gap-3">
+        <EditorToolbar
+          title={isEditing ? t('blog.editPost') : t('blog.createNewPost')}
+          description={t('editor.draftHint')}
+          actions={
             <LocaleToggle activeLocale={formLocale} onChange={setFormLocale} />
-            <button
-              type="button"
-              onClick={closeForm}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-raised rounded-lg text-text-main hover:bg-surface-raised"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
+          }
+        />
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
-
-        {/* Content */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.content')}
-          </h3>
+        <EditorGroup title={t('editor.groups.summary')}>
           <TranslationField
-            label={t('blog.titleEnLabel')}
+            label={t('editor.fields.title')}
             enValue={formData.title_en}
             itValue={formData.title_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, title_en: v }))}
             onChangeIt={(v) => setFormData((p) => ({ ...p, title_it: v }))}
+            enPlaceholder={t('blog.titleEnPlaceholder')}
+            itPlaceholder={t('blog.titleItPlaceholder')}
             required
             activeLocale={formLocale}
           />
           <TranslationField
-            label={t('blog.descriptionEnLabel')}
+            label={t('editor.fields.summary')}
             enValue={formData.description_en}
             itValue={formData.description_it}
             onChangeEn={(v) =>
@@ -467,116 +528,22 @@ export default function BlogSection() {
             onChangeIt={(v) =>
               setFormData((p) => ({ ...p, description_it: v }))
             }
+            enPlaceholder={t('blog.descriptionEnPlaceholder')}
+            itPlaceholder={t('blog.descriptionItPlaceholder')}
             type="textarea"
             rows={3}
             activeLocale={formLocale}
           />
-          <TranslationField
-            label={t('blog.bodyEnLabel')}
-            enValue={formData.body_en}
-            itValue={formData.body_it}
-            onChangeEn={(v) => setFormData((p) => ({ ...p, body_en: v }))}
-            onChangeIt={(v) => setFormData((p) => ({ ...p, body_it: v }))}
-            type="textarea"
-            rows={8}
-            activeLocale={formLocale}
-          />
-          <div className="flex items-start gap-2 text-xs text-text-muted bg-surface-base rounded-lg p-3 border border-border-subtle ">
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
-                  ****text****
-                </code>{' '}
-                {t('blog.syntaxHighlight')}
-              </p>
-              <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
-                  ![alt-blurhash](url)
-                </code>{' '}
-                {t('blog.syntaxImage')}
-              </p>
-            </div>
-          </div>
-        </div>
+        </EditorGroup>
 
-        {/* Metadata */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.configuration')}
-          </h3>
-          <div className="grid md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Tags
-              </label>
-              <input
-                type="text"
-                value={formData.post_tags}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, post_tags: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('blog.tagsPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                value={formData.created_at}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, created_at: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Author
-              </label>
-              <select
-                value={formData.author_id}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, author_id: e.target.value }))
-                }
-                className={inputClass}
-              >
-                <option value="">Select</option>
-                {authors.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.display_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.hidden}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, hidden: e.target.checked }))
-              }
-              className="w-4 h-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
-            />
-            Hidden
-          </label>
-        </div>
-
-        {/* Media */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('blog.selectImage')}
-          </h3>
+        <EditorGroup title={t('editor.groups.media')}>
           <FileDropzone
-            label="Image"
+            label={t('blog.selectImage')}
             previewUrl={imgUpload.previewUrl}
             blurhash={imgUpload.blurhash}
             isDragging={imgUpload.isDragging}
             isProcessing={imgUpload.isProcessing}
+            hasPendingFile={Boolean(imgUpload.file)}
             error={imgUpload.error}
             currentUrl={isEditing ? formData.image : undefined}
             dropzoneProps={{
@@ -588,55 +555,137 @@ export default function BlogSection() {
             fileInputRef={imgUpload.fileInputRef}
             onClear={imgUpload.clearFile}
             onBrowse={imgUpload.openFileDialog}
+            overlayActions
           />
-        </div>
+        </EditorGroup>
 
-        <div className="flex gap-3 pt-4">
+        <EditorGroup title={t('editor.groups.content')}>
+
+          <PostBodyField
+            id="blog-body"
+            label={t('editor.fields.content')}
+            value={formLocale === 'en' ? formData.body_en : formData.body_it}
+            onChange={(v) =>
+              setFormData((p) =>
+                formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
+              )
+            }
+            placeholder={
+              formLocale === 'en'
+                ? t('blog.bodyEnPlaceholder')
+                : t('blog.bodyItPlaceholder')
+            }
+            stageImages={bodyImages.stageFiles}
+            stagingErrors={bodyImages.stagingErrors}
+            onPreview={() => setPreviewOpen(true)}
+          />
+          {previewOpen && (
+            <PostPreviewModal
+              title={t('editor.fields.content')}
+              markdown={
+                formLocale === 'en' ? formData.body_en : formData.body_it
+              }
+              closeLabel={t('common.close')}
+              onClose={() => setPreviewOpen(false)}
+            />
+          )}
+          <details className="rounded-lg border border-border-subtle bg-surface-base p-3 text-xs text-text-muted">
+            <summary className="cursor-pointer font-medium text-text-main">
+              {t('editor.formattingHelp')}
+            </summary>
+            <div className="mt-2 space-y-1">
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  ****text****
+                </code>{' '}
+                {t('editor.syntaxBold')}
+              </p>
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  *text*
+                </code>{' '}
+                {t('editor.syntaxViolet')}
+              </p>
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  ![alt-blurhash](url)
+                </code>{' '}
+                {t('blog.syntaxImage')}
+              </p>
+            </div>
+          </details>
+        </EditorGroup>
+
+        <EditorGroup title={t('editor.groups.publication')}>
+          <div className="grid gap-4 md:grid-cols-3">
+            <TagEditor
+              id="blog-tags"
+              label={t('blog.tagsLabel')}
+              value={formData.post_tags}
+              onChange={(post_tags) =>
+                setFormData((p) => ({ ...p, post_tags }))
+              }
+              placeholder={t('blog.tagsPlaceholder')}
+            />
+            <div>
+              <label htmlFor="blog-date" className={editorLabelClass}>
+                {t('blog.dateLabel')}
+              </label>
+              <input
+                id="blog-date"
+                type="date"
+                value={formData.created_at}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, created_at: e.target.value }))
+                }
+                className={editorInputClass}
+              />
+            </div>
+            <div>
+              <label htmlFor="blog-author" className={editorLabelClass}>
+                {t('blog.authorLabel')}
+              </label>
+              <Dropdown
+                id="blog-author"
+                value={formData.author_id}
+                onChange={(value) =>
+                  setFormData((p) => ({ ...p, author_id: value }))
+                }
+                placeholder={t('blog.authorPlaceholder')}
+                triggerClassName={editorInputClass}
+                options={[
+                  { label: t('blog.authorPlaceholder'), value: '' },
+                  ...authors.map((a) => ({
+                    value: a.id,
+                    label: a.display_name,
+                  })),
+                ]}
+              />
+            </div>
+          </div>
+          <Toggle
+            checked={formData.hidden}
+            onChange={(hidden) => setFormData((p) => ({ ...p, hidden }))}
+            label={t('blog.hiddenLabel')}
+          />
+        </EditorGroup>
+
+        <div className="flex gap-3 pt-2">
           <button
             type="button"
             onClick={closeForm}
-            className="px-4 py-2 bg-surface-raised text-white rounded-lg"
+            className={editorSecondaryButtonClass}
           >
             {t('common.cancel')}
           </button>
           <button
             type="button"
-            onClick={() => setIsPostPreviewOpen(true)}
-            className="px-4 py-2 bg-accent-violet-deep text-white rounded-lg"
-          >
-            <Eye className="w-4 h-4 inline mr-1" />
-            {t('blog.previewPost')}
-          </button>
-          <button
-            type="button"
             onClick={isEditing ? handleUpdate : handleCreate}
-            className="px-4 py-2 bg-accent-violet text-white rounded-lg"
+            className={editorPrimaryButtonClass}
           >
-            {t('common.done')}
+            {isEditing ? t('editor.applyDraft') : t('editor.addDraft')}
           </button>
         </div>
-
-        <PreviewModal
-          isOpen={isPostPreviewOpen}
-          onClose={() => setIsPostPreviewOpen(false)}
-          title={t('blog.postPreviewTitle')}
-          copy={{
-            locale: formLocale,
-            namespace: 'posts-section',
-            drafts: translations,
-          }}
-        >
-          <PostPreview
-            formData={formData}
-            postType="blog"
-            locale={formLocale}
-            imageFile={imgUpload.file}
-            author={authors.find((a) => a.id === formData.author_id) || null}
-            views={
-              isEditing ? posts.find((p) => p.id === editingId)?.views || 0 : 0
-            }
-          />
-        </PreviewModal>
       </div>
     );
   }
@@ -655,125 +704,88 @@ export default function BlogSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {canEditTranslations && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-              {t('common.translations')}
-            </h2>
-            <LocaleToggle
-              activeLocale={activeLocale}
-              onChange={setActiveLocale}
-            />
-          </div>
-          {transLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <TranslationField
-                label={t('blog.translationTitleLabel')}
-                enValue={getField('en', 'title2')}
-                itValue={getField('it', 'title2')}
-                onChangeEn={(v) => setField('en', 'title2', v)}
-                onChangeIt={(v) => setField('it', 'title2', v)}
-                activeLocale={activeLocale}
-              />
-              <TranslationField
-                label={t('blog.translationSubtitleLabel')}
-                enValue={getField('en', 'subtitle2')}
-                itValue={getField('it', 'subtitle2')}
-                onChangeEn={(v) => setField('en', 'subtitle2', v)}
-                onChangeIt={(v) => setField('it', 'subtitle2', v)}
-                type="textarea"
-                rows={3}
-                activeLocale={activeLocale}
-              />
-              <TranslationField
-                label={t('blog.searchbarPlaceholderLabel')}
-                enValue={getField('en', 'searchbar')}
-                itValue={getField('it', 'searchbar')}
-                onChangeEn={(v) => setField('en', 'searchbar', v)}
-                onChangeIt={(v) => setField('it', 'searchbar', v)}
-                activeLocale={activeLocale}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('blog.postsTitle')}
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-        >
-          <Plus className="w-4 h-4" />
-          {t('blog.addBlogPost')}
-        </button>
-      </div>
+      <EditorToolbar
+        title={t('blog.postsTitle')}
+        count={posts.length}
+        actions={
+          <button
+            type="button"
+            onClick={openCreate}
+            className={editorPrimaryButtonClass}
+          >
+            <Plus className="w-4 h-4" />
+            {t('blog.addBlogPost')}
+          </button>
+        }
+      />
 
       {posts.length === 0 ? (
         <EmptyState icon={FileText} message={t('blog.noBlogPosts')} />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {posts.map((post) => (
-            <div
-              key={post.id}
-              className="bg-surface-card rounded-xl overflow-hidden border-2 border-accent-violet/20"
-            >
-              <ListPostImage
-                imageFile={post.image_file}
-                imageUrl={post.image}
-                blurhashURL={post.blurhashURL}
-                alt={post.title_en}
-              />
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-text-main truncate">
-                    {post.title_en}
-                  </h3>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(post)}
-                      className="p-1 text-accent-violet hover:text-accent-violet-deep"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(post.id)}
-                      className="p-1 text-red-500 hover:text-red-400"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+        <div className="space-y-3">
+          {posts.map((post) => {
+            const title =
+              activeLocale === 'it'
+                ? post.title_it || post.title_en
+                : post.title_en;
+            const description =
+              activeLocale === 'it'
+                ? post.description_it || post.description_en
+                : post.description_en;
+            return (
+              <div
+                key={post.id}
+                className={`${editorRowClass} flex flex-wrap items-start gap-4`}
+              >
+                <ListPostImage
+                  imageFile={post.image_file}
+                  imageUrl={post.image}
+                  blurhashURL={post.blurhashURL}
+                  alt={title}
+                  compact
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="truncate font-semibold text-text-main">
+                      {title}
+                    </h3>
+                    {post.hidden && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-text-muted">
+                        <EyeOff className="h-3 w-3" />
+                        {t('blog.hiddenLabel')}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-sm text-text-muted">
+                    {description}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted">
+                    <span>
+                      <Calendar className="mr-1 inline h-3 w-3" />
+                      {new Date(post.created_at).toLocaleDateString()}
+                    </span>
+                    <span>
+                      <FileText className="mr-1 inline h-3 w-3" />
+                      {t('blog.viewsLabel', { count: post.views })}
+                    </span>
                   </div>
                 </div>
-                <p className="text-sm text-text-main mb-2 line-clamp-2">
-                  {post.description_en}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-text-muted ">
-                  <Calendar className="w-3 h-3" />
-                  <span>{new Date(post.created_at).toLocaleDateString()}</span>
-                  <FileText className="w-3 h-3" />
-                  <span>{post.views} views</span>
+                <div className="flex w-full justify-end sm:w-auto">
+                  <CardToolbar
+                    onToggleHidden={() => toggleHidden(post.id)}
+                    hidden={post.hidden ?? false}
+                    onEdit={() => openEdit(post)}
+                    onDelete={() => handleDelete(post.id)}
+                  />
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -786,18 +798,6 @@ export default function BlogSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('blog.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'posts-section',
-          drafts: translations,
-        }}
-      >
-        <BlogPreview posts={posts} deletedPostIds={deletedIds} />
-      </PreviewModal>
     </fieldset>
   );
 }

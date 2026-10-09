@@ -13,23 +13,21 @@ import {
   validatePdfFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import type { MutationResult } from '@/libs/cms/mutationResult';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import { cacheTags } from '@/libs/content/cacheTags';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { HeroShape } from '@/types/fetchedData.types';
+import { normalizeHeroShape } from '@/utils/heroDisplay';
 import { createClient } from '@/utils/supabase/server';
 
 type HeroOperation =
   | { type: 'GET' }
-  | { type: 'UPDATE'; data: HeroUpdateData }
+  | { type: 'UPDATE_DISPLAY'; data: HeroDisplayData }
   | {
       type: 'UPLOAD_IMAGE';
       file: File;
       currentImageUrl?: string;
       blurhashURL?: string;
-    }
-  | {
-      type: 'UPLOAD_RESUME';
-      file: File;
-      field: 'resume_en' | 'resume_it';
-      currentResumeUrl?: string;
     }
   | {
       type: 'UPDATE_WITH_FILES';
@@ -38,15 +36,15 @@ type HeroOperation =
       blurhashURL?: string;
     };
 
-type HeroUpdateData = {
-  name?: string;
-  role?: string;
-  about?: string;
+type HeroAssetUpdateData = {
   propic?: string;
   blurhashURL?: string;
   resume_en?: string;
   resume_it?: string;
 };
+
+/** Portrait preset; unknown values degrade to the default. */
+type HeroDisplayData = { shape?: string };
 
 type HeroFileData = {
   propic?: File;
@@ -81,8 +79,8 @@ export async function heroActions(
       case 'GET':
         return await getHeroData(supabase);
 
-      case 'UPDATE':
-        return await updateHero(supabase, operation.data);
+      case 'UPDATE_DISPLAY':
+        return await updateHeroDisplay(supabase, operation.data);
 
       case 'UPLOAD_IMAGE':
         return await uploadHeroImage(
@@ -90,14 +88,6 @@ export async function heroActions(
           operation.file,
           operation.currentImageUrl,
           operation.blurhashURL
-        );
-
-      case 'UPLOAD_RESUME':
-        return await uploadResume(
-          supabase,
-          operation.file,
-          operation.field,
-          operation.currentResumeUrl
         );
 
       case 'UPDATE_WITH_FILES':
@@ -126,7 +116,7 @@ async function getHeroData(supabase: SupabaseClient): Promise<HeroResult> {
   try {
     const { data: heroSection } = await supabase
       .from('hero_section')
-      .select('id, propic, blurhashURL')
+      .select('id, propic, blurhashURL, shape')
       .single();
     const { data: resumeData } = await supabase
       .from('hero_section')
@@ -156,17 +146,28 @@ async function getHeroData(supabase: SupabaseClient): Promise<HeroResult> {
   }
 }
 
-async function updateHero(
+async function updateHeroDisplay(
   _supabase: SupabaseClient,
-  updateData: HeroUpdateData
+  updateData: HeroDisplayData
 ): Promise<HeroResult> {
   try {
     const admin = getAdminClient();
+    const patch: { shape?: HeroShape } = {};
+    if (updateData.shape !== undefined) {
+      patch.shape = normalizeHeroShape(updateData.shape);
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return { success: false, error: 'No changes to save' };
+    }
+
+    // `.single()` is the commit evidence: with no hero row the update matches
+    // zero rows and PostgREST raises PGRST116 instead of a false success.
     const { data, error } = await admin
       .from('hero_section')
-      .update(updateData)
+      .update(patch)
       .eq('id', 1)
-      .select()
+      .select('shape')
       .single();
 
     if (error) throw error;
@@ -178,7 +179,7 @@ async function updateHero(
 
     return { success: true, data, revalidation };
   } catch (error) {
-    console.error('Error updating hero:', error);
+    console.error('Error updating hero display:', error);
     return {
       success: false,
       error: 'Failed to update hero section',
@@ -199,6 +200,7 @@ async function uploadHeroImage(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const prepared = await prepareImageUpload(file, blurhashURL, {
       maxWidth: 512,
       maxHeight: 512,
@@ -221,7 +223,7 @@ async function uploadHeroImage(
     // Unique immutable path: the new object never overwrites the previous one.
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
+      bucket,
       'avatar',
       'avatar',
       prepared.image
@@ -243,14 +245,14 @@ async function uploadHeroImage(
       .single();
 
     if (updateError) {
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
       currentRow.propic,
-      'website',
+      bucket,
       upload.path
     );
 
@@ -273,75 +275,6 @@ async function uploadHeroImage(
   }
 }
 
-async function uploadResume(
-  _supabase: SupabaseClient,
-  file: File,
-  field: 'resume_en' | 'resume_it',
-  _currentResumeUrl?: string
-): Promise<HeroResult> {
-  try {
-    const fileValidation = validatePdfFile(file);
-    if (!fileValidation.isValid) {
-      return { success: false, error: fileValidation.error };
-    }
-
-    const admin = getAdminClient();
-    const { data: currentRow, error: fetchError } = await admin
-      .from('hero_section')
-      .select('resume_en, resume_it')
-      .eq('id', 1)
-      .single();
-    if (fetchError || !currentRow)
-      throw fetchError ?? new Error('Hero row not found');
-
-    // Unique immutable PDF path: never overwrites the previous resume.
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const upload = await uploadPdfBuffer(
-      admin,
-      'website',
-      'resumes',
-      field,
-      buffer
-    );
-
-    const { error: updateError } = await admin
-      .from('hero_section')
-      .update({ [field]: upload.publicUrl })
-      .eq('id', 1)
-      .select('id')
-      .single();
-
-    if (updateError) {
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
-      throw updateError;
-    }
-
-    await removePublicFileIfDifferent(
-      admin,
-      currentRow[field] as string | null,
-      'website',
-      upload.path
-    );
-
-    const revalidation = await invalidatePublicContent({
-      entity: 'resume',
-      operation: 'update',
-    });
-
-    return {
-      success: true,
-      data: { [field]: upload.publicUrl },
-      revalidation,
-    };
-  } catch (error) {
-    console.error('Error uploading resume:', error);
-    return {
-      success: false,
-      error: 'Failed to upload resume',
-    };
-  }
-}
-
 async function updateWithFiles(
   _supabase: SupabaseClient,
   files: HeroFileData,
@@ -349,6 +282,7 @@ async function updateWithFiles(
   blurhashURL?: string
 ): Promise<HeroResult> {
   const admin = getAdminClient();
+  const bucket = getCmsStorageBucket();
   const propicFile = files.propic ?? files.mainImage;
 
   // 1. Validate every file before touching storage or the DB. A single invalid
@@ -372,7 +306,7 @@ async function updateWithFiles(
     }
   }
 
-  const updates: HeroUpdateData = {};
+  const updates: HeroAssetUpdateData = {};
   const staged: Array<{
     path: string;
     field: 'propic' | 'resume_en' | 'resume_it';
@@ -393,7 +327,7 @@ async function updateWithFiles(
 
       const upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
+        bucket,
         'avatar',
         'avatar',
         prepared.image
@@ -407,7 +341,7 @@ async function updateWithFiles(
       const buffer = Buffer.from(await files.resume_en.arrayBuffer());
       const upload = await uploadPdfBuffer(
         admin,
-        'website',
+        bucket,
         'resumes',
         'resume_en',
         buffer
@@ -420,7 +354,7 @@ async function updateWithFiles(
       const buffer = Buffer.from(await files.resume_it.arrayBuffer());
       const upload = await uploadPdfBuffer(
         admin,
-        'website',
+        bucket,
         'resumes',
         'resume_it',
         buffer
@@ -430,7 +364,7 @@ async function updateWithFiles(
     }
   } catch (stageError) {
     for (const object of staged) {
-      await removeStorageObjectBestEffort(admin, 'website', object.path);
+      await removeStorageObjectBestEffort(admin, bucket, object.path);
     }
     return {
       success: false,
@@ -454,7 +388,7 @@ async function updateWithFiles(
 
   if (fetchError || !currentRow) {
     for (const object of staged)
-      await removeStorageObjectBestEffort(admin, 'website', object.path);
+      await removeStorageObjectBestEffort(admin, bucket, object.path);
     return {
       success: false,
       error: fetchError?.message ?? 'Hero row not found',
@@ -470,7 +404,7 @@ async function updateWithFiles(
 
   if (updateError) {
     for (const object of staged) {
-      await removeStorageObjectBestEffort(admin, 'website', object.path);
+      await removeStorageObjectBestEffort(admin, bucket, object.path);
     }
     return { success: false, error: updateError.message };
   }
@@ -485,14 +419,18 @@ async function updateWithFiles(
     await removePublicFileIfDifferent(
       admin,
       previous ?? null,
-      'website',
+      bucket,
       object.path
     );
   }
 
   const revalidation = await invalidatePublicContent({
-    entity: 'hero',
+    entity: propicFile ? 'hero' : 'resume',
     operation: 'asset-update',
+    extraTags:
+      propicFile && (files.resume_en || files.resume_it)
+        ? [cacheTags.resume, cacheTags.heroSection]
+        : undefined,
   });
 
   return { success: true, data: updates, revalidation };

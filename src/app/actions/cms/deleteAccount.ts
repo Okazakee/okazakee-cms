@@ -1,6 +1,11 @@
 'use server';
 
 import { redirect } from 'next/navigation';
+import {
+  getUserGithubId,
+  getUserGithubUsername,
+  getVerifiedUserEmail,
+} from './utils/auth';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { createClient } from '@/utils/supabase/server';
@@ -32,9 +37,11 @@ export async function deleteMyAccount() {
   const adminClient = getCmsAdminClient();
 
   try {
-    // Find the user in cms_allowed_users by email or GitHub username
-    const email = authUser.email?.toLowerCase();
-    const githubUsername = authUser.user_metadata?.user_name;
+    // Immutable identity first, then verified-email, then legacy display
+    // handle. No user_metadata trust: the username is identity-derived.
+    const githubUserId = getUserGithubId(authUser);
+    const verifiedEmail = getVerifiedUserEmail(authUser);
+    const githubUsernameLegacy = getUserGithubUsername(authUser);
 
     let allowedUser: { id: number; role: string } | null = null;
 
@@ -42,22 +49,32 @@ export async function deleteMyAccount() {
     // anon/authenticated have no access to cms_allowed_users.
     const allowlistClient = adminClient;
 
-    // Try by email first
-    if (email) {
+    // Immutable GitHub ID first
+    if (!allowedUser && githubUserId) {
+      const { data: idMatch } = await allowlistClient
+        .from('cms_allowed_users')
+        .select('id, role')
+        .eq('github_user_id', githubUserId)
+        .single();
+      if (idMatch) allowedUser = idMatch;
+    }
+
+    // Verified email second (returns immediately under current behavior)
+    if (!allowedUser && verifiedEmail) {
       const { data: emailMatch } = await allowlistClient
         .from('cms_allowed_users')
         .select('id, role')
-        .eq('email', email)
+        .eq('email', verifiedEmail.toLowerCase())
         .single();
       if (emailMatch) allowedUser = emailMatch;
     }
 
-    // Try by GitHub username if no email match
-    if (!allowedUser && githubUsername) {
+    // Legacy display handle last (dual-allowed transition only)
+    if (!allowedUser && githubUsernameLegacy) {
       const { data: githubMatch } = await allowlistClient
         .from('cms_allowed_users')
         .select('id, role')
-        .eq('github_username', githubUsername)
+        .eq('github_username', githubUsernameLegacy)
         .single();
       if (githubMatch) allowedUser = githubMatch;
     }

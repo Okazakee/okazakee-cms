@@ -162,22 +162,45 @@ describe('validatePdfFile', () => {
 });
 
 describe('getStoragePathFromPublicUrl', () => {
-  const base = 'https://xxx.supabase.co/storage/v1/object/public/website';
+  const origin = 'https://xxx.supabase.co';
+  const base = `${origin}/storage/v1/object/public/website`;
 
-  it('extracts path after bucket segment', () => {
+  it('extracts path after the exact bucket prefix', () => {
     expect(
       getStoragePathFromPublicUrl(
         `${base}/Website%20Assets/blog/123-hello.webp`,
-        'website'
+        'website',
+        origin
       )
     ).toBe('Website Assets/blog/123-hello.webp');
   });
 
-  it('returns null when bucket is absent', () => {
+  it('returns null when the origin differs (cross-origin no-op)', () => {
+    expect(
+      getStoragePathFromPublicUrl(
+        'https://attacker.test/storage/v1/object/public/website/x.webp',
+        'website',
+        origin
+      )
+    ).toBeNull();
+  });
+
+  it('returns null when the bucket differs on the same origin (cross-bucket no-op)', () => {
+    expect(
+      getStoragePathFromPublicUrl(
+        'https://xxx.supabase.co/storage/v1/object/public/website-dev/x.webp',
+        'website',
+        origin
+      )
+    ).toBeNull();
+  });
+
+  it('returns null when the bucket is absent', () => {
     expect(
       getStoragePathFromPublicUrl(
         'https://example.com/some/path.webp',
-        'website'
+        'website',
+        origin
       )
     ).toBeNull();
   });
@@ -187,26 +210,56 @@ describe('getStoragePathFromPublicUrl', () => {
     expect(
       getStoragePathFromPublicUrl(
         'https://xxx.supabase.co/storage/v1/object/public/mywebsite/x.png',
-        'website'
+        'website',
+        origin
+      )
+    ).toBeNull();
+  });
+
+  it('returns null for a bucket name embedded deeper in the path', () => {
+    // "website" appears as a prefix segment but not at the storage prefix
+    expect(
+      getStoragePathFromPublicUrl(
+        'https://attacker.test/website/resumes/unrelated.pdf',
+        'website',
+        origin
       )
     ).toBeNull();
   });
 
   it('returns null on malformed URL', () => {
-    expect(getStoragePathFromPublicUrl('not-a-url', 'website')).toBeNull();
+    expect(
+      getStoragePathFromPublicUrl('not-a-url', 'website', origin)
+    ).toBeNull();
+  });
+
+  it('rejects traversal after decoding', () => {
+    expect(
+      getStoragePathFromPublicUrl(`${base}/..%2fsecret.webp`, 'website', origin)
+    ).toBeNull();
+    expect(
+      getStoragePathFromPublicUrl(
+        `${base}/%2e%2e%2fsecret.webp`,
+        'website',
+        origin
+      )
+    ).toBeNull();
   });
 
   it('ignores query strings (cache busters)', () => {
     expect(
       getStoragePathFromPublicUrl(
         `${base}/avatar/avatar.webp?t=123456`,
-        'website'
+        'website',
+        origin
       )
     ).toBe('avatar/avatar.webp');
   });
 
   it('returns null for bucket root', () => {
-    expect(getStoragePathFromPublicUrl(`${base}/`, 'website')).toBeNull();
+    expect(
+      getStoragePathFromPublicUrl(`${base}/`, 'website', origin)
+    ).toBeNull();
   });
 });
 

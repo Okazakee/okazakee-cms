@@ -1,46 +1,56 @@
 'use client';
 
-import {
-  Calendar,
-  Edit3,
-  Eye,
-  FileText,
-  Info,
-  Plus,
-  Trash2,
-  X,
-} from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { Calendar, FileText, Plus } from 'lucide-react';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import {
   type Author,
   portfolioActions,
 } from '@/app/actions/cms/sections/portfolioActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { PostBodyField } from '@/components/cms/shared/PostBodyField';
+import { PostPreviewModal } from '@/components/cms/shared/PostPreviewModal';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
+import { TagEditor } from '@/components/cms/shared/TagEditor';
+import { Toggle } from '@/components/cms/shared/Toggle';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
 import { ListPostImage } from '@/components/common/cms/ListPostImage';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { PortfolioPreview } from '@/components/common/cms/previews/PortfolioPreview';
-import { PostPreview } from '@/components/common/cms/previews/PostPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
+import { useBodyImages } from '@/hooks/cms/useBodyImages';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoPortfolioPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { PortfolioPost } from '@/types/fetchedData.types';
+import {
+  deriveButtonsFromPost,
+  type PostButton,
+  type PostButtonKind,
+  postButtonKinds,
+} from '@/utils/cms/postButtons';
 
 type FormMode = 'list' | 'create' | 'edit';
 type EditablePost = PortfolioPost & { image_file?: File | null };
@@ -54,17 +64,18 @@ interface PortfolioFormData {
   description_it: string;
   body_en: string;
   body_it: string;
-  source_link: string;
-  demo_link: string;
-  store_link: string;
-  fdroid_link: string;
-  website: string;
-  ios_store_link: string;
+  buttons: PostButton[];
   post_tags: string;
   created_at: string;
   author_id: string;
   hidden: boolean;
 }
+
+/**
+ * Framework cap is 10 MB per server-action request: covers plus body
+ * snapshots must fit together or nothing is sent.
+ */
+const MAX_PUBLISH_BYTES = 9 * 1024 * 1024;
 
 const emptyForm: PortfolioFormData = {
   title_en: '',
@@ -75,12 +86,7 @@ const emptyForm: PortfolioFormData = {
   description_it: '',
   body_en: '',
   body_it: '',
-  source_link: '',
-  demo_link: '',
-  store_link: '',
-  fdroid_link: '',
-  website: '',
-  ios_store_link: '',
+  buttons: [],
   post_tags: '',
   created_at: new Date().toISOString().split('T')[0],
   author_id: '',
@@ -95,13 +101,11 @@ export default function PortfolioSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isPostPreviewOpen, setIsPostPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [mode, setMode] = useState<FormMode>('list');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<PortfolioFormData>(emptyForm);
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const activeLocale = useLocale() === 'it' ? 'it' : 'en';
   const [formLocale, setFormLocale] = useState<'en' | 'it'>('en');
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
   const [newPosts, setNewPosts] = useState<
@@ -115,24 +119,11 @@ export default function PortfolioSection() {
     imageProcessing: { maxWidth: 1920, maxHeight: 1080, quality: 0.85 },
     generateBlurhash: true,
   });
-
-  const {
-    translations,
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    canEditTranslations,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('posts-section');
+  const bodyImages = useBodyImages();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const isDirty =
-    modifiedIds.size > 0 ||
-    newPosts.length > 0 ||
-    deletedIds.size > 0 ||
-    transDirty;
+    modifiedIds.size > 0 || newPosts.length > 0 || deletedIds.size > 0;
   useSectionDirty('portfolio', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -144,6 +135,25 @@ export default function PortfolioSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture posts, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setPosts(
+          JSON.parse(JSON.stringify(demoPortfolioPosts)).map(
+            (p: EditablePost) => ({ ...p, image_file: null })
+          )
+        );
+        setAuthors([
+          {
+            id: 'demo-user',
+            display_name: 'Demo Dana',
+            avatar_url: null,
+          },
+        ]);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await portfolioActions({ type: 'GET' });
         if (!current()) return;
@@ -188,12 +198,9 @@ export default function PortfolioSection() {
       description_it: post.description_it ?? '',
       body_en: post.body_en ?? '',
       body_it: post.body_it ?? '',
-      source_link: post.source_link ?? '',
-      demo_link: post.demo_link ?? '',
-      store_link: post.store_link ?? '',
-      fdroid_link: post.fdroid_link ?? '',
-      website: post.website ?? '',
-      ios_store_link: post.ios_store_link ?? '',
+      // A row written before the buttons column existed opens on a populated
+      // builder, derived from the legacy link columns.
+      buttons: deriveButtonsFromPost(post),
       post_tags: post.post_tags ?? '',
       created_at: post.created_at?.split('T')[0] ?? '',
       author_id: post.author_id ?? user?.id ?? '',
@@ -209,6 +216,37 @@ export default function PortfolioSection() {
     imgUpload.clearFile();
     setEditingId(null);
   };
+
+  const addButton = () =>
+    setFormData((p) => ({
+      ...p,
+      buttons: [...p.buttons, { kind: 'source', url: '' }],
+    }));
+
+  const removeButton = (index: number) =>
+    setFormData((p) => ({
+      ...p,
+      buttons: p.buttons.filter((_, i) => i !== index),
+    }));
+
+  const updateButton = (index: number, patch: Partial<PostButton>) =>
+    setFormData((p) => ({
+      ...p,
+      buttons: p.buttons.map((button, i) =>
+        i === index ? { ...button, ...patch } : button
+      ),
+    }));
+
+  // Order is render order, so moving a button is a real edit the editor must
+  // be able to make — same up/down affordance as skills and contacts.
+  const moveButton = (index: number, direction: -1 | 1) =>
+    setFormData((p) => {
+      const target = index + direction;
+      if (target < 0 || target >= p.buttons.length) return p;
+      const next = [...p.buttons];
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...p, buttons: next };
+    });
 
   const handleCreate = () => {
     if (!formData.title_en || !imgUpload.file) {
@@ -262,10 +300,41 @@ export default function PortfolioSection() {
     setPosts((prev) => prev.filter((p) => p.id !== id));
   };
 
+  // List quick toggle: stages a visibility flip like any other edit, so
+  // Publish commits it through the normal evidence flow.
+  const toggleHidden = (id: number) => {
+    setPosts((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p))
+    );
+    setModifiedIds((prev) => new Set(prev).add(id));
+  };
+
   const handlePublish = useCallback(async () => {
     const errors: string[] = [];
     setIsUpdating(true);
     setError(null);
+
+    // Offline showcase: remap temp ids, materialize staged covers as
+    // object URLs, drop deletes, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      const retained = posts.filter((p) => !deletedIds.has(p.id));
+      let nextFakeId = Math.max(0, ...retained.map((p) => p.id)) + 1;
+      setPosts(
+        retained.map((p) => ({
+          ...p,
+          id: p.id < 0 ? nextFakeId++ : p.id,
+          image: p.image_file ? URL.createObjectURL(p.image_file) : p.image,
+          image_file: null,
+        }))
+      );
+      setNewPosts([]);
+      setModifiedIds(new Set());
+      setDeletedIds(new Set());
+      bodyImages.reconcile(retained.flatMap((p) => [p.body_en, p.body_it]));
+      setIsUpdating(false);
+      return;
+    }
 
     // Pending creates may have been edited after creation: always derive the
     // payload from the latest `posts` entry, never the stale newPosts snapshot.
@@ -279,22 +348,21 @@ export default function PortfolioSection() {
           tempId: String(item.post.id),
           file,
           blurhashURL: post.blurhashURL,
+          bodyFiles: bodyImages.referencedPayload([
+            post.body_en,
+            post.body_it,
+          ]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
             image: '',
-            source_link: post.source_link,
-            demo_link: post.demo_link,
             description_en: post.description_en,
             description_it: post.description_it,
             body_en: post.body_en,
             body_it: post.body_it,
             blurhashURL: post.blurhashURL || '',
             post_tags: post.post_tags,
-            store_link: post.store_link,
-            fdroid_link: post.fdroid_link,
-            website: post.website,
-            ios_store_link: post.ios_store_link,
+            buttons: post.buttons ?? [],
             created_at: post.created_at,
             author_id: post.author_id || user?.id || '',
             hidden: post.hidden ?? false,
@@ -313,6 +381,10 @@ export default function PortfolioSection() {
           file: post.image_file || null,
           currentImageUrl: post.image,
           blurhashURL: post.blurhashURL,
+          bodyFiles: bodyImages.referencedPayload([
+            post.body_en,
+            post.body_it,
+          ]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
@@ -320,12 +392,7 @@ export default function PortfolioSection() {
             description_it: post.description_it,
             body_en: post.body_en,
             body_it: post.body_it,
-            source_link: post.source_link,
-            demo_link: post.demo_link,
-            store_link: post.store_link,
-            fdroid_link: post.fdroid_link,
-            website: post.website,
-            ios_store_link: post.ios_store_link,
+            buttons: post.buttons ?? [],
             post_tags: post.post_tags,
             created_at: post.created_at,
             author_id: post.author_id,
@@ -335,6 +402,23 @@ export default function PortfolioSection() {
       ];
     });
     const deleteIds = Array.from(deletedIds);
+
+    // Framework cap is 10 MB per server-action request: covers plus body
+    // snapshots must fit together, or nothing is sent.
+    const payloadBytes = [...creates, ...updates].reduce(
+      (total, item) =>
+        total +
+        (item.file?.size ?? 0) +
+        item.bodyFiles.reduce((sum, f) => sum + f.file.size, 0),
+      0
+    );
+    if (payloadBytes > MAX_PUBLISH_BYTES) {
+      setError(
+        'Total upload size is over ~9 MB (covers plus body images); publish fewer posts at a time'
+      );
+      setIsUpdating(false);
+      return;
+    }
 
     try {
       let retainedCreates = createTempIds;
@@ -387,11 +471,15 @@ export default function PortfolioSection() {
         );
         setModifiedIds(new Set(retainedUpdates));
         setDeletedIds(new Set(retainedDeletes));
-      }
-
-      if (transDirty) {
-        const te = await saveTranslations();
-        errors.push(...te);
+        // Drop staged body images no retained draft references anymore;
+        // a full success clears everything.
+        const retainedPosts = posts.filter(
+          (p) =>
+            retainedCreateSet.has(String(p.id)) || retainedModifiedSet.has(p.id)
+        );
+        bodyImages.reconcile(
+          retainedPosts.flatMap((p) => [p.body_en, p.body_it])
+        );
       }
 
       const revalidationMessage = revalidationWarning(batch);
@@ -401,8 +489,7 @@ export default function PortfolioSection() {
       const remaining =
         retainedCreates.length +
         retainedUpdates.length +
-        retainedDeletes.length +
-        (transDirty && !batch.success ? 1 : 0);
+        retainedDeletes.length;
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -417,25 +504,26 @@ export default function PortfolioSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [
-    posts,
-    newPosts,
-    deletedIds,
-    modifiedIds,
-    transDirty,
-    saveTranslations,
-    fetchData,
-    user,
-  ]);
+  }, [posts, newPosts, deletedIds, modifiedIds, fetchData, user, bodyImages]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setPosts(
+        JSON.parse(JSON.stringify(demoPortfolioPosts)).map(
+          (p: EditablePost) => ({ ...p, image_file: null })
+        )
+      );
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewPosts([]);
     setDeletedIds(new Set());
-    revertTranslations();
     setError(null);
+    // Drafts are gone: every staged blob is residue.
+    bodyImages.revokeAll();
   };
 
   useSectionCallbacks('portfolio', handlePublish, handleRevert);
@@ -454,31 +542,18 @@ export default function PortfolioSection() {
     const isEditing = mode === 'edit';
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-main ">
-            {isEditing ? t('portfolio.editPost') : t('portfolio.createNewPost')}
-          </h2>
-          <div className="flex items-center gap-3">
+        <EditorToolbar
+          title={
+            isEditing ? t('portfolio.editPost') : t('portfolio.createNewPost')
+          }
+          actions={
             <LocaleToggle activeLocale={formLocale} onChange={setFormLocale} />
-            <button
-              type="button"
-              onClick={closeForm}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-raised rounded-lg text-text-main hover:bg-surface-raised"
-            >
-              <X className="w-4 h-4" />
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
+          }
+        />
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
-
-        {/* Content */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.content')}
-          </h3>
+        <EditorGroup title={t('editor.groups.summary')}>
           <TranslationField
-            label={t('portfolio.titleEnLabel')}
+            label={t('editor.fields.title')}
             enValue={formData.title_en}
             itValue={formData.title_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, title_en: v }))}
@@ -487,7 +562,7 @@ export default function PortfolioSection() {
             activeLocale={formLocale}
           />
           <TranslationField
-            label={t('portfolio.descriptionEnLabel')}
+            label={t('editor.fields.summary')}
             enValue={formData.description_en}
             itValue={formData.description_it}
             onChangeEn={(v) =>
@@ -500,207 +575,14 @@ export default function PortfolioSection() {
             rows={3}
             activeLocale={formLocale}
           />
-          <TranslationField
-            label={t('portfolio.bodyEnLabel')}
-            enValue={formData.body_en}
-            itValue={formData.body_it}
-            onChangeEn={(v) => setFormData((p) => ({ ...p, body_en: v }))}
-            onChangeIt={(v) => setFormData((p) => ({ ...p, body_it: v }))}
-            type="textarea"
-            rows={8}
-            activeLocale={formLocale}
-          />
-          <div className="flex items-start gap-2 text-xs text-text-muted bg-surface-base rounded-lg p-3 border border-border-subtle ">
-            <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
-                  ****text****
-                </code>{' '}
-                {t('portfolio.syntaxHighlight')}
-              </p>
-              <p>
-                <code className="text-accent-violet bg-accent-violet/10 px-1 rounded">
-                  ![alt-blurhash](url)
-                </code>{' '}
-                {t('portfolio.syntaxImage')}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Links */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('portfolio.sourceLinkLabel')}
-          </h3>
-          <div className="grid md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                {t('portfolio.sourceLinkLabel')}
-              </label>
-              <input
-                type="url"
-                value={formData.source_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, source_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.sourceLinkPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                {t('portfolio.demoLinkLabel')}
-              </label>
-              <input
-                type="url"
-                value={formData.demo_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, demo_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.demoLinkPlaceholder')}
-              />
-            </div>
-          </div>
-          <div className="grid md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                {t('portfolio.storeLinkLabel')}
-              </label>
-              <input
-                type="url"
-                value={formData.store_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, store_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.storeLinkPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                F-Droid
-              </label>
-              <input
-                type="url"
-                value={formData.fdroid_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, fdroid_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder="https://f-droid.org/..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                iOS App Store
-              </label>
-              <input
-                type="url"
-                value={formData.ios_store_link}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, ios_store_link: e.target.value }))
-                }
-                className={inputClass}
-                placeholder="https://apps.apple.com/..."
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              Website
-            </label>
-            <input
-              type="url"
-              value={formData.website}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, website: e.target.value }))
-              }
-              className={inputClass}
-              placeholder="https://..."
-            />
-          </div>
-        </div>
-
-        {/* Metadata */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('common.configuration')}
-          </h3>
-          <div className="grid md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Tags
-              </label>
-              <input
-                type="text"
-                value={formData.post_tags}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, post_tags: e.target.value }))
-                }
-                className={inputClass}
-                placeholder={t('portfolio.tagsPlaceholder')}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                value={formData.created_at}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, created_at: e.target.value }))
-                }
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
-                Author
-              </label>
-              <select
-                value={formData.author_id}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, author_id: e.target.value }))
-                }
-                className={inputClass}
-              >
-                <option value="">Select</option>
-                {authors.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.display_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-text-main cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.hidden}
-              onChange={(e) =>
-                setFormData((p) => ({ ...p, hidden: e.target.checked }))
-              }
-              className="w-4 h-4 rounded border-border-subtle text-accent-violet focus:ring-accent-violet"
-            />
-            Hidden
-          </label>
-        </div>
-
-        {/* Media */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('portfolio.selectImage')}
-          </h3>
+        </EditorGroup>
+        <EditorGroup title={t('editor.groups.media')}>
           <FileDropzone
-            label="Image"
             previewUrl={imgUpload.previewUrl}
             blurhash={imgUpload.blurhash}
             isDragging={imgUpload.isDragging}
             isProcessing={imgUpload.isProcessing}
+            hasPendingFile={Boolean(imgUpload.file)}
             error={imgUpload.error}
             currentUrl={isEditing ? formData.image : undefined}
             dropzoneProps={{
@@ -712,55 +594,210 @@ export default function PortfolioSection() {
             fileInputRef={imgUpload.fileInputRef}
             onClear={imgUpload.clearFile}
             onBrowse={imgUpload.openFileDialog}
+            overlayActions
           />
-        </div>
+        </EditorGroup>
+        <EditorGroup title={t('editor.groups.content')}>
+          <PostBodyField
+            id="portfolio-body"
+            label={t('editor.fields.content')}
+            value={formLocale === 'en' ? formData.body_en : formData.body_it}
+            onChange={(v) =>
+              setFormData((p) =>
+                formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
+              )
+            }
+            stageImages={bodyImages.stageFiles}
+            stagingErrors={bodyImages.stagingErrors}
+            onPreview={() => setPreviewOpen(true)}
+          />
+          {previewOpen && (
+            <PostPreviewModal
+              title={t('editor.fields.content')}
+              markdown={
+                formLocale === 'en' ? formData.body_en : formData.body_it
+              }
+              closeLabel={t('common.close')}
+              onClose={() => setPreviewOpen(false)}
+            />
+          )}
+          <details className="rounded-lg border border-border-subtle bg-surface-base p-3 text-xs text-text-muted">
+            <summary className="cursor-pointer font-medium text-text-main">
+              {t('editor.formattingHelp')}
+            </summary>
+            <div className="mt-2 space-y-1">
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  ****text****
+                </code>{' '}
+                {t('editor.syntaxBold')}
+              </p>
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  *text*
+                </code>{' '}
+                {t('editor.syntaxViolet')}
+              </p>
+              <p>
+                <code className="rounded bg-accent-violet/10 px-1 text-accent-violet">
+                  ![alt-blurhash](url)
+                </code>{' '}
+                {t('portfolio.syntaxImage')}
+              </p>
+            </div>
+          </details>
+        </EditorGroup>
 
-        <div className="flex gap-3 pt-4">
+        <EditorGroup
+          title={t('editor.groups.links')}
+          description={t('portfolio.buttonsHint')}
+          actions={
+            <button
+              type="button"
+              onClick={addButton}
+              className={editorPrimaryButtonClass}
+            >
+              <Plus className="h-4 w-4" />
+              {t('portfolio.addButton')}
+            </button>
+          }
+        >
+          {formData.buttons.length === 0 ? (
+            <p className="text-sm text-text-muted">
+              {t('portfolio.buttonsEmpty')}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {formData.buttons.map((button, index) => (
+                <div
+                  key={index}
+                  className="bg-surface-base rounded-lg border border-border-subtle p-3 space-y-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <CardToolbar
+                      showReorder
+                      onMoveUp={() => moveButton(index, -1)}
+                      onMoveDown={() => moveButton(index, 1)}
+                      isFirst={index === 0}
+                      isLast={index === formData.buttons.length - 1}
+                      onDelete={() => removeButton(index)}
+                    />
+                    <Dropdown
+                      className="relative inline-block w-full sm:w-48"
+                      triggerClassName={inputClass}
+                      label={t('portfolio.buttonKindLabel')}
+                      value={button.kind}
+                      onChange={(value) =>
+                        updateButton(index, { kind: value as PostButtonKind })
+                      }
+                      options={postButtonKinds.map((kind) => ({
+                        value: kind,
+                        label: t(`portfolio.buttonKind.${kind}`),
+                      }))}
+                    />
+                  </div>
+                  <input
+                    type="url"
+                    aria-label={t('portfolio.buttonUrlLabel')}
+                    value={button.url}
+                    onChange={(e) =>
+                      updateButton(index, { url: e.target.value })
+                    }
+                    className={inputClass}
+                    placeholder={t('portfolio.buttonUrlPlaceholder')}
+                  />
+                  {button.kind === 'custom' && (
+                    <input
+                      type="text"
+                      aria-label={t('portfolio.buttonLabelLabel')}
+                      value={button.label ?? ''}
+                      onChange={(e) =>
+                        updateButton(index, { label: e.target.value })
+                      }
+                      className={inputClass}
+                      placeholder={t('portfolio.buttonLabelPlaceholder')}
+                      required
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </EditorGroup>
+
+        <EditorGroup title={t('editor.groups.publication')}>
+          <div className="grid gap-4 md:grid-cols-3">
+            <TagEditor
+              id="portfolio-tags"
+              label={t('portfolio.tagsLabel')}
+              value={formData.post_tags}
+              onChange={(post_tags) =>
+                setFormData((p) => ({ ...p, post_tags }))
+              }
+              placeholder={t('portfolio.tagsPlaceholder')}
+            />
+            <div>
+              <label htmlFor="portfolio-date" className={editorLabelClass}>
+                {t('portfolio.dateLabel')}
+              </label>
+              <input
+                id="portfolio-date"
+                type="date"
+                value={formData.created_at}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, created_at: e.target.value }))
+                }
+                className={editorInputClass}
+              />
+            </div>
+            <div>
+              <label htmlFor="portfolio-author" className={editorLabelClass}>
+                {t('portfolio.authorLabel')}
+              </label>
+              <Dropdown
+                id="portfolio-author"
+                value={formData.author_id}
+                onChange={(value) =>
+                  setFormData((p) => ({ ...p, author_id: value }))
+                }
+                placeholder={t('portfolio.authorPlaceholder')}
+                triggerClassName={inputClass}
+                options={[
+                  {
+                    label: t('portfolio.authorPlaceholder'),
+                    value: '',
+                  },
+                  ...authors.map((a) => ({
+                    value: a.id,
+                    label: a.display_name,
+                  })),
+                ]}
+              />
+            </div>
+          </div>
+          <Toggle
+            checked={formData.hidden}
+            onChange={(hidden) => setFormData((p) => ({ ...p, hidden }))}
+            label={t('portfolio.hiddenLabel')}
+          />
+        </EditorGroup>
+
+        <div className="flex flex-wrap gap-3 pt-4">
           <button
             type="button"
             onClick={closeForm}
-            className="px-4 py-2 bg-surface-raised text-white rounded-lg"
+            className={editorSecondaryButtonClass}
           >
             {t('common.cancel')}
           </button>
           <button
             type="button"
-            onClick={() => setIsPostPreviewOpen(true)}
-            className="px-4 py-2 bg-accent-violet-deep text-white rounded-lg"
-          >
-            <Eye className="w-4 h-4 inline mr-1" />
-            {t('portfolio.previewPost')}
-          </button>
-          <button
-            type="button"
             onClick={isEditing ? handleUpdate : handleCreate}
-            className="px-4 py-2 bg-accent-violet text-white rounded-lg"
+            className={editorPrimaryButtonClass}
           >
-            {t('common.done')}
+            {isEditing ? t('editor.applyDraft') : t('editor.addDraft')}
           </button>
         </div>
-
-        <PreviewModal
-          isOpen={isPostPreviewOpen}
-          onClose={() => setIsPostPreviewOpen(false)}
-          title={t('portfolio.postPreviewTitle')}
-          copy={{
-            locale: formLocale,
-            namespace: 'posts-section',
-            drafts: translations,
-          }}
-        >
-          <PostPreview
-            formData={formData}
-            postType="portfolio"
-            locale={formLocale}
-            imageFile={imgUpload.file}
-            author={authors.find((a) => a.id === formData.author_id) || null}
-            views={
-              isEditing ? posts.find((p) => p.id === editingId)?.views || 0 : 0
-            }
-          />
-        </PreviewModal>
       </div>
     );
   }
@@ -779,118 +816,87 @@ export default function PortfolioSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {canEditTranslations && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-              {t('common.translations')}
-            </h2>
-            <LocaleToggle
-              activeLocale={activeLocale}
-              onChange={setActiveLocale}
-            />
-          </div>
-          {transLoading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <TranslationField
-                label={t('portfolio.translationTitleLabel')}
-                enValue={getField('en', 'title1')}
-                itValue={getField('it', 'title1')}
-                onChangeEn={(v) => setField('en', 'title1', v)}
-                onChangeIt={(v) => setField('it', 'title1', v)}
-                activeLocale={activeLocale}
-              />
-              <TranslationField
-                label={t('portfolio.translationSubtitleLabel')}
-                enValue={getField('en', 'subtitle1')}
-                itValue={getField('it', 'subtitle1')}
-                onChangeEn={(v) => setField('en', 'subtitle1', v)}
-                onChangeIt={(v) => setField('it', 'subtitle1', v)}
-                type="textarea"
-                rows={3}
-                activeLocale={activeLocale}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('portfolio.postsTitle')}
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-        >
-          <Plus className="w-4 h-4" />
-          {t('portfolio.addPortfolioPost')}
-        </button>
-      </div>
+      <EditorToolbar
+        title={t('portfolio.postsTitle')}
+        count={posts.length}
+        actions={
+          <button
+            type="button"
+            onClick={openCreate}
+            className={editorPrimaryButtonClass}
+          >
+            <Plus className="h-4 w-4" />
+            {t('portfolio.addPortfolioPost')}
+          </button>
+        }
+      />
 
       {posts.length === 0 ? (
         <EmptyState icon={FileText} message={t('portfolio.noPortfolioPosts')} />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {posts.map((post) => (
-            <div
-              key={post.id}
-              className="bg-surface-card rounded-xl overflow-hidden border-2 border-accent-violet/20"
-            >
-              <ListPostImage
-                imageFile={post.image_file}
-                imageUrl={post.image}
-                blurhashURL={post.blurhashURL}
-                alt={post.title_en}
-              />
-              <div className="p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-text-main truncate">
-                    {post.title_en}
+        <ul className="space-y-3">
+          {posts.map((post) => {
+            const title =
+              (activeLocale === 'it' ? post.title_it : post.title_en) ||
+              post.title_en;
+            const description =
+              (activeLocale === 'it'
+                ? post.description_it
+                : post.description_en) || post.description_en;
+            return (
+              <li
+                key={post.id}
+                className={`${editorRowClass} flex flex-wrap items-start gap-4`}
+              >
+                <ListPostImage
+                  imageFile={post.image_file}
+                  imageUrl={post.image}
+                  blurhashURL={post.blurhashURL}
+                  alt={title}
+                  compact
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate font-semibold text-text-main">
+                    {title}
                   </h3>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(post)}
-                      className="p-1 text-accent-violet hover:text-accent-violet-deep"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(post.id)}
-                      className="p-1 text-red-500 hover:text-red-400"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                  {description && (
+                    <p className="truncate text-sm text-text-muted">
+                      {description}
+                    </p>
+                  )}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
+                    <span className="inline-flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      {new Date(post.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <FileText className="h-3 w-3" />
+                      {t('portfolio.viewsLabel', { count: post.views })}
+                    </span>
+                    {post.hidden && (
+                      <span className="rounded-full bg-surface-raised px-2 py-0.5 text-xs text-text-muted">
+                        {t('portfolio.hiddenLabel')}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <p className="text-sm text-text-main mb-2 line-clamp-2">
-                  {post.description_en}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-text-muted ">
-                  <Calendar className="w-3 h-3" />
-                  <span>{new Date(post.created_at).toLocaleDateString()}</span>
-                  <FileText className="w-3 h-3" />
-                  <span>{post.views} views</span>
+                <div className="flex w-full justify-end sm:w-auto">
+                  <CardToolbar
+                    onToggleHidden={() => toggleHidden(post.id)}
+                    hidden={post.hidden ?? false}
+                    onEdit={() => openEdit(post)}
+                    onDelete={() => handleDelete(post.id)}
+                  />
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
 
       <ConfirmDialog
@@ -902,18 +908,6 @@ export default function PortfolioSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('portfolio.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'posts-section',
-          drafts: translations,
-        }}
-      >
-        <PortfolioPreview posts={posts} deletedPostIds={deletedIds} />
-      </PreviewModal>
     </fieldset>
   );
 }

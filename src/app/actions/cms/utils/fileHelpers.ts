@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { encode as blurkitEncode } from 'blurkit/node';
+import { getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import { FALLBACK_BLURHASH, isValidBlurhash } from '@/utils/blurhashUtils';
 // Pure validation helpers live in @/utils/cms/validation (unit-tested).
@@ -17,7 +18,12 @@ import {
 } from '@/utils/cms/validation';
 import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
 import { createClient } from '@/utils/supabase/server';
-import { findAllowedCmsUser, getUserGithubUsername } from './auth';
+import {
+  findAllowedCmsUser,
+  getUserGithubId,
+  getUserGithubUsername,
+  getVerifiedUserEmail,
+} from './auth';
 
 export {
   getStoragePathFromPublicUrl,
@@ -36,7 +42,12 @@ type CmsActionRole = 'authenticated' | 'allowlisted' | 'admin' | 'post-writer';
 
 export type CmsActionContext = {
   supabase: ServerSupabaseClient;
-  user: { id: string; email: string; githubUsername: string | null };
+  user: {
+    id: string;
+    email: string;
+    githubUserId: string | null;
+    githubUsername: string | null;
+  };
   role: string | null;
 };
 
@@ -53,20 +64,25 @@ export async function getCmsActionContext(
     throw new Error('Unauthorized: Authentication required');
   }
 
+  const githubUserId = getUserGithubId(user);
+  const verifiedEmail = getVerifiedUserEmail(user);
+  // Display-only handle from the verified identity; never user_metadata.
   const githubUsername = getUserGithubUsername(user);
   // Trust boundary: the session client authenticates the requester
   // (auth.getUser() above). The CMS role lookup must go through the
   // service_role admin client — authenticated has no SELECT on
   // cms_allowed_users since the hardening (anon/authenticated = no access).
+  // Order: githubUserID -> verified-email (returns immediately) -> legacy
+  // display handle. No user_metadata trust anywhere.
   const role =
     requiredRole === 'authenticated'
       ? null
       : (
-          await findAllowedCmsUser(
-            getCmsAdminClient(),
-            user.email,
-            githubUsername
-          )
+          await findAllowedCmsUser(getCmsAdminClient(), {
+            email: verifiedEmail,
+            githubUserId,
+            githubUsernameLegacy: githubUsername,
+          })
         )?.role || null;
 
   if (requiredRole === 'allowlisted' && !role) {
@@ -93,6 +109,7 @@ export async function getCmsActionContext(
     user: {
       id: user.id,
       email: user.email || '',
+      githubUserId,
       githubUsername,
     },
     role,
@@ -170,6 +187,13 @@ type ProcessImageOptions = {
   maxWidth?: number;
   maxHeight?: number;
   quality?: number;
+  /**
+   * How the requested box is filled. `cover` (default) crops to the exact
+   * bounds, which suits portrait/thumbnail targets; `inside` fits the whole
+   * image within the bounds and keeps its aspect ratio for wide assets such as
+   * header logos.
+   */
+  fit?: 'cover' | 'inside';
 };
 
 type ProcessImageResult = {
@@ -248,7 +272,14 @@ export async function processImage(
 
     let pipeline = sharp(inputBuffer, { animated });
 
-    if (maxWidth && maxHeight) {
+    if (maxWidth && maxHeight && options?.fit === 'inside') {
+      // Contain: fit the whole image inside the bounds and never enlarge it,
+      // so a wide logo is not centre-cropped into a fixed box.
+      pipeline = pipeline.resize(maxWidth, maxHeight, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    } else if (maxWidth && maxHeight) {
       pipeline = pipeline.resize(maxWidth, maxHeight, {
         fit: 'cover',
         position: 'center',
@@ -448,15 +479,25 @@ export async function removeStorageObjectBestEffort(
 
 /**
  * Best-effort removal of the file behind a public URL, if it exists.
- * Never throws — see removeStorageObjectBestEffort.
+ * Strict origin + exact bucket-prefix match; cross-bucket/cross-origin
+ * URLs are a no-op. Never throws — see removeStorageObjectBestEffort.
  */
 export async function removePublicFileIfPresent(
   supabase: SupabaseClient,
   fileUrl: string | null | undefined,
-  bucket: string
+  bucket: string,
+  origin?: string
 ): Promise<void> {
   if (!fileUrl) return;
-  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket);
+  let resolved = origin;
+  if (!resolved) {
+    try {
+      resolved = getCmsStorageOrigin();
+    } catch {
+      return;
+    }
+  }
+  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket, resolved);
   if (!filePath) return;
   await removeStorageObjectBestEffort(supabase, bucket, filePath);
 }
@@ -469,10 +510,135 @@ export async function removePublicFileIfDifferent(
   supabase: SupabaseClient,
   fileUrl: string | null | undefined,
   bucket: string,
-  nextPath: string
+  nextPath: string,
+  origin?: string
 ): Promise<void> {
   if (!fileUrl) return;
-  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket);
+  let resolved = origin;
+  if (!resolved) {
+    try {
+      resolved = getCmsStorageOrigin();
+    } catch {
+      return;
+    }
+  }
+  const filePath = getStoragePathFromPublicUrl(fileUrl, bucket, resolved);
   if (!filePath || filePath === nextPath) return;
   await removeStorageObjectBestEffort(supabase, bucket, filePath);
+}
+
+/**
+ * Server-side copy of a Storage object within one bucket. Returns the
+ * destination path on success, null on failure. Never throws: callers fall
+ * back to the source path (which stays valid) when the copy fails.
+ */
+export async function copyStorageObjectBestEffort(
+  supabase: SupabaseClient,
+  bucket: string,
+  fromPath: string,
+  toPath: string
+): Promise<string | null> {
+  try {
+    const { error } = await supabase.storage
+      .from(bucket)
+      .copy(fromPath, toPath);
+    if (error) {
+      console.error(
+        `Failed to copy storage object ${fromPath} to ${toPath}:`,
+        error
+      );
+      return null;
+    }
+    return toPath;
+  } catch (error) {
+    console.error(
+      `Failed to copy storage object ${fromPath} to ${toPath}:`,
+      error
+    );
+    return null;
+  }
+}
+
+/**
+ * Moves a staged pre-insert upload into its per-post folder after the row
+ * commits: copies `<stagedPath>` to `<prefix>/<staged-basename>`, removes the
+ * staged object best-effort, and returns the final public URL + path.
+ * Returns null (row keeps pointing at the staged object, which stays valid)
+ * when the copy fails. Never throws.
+ */
+export async function finalizeStagedPostImage(
+  supabase: SupabaseClient,
+  bucket: string,
+  stagedPath: string,
+  prefix: string
+): Promise<{ publicUrl: string; path: string } | null> {
+  const tail = stagedPath.split('/').pop() ?? '';
+  if (!tail) return null;
+  const finalPath = `${prefix}/${tail}`;
+  if (finalPath === stagedPath) return null;
+  const copied = await copyStorageObjectBestEffort(
+    supabase,
+    bucket,
+    stagedPath,
+    finalPath
+  );
+  if (!copied) return null;
+  await removeStorageObjectBestEffort(supabase, bucket, stagedPath);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(finalPath);
+  return { publicUrl: data.publicUrl, path: finalPath };
+}
+
+/**
+ * Best-effort removal of every object under a prefix (e.g. `blog/<id>` when
+ * its post is deleted). Never throws: a surviving orphan is harmless, a
+ * thrown cleanup is not.
+ */
+export async function removePrefixBestEffort(
+  supabase: SupabaseClient,
+  bucket: string,
+  prefix: string
+): Promise<void> {
+  try {
+    const paths: string[] = [];
+    let offset = 0;
+    const limit = 100;
+    for (;;) {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .list(prefix, { limit, offset });
+      if (error || !data || data.length === 0) break;
+      for (const entry of data) {
+        const name = (entry as { name: string }).name;
+        if (!name) continue;
+        const id = (entry as { id: string | null }).id;
+        if (id === null || id === undefined) {
+          await removePrefixBestEffort(supabase, bucket, `${prefix}/${name}`);
+        } else {
+          paths.push(`${prefix}/${name}`);
+        }
+      }
+      if (data.length < limit) break;
+      offset += limit;
+    }
+    for (let i = 0; i < paths.length; i += 100) {
+      try {
+        const { error: removeError } = await supabase.storage
+          .from(bucket)
+          .remove(paths.slice(i, i + 100));
+        if (removeError) {
+          console.error(
+            `Failed to remove storage objects under ${prefix}:`,
+            removeError
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Failed to remove storage objects under ${prefix}:`,
+          error
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to remove storage prefix ${prefix}:`, error);
+  }
 }

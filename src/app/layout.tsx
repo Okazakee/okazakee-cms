@@ -4,7 +4,6 @@ import { Suspense } from 'react';
 import { publicConfig } from '@/config/public';
 import cmsEn from '@/i18n/messages/cms.en.json';
 import cmsIt from '@/i18n/messages/cms.it.json';
-import { getTranslationsSupabase } from '@/utils/getData';
 import { CmsIntlProvider } from './CmsIntlProvider';
 import { Providers } from './providers';
 
@@ -14,24 +13,13 @@ const whiteRabbit = localFont({
   weight: '400',
 });
 
-async function CmsShell({ children }: { children: React.ReactNode }) {
-  // Public translations are still merged here: CMS previews render public
-  // section content (hero, skills, posts, header/footer, ...) which is data
-  // in Supabase, not static CMS UI labels. Both locales are delivered so
-  // the SidePanel selector can switch the UI language client-side, without
-  // URL locales.
-  const [publicEn, publicIt] = await Promise.all([
-    getTranslationsSupabase('en'),
-    getTranslationsSupabase('it'),
-  ]);
-
+function CmsShell({ children }: { children: React.ReactNode }) {
+  // The editor renders from its own bundles only: it no longer mirrors public
+  // section content, so no public copy is read from the database here. Both
+  // locales are delivered so the SidePanel selector can switch the UI language
+  // client-side, without URL locales.
   return (
-    <CmsIntlProvider
-      messages={{
-        en: { ...publicEn, cms: cmsEn },
-        it: { ...publicIt, cms: cmsIt },
-      }}
-    >
+    <CmsIntlProvider messages={{ en: { cms: cmsEn }, it: { cms: cmsIt } }}>
       {children}
     </CmsIntlProvider>
   );

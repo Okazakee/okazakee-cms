@@ -7,14 +7,15 @@ import { getCmsBootData } from '@/app/actions/cms/getUser';
 import BlogSection from '@/components/cms/sections/Blog/BlogSection';
 import CareerSection from '@/components/cms/sections/Career/CareerSection';
 import ContactsSection from '@/components/cms/sections/Contacts/ContactsSection';
-import {
-  RequestCopySection,
-  SiteCopySection,
-} from '@/components/cms/sections/Copy/CopySections';
+import { RequestCopySection } from '@/components/cms/sections/Copy/CopySections';
+import { demoHeroSection, demoUser } from '@/libs/demo/fixtures';
+import { isDemoSession } from '@/libs/demo/session';
 import HeroSection from '@/components/cms/sections/Hero/HeroSection';
-import LayoutSection from '@/components/cms/sections/Layout/LayoutSection';
+import { LayoutSection } from '@/components/cms/sections/Layout/LayoutSection';
 import PortfolioSection from '@/components/cms/sections/Portfolio/PortfolioSection';
 import PrivacyPolicySection from '@/components/cms/sections/Privacy/PrivacyPolicySection';
+import RequestsSection from '@/components/cms/sections/Requests/RequestsSection';
+import { ResumeSection } from '@/components/cms/sections/Resume/ResumeSection';
 import SkillsSection from '@/components/cms/sections/Skills/SkillsSection';
 import UsersSection from '@/components/cms/sections/Users/UsersSection';
 import AccountSection from '@/components/common/cms/AccountSection';
@@ -22,26 +23,35 @@ import { CmsHeader } from '@/components/common/cms/CmsHeader';
 import SidePanel from '@/components/common/cms/SidePanel';
 import { useCmsStore } from '@/store/cmsStore';
 
-const adminSections = [
+// Page order: the sidebar reads top-to-bottom like the public page does.
+const pageSections = [
   'hero',
   'skills',
   'career',
   'portfolio',
   'blog',
   'contacts',
-  'request-form',
+];
+const inboxSections = ['requests'];
+const systemSections = [
   'layout',
-  'site-copy',
+  'resume',
+  'request-form',
   'privacy-policy',
   'users',
   'account',
 ];
+const adminSections = [...pageSections, ...inboxSections, ...systemSections];
 const editorSections = ['portfolio', 'blog', 'account'];
 
 function Editor({ section }: { section: string }) {
   switch (section) {
+    case 'layout':
+      return <LayoutSection />;
     case 'hero':
       return <HeroSection />;
+    case 'resume':
+      return <ResumeSection />;
     case 'skills':
       return <SkillsSection />;
     case 'career':
@@ -54,10 +64,8 @@ function Editor({ section }: { section: string }) {
       return <ContactsSection />;
     case 'request-form':
       return <RequestCopySection />;
-    case 'layout':
-      return <LayoutSection />;
-    case 'site-copy':
-      return <SiteCopySection />;
+    case 'requests':
+      return <RequestsSection />;
     case 'privacy-policy':
       return <PrivacyPolicySection />;
     case 'users':
@@ -90,6 +98,19 @@ export default function CMSPage() {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
+    // Offline showcase: fixture identity, no server round-trip. Real boot
+    // below is untouched.
+    if (isDemoSession()) {
+      const store = useCmsStore.getState();
+      store.setDemoMode(true);
+      store.setUser(demoUser);
+      store.setHeroSection(demoHeroSection);
+      store.setSidePanelSections(adminSections);
+      store.setActiveSection(adminSections[0] ?? 'hero');
+      setVisited([adminSections[0] ?? 'hero']);
+      setBooting(false);
+      return;
+    }
     void getCmsBootData()
       .then((boot) => {
         if (boot.status === 'error') throw new Error(boot.error);
@@ -101,11 +122,30 @@ export default function CMSPage() {
           boot.user.role === 'admin' ? adminSections : editorSections;
         const store = useCmsStore.getState();
         store.setUser(boot.user);
+        // Remember the identity for the login screen ("Welcome back" +
+        // avatar) when the next visit arrives with a dead session.
+        try {
+          window.localStorage.setItem(
+            'cms_last_user',
+            JSON.stringify({
+              displayName: boot.user.displayName,
+              avatarUrl: boot.user.avatarUrl,
+            })
+          );
+        } catch {
+          // Private mode / storage full: purely cosmetic, ignore.
+        }
         store.setHeroSection(boot.heroSection);
         store.setSidePanelSections(sections);
-        const initial = sections.includes(store.activeSection || '')
-          ? (store.activeSection as string)
-          : sections[0];
+        const saved =
+          typeof window !== 'undefined'
+            ? window.localStorage.getItem('cms_active_section')
+            : null;
+        // Prefer the store value (in-session switches survive boot when the
+        // effect re-runs), then the saved value, then the first section.
+        const candidates = [store.activeSection, saved];
+        const initial =
+          candidates.find((s) => s && sections.includes(s)) ?? sections[0];
         store.setActiveSection(initial);
         setVisited([initial]);
         setBooting(false);

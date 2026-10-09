@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { CMSUser } from '@/app/actions/cms/getUser';
+import type { HeroSettings } from '@/types/fetchedData.types';
 
 export interface PublishState {
   isDirty: boolean;
@@ -17,34 +18,40 @@ export interface PublishFailure {
   error: string;
 }
 
+/** Hero and Resume updates preserve the other editor's committed fields. */
+export function mergeHeroSettings(
+  current: HeroSettings | null,
+  patch: Partial<HeroSettings>
+): HeroSettings {
+  return {
+    mainImage: current?.mainImage ?? null,
+    blurhashURL: current?.blurhashURL ?? null,
+    resume_en: current?.resume_en ?? null,
+    resume_it: current?.resume_it ?? null,
+    shape: current?.shape ?? null,
+    ...patch,
+  };
+}
+
 interface CmsState {
   user: CMSUser | null;
   sidePanelSections: string[];
   activeSection: string | null;
-  heroSection: {
-    mainImage: string | null;
-    blurhashURL: string | null;
-    resume_en: string | null;
-    resume_it: string | null;
-  } | null;
+  heroSection: HeroSettings | null;
   loading: boolean;
   error: string | null;
   warning: string | null;
   publishQueue: Record<string, PublishState>;
   sectionCallbacks: Record<string, SectionCallbacks>;
   isPublishingAll: boolean;
+  /** Offline showcase mode: fixture data, no server actions. */
+  demoMode: boolean;
 
   setUser: (user: CMSUser | null) => void;
+  setDemoMode: (demoMode: boolean) => void;
   setSidePanelSections: (sections: string[]) => void;
   setActiveSection: (section: string) => void;
-  setHeroSection: (
-    heroSection: {
-      mainImage: string | null;
-      blurhashURL: string | null;
-      resume_en: string | null;
-      resume_it: string | null;
-    } | null
-  ) => void;
+  setHeroSection: (heroSection: HeroSettings | null) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setWarning: (warning: string | null) => void;
@@ -63,7 +70,7 @@ interface CmsState {
 export const useCmsStore = create<CmsState>((set, get) => ({
   user: null,
   sidePanelSections: [],
-  activeSection: 'hero',
+  activeSection: null,
   heroSection: null,
   loading: false,
   error: null,
@@ -71,8 +78,10 @@ export const useCmsStore = create<CmsState>((set, get) => ({
   publishQueue: {},
   sectionCallbacks: {},
   isPublishingAll: false,
+  demoMode: false,
 
   setUser: (user) => set({ user }),
+  setDemoMode: (demoMode) => set({ demoMode }),
   setSidePanelSections: (sections) => set({ sidePanelSections: sections }),
   setActiveSection: (section) => set({ activeSection: section }),
   setHeroSection: (heroSection) => set({ heroSection }),

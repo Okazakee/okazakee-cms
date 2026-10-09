@@ -16,7 +16,6 @@ import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 
 type I18nOperation =
   | { type: 'GET' }
-  | { type: 'GET_PUBLIC' }
   | {
       type: 'UPDATE_SECTION';
       locale: string;
@@ -53,10 +52,9 @@ const CONFLICT_ERROR =
  * Invalidates the CMS's OWN cached reads after a committed mutation.
  *
  * `updateTag` is the immediate Server-Action mechanism for `'use cache'`
- * entries (the CMS shell/previews read translations via
- * `getTranslationsSupabase`). `refresh` re-renders the current route so the
- * editor sees their own write without a manual reload. Remote public-site
- * invalidation is handled separately by `invalidatePublicContent`.
+ * entries. `refresh` re-renders the current route so the editor sees their own
+ * write without a manual reload. Remote public-site invalidation is handled
+ * separately by `invalidatePublicContent`.
  */
 function invalidateLocalCache(entity: ContentEntity): void {
   for (const tag of getLocalInvalidationTags(entity)) {
@@ -136,12 +134,9 @@ async function casMergeSection(
 export async function i18nActions(
   operation: I18nOperation
 ): Promise<I18nResult> {
-  // Allowlisted editors may read public copy; administration and writes require admin.
   let supabase: Awaited<ReturnType<typeof getCmsActionContext>>['supabase'];
   try {
-    const context = await getCmsActionContext(
-      operation.type === 'GET_PUBLIC' ? 'allowlisted' : 'admin'
-    );
+    const context = await getCmsActionContext('admin');
     supabase = context.supabase;
   } catch (error) {
     return {
@@ -150,12 +145,22 @@ export async function i18nActions(
     };
   }
 
+  if (
+    (operation.type === 'UPDATE_SECTION' ||
+      operation.type === 'UPDATE_SECTIONS') &&
+    operation.sectionKey !== 'hero-section' &&
+    operation.sectionKey !== 'request-form'
+  ) {
+    return {
+      success: false,
+      error: 'This translation namespace is owned by the public website',
+    };
+  }
+
   try {
     switch (operation.type) {
       case 'GET':
         return await getI18nData(supabase);
-      case 'GET_PUBLIC':
-        return await getI18nData(supabase, true);
 
       case 'UPDATE_SECTION':
         return await updateSectionTranslations(
@@ -254,14 +259,11 @@ async function updateSectionTranslationsForLocales(
   };
 }
 
-async function getI18nData(
-  supabase: SupabaseClient,
-  publicOnly = false
-): Promise<I18nResult> {
+async function getI18nData(supabase: SupabaseClient): Promise<I18nResult> {
   try {
     const { data, error } = await supabase
       .from('i18n_translations')
-      .select(publicOnly ? 'language, translations' : '*')
+      .select('*')
       .order('language', { ascending: true });
 
     if (error) throw error;

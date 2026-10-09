@@ -1,19 +1,20 @@
 'use client';
 
-import { Eye, EyeOff } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { EditorGroup } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { MarkdownRenderer } from '@/components/layout/MarkdownRenderer';
+import { VisualBodyEditor } from '@/components/cms/shared/VisualBodyEditor';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoPrivacy } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 
 export default function PrivacyPolicySection() {
@@ -27,7 +28,6 @@ export default function PrivacyPolicySection() {
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
   const isDirty = enMarkdown !== original.en || itMarkdown !== original.it;
@@ -37,6 +37,16 @@ export default function PrivacyPolicySection() {
   const fetchData = useCallback(async () => {
     const current = beginLoad();
     setIsLoading(true);
+    // Offline showcase: fixture copy, no server round-trip.
+    if (useCmsStore.getState().demoMode) {
+      if (!current()) return;
+      setEnMarkdown(demoPrivacy.en);
+      setItMarkdown(demoPrivacy.it);
+      setOriginal({ en: demoPrivacy.en, it: demoPrivacy.it });
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     try {
       const r = await i18nActions({ type: 'GET' });
       if (!current()) return;
@@ -67,6 +77,12 @@ export default function PrivacyPolicySection() {
     useCmsStore.getState().setError(null);
     const errors: string[] = [];
     const submitted = { en: enMarkdown, it: itMarkdown };
+    // Offline showcase: commit locally.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      setOriginal(submitted);
+      return;
+    }
     try {
       for (const locale of ['en', 'it'] as const) {
         if (submitted[locale] === original[locale]) continue;
@@ -108,9 +124,6 @@ export default function PrivacyPolicySection() {
 
   useSectionCallbacks('privacy-policy', handlePublish, handleRevert);
 
-  const textareaClass =
-    'w-full px-4 py-3 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none font-mono text-sm resize-y';
-
   if (isLoading)
     return (
       <div className="flex items-center justify-center py-12">
@@ -136,55 +149,39 @@ export default function PrivacyPolicySection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
-
-      <div className="flex items-center justify-between gap-2">
-        <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
-        <button
-          type="button"
-          onClick={() => setShowPreview((p) => !p)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm bg-surface-card hover:bg-surface-raised text-text-main rounded-lg transition-colors"
-        >
-          {showPreview ? (
-            <EyeOff className="w-4 h-4" />
-          ) : (
-            <Eye className="w-4 h-4" />
-          )}
-          {showPreview ? 'Hide Preview' : 'Show Preview'}
-        </button>
-      </div>
-
-      <div>
-        <h2 className="text-lg font-bold text-accent-violet mb-3">
-          {activeLocale === 'en' ? t('common.english') : t('common.italian')}
-        </h2>
-        <textarea
+      <EditorGroup
+        title={t('editor.groups.document')}
+        actions={
+          <LocaleToggle
+            activeLocale={activeLocale}
+            onChange={setActiveLocale}
+          />
+        }
+      >
+        <VisualBodyEditor
+          id="privacy-body"
           value={activeLocale === 'en' ? enMarkdown : itMarkdown}
-          onChange={(e) => {
-            if (activeLocale === 'en') setEnMarkdown(e.target.value);
-            else setItMarkdown(e.target.value);
+          onChange={(v) => {
+            if (activeLocale === 'en') setEnMarkdown(v);
+            else setItMarkdown(v);
           }}
-          className={textareaClass}
-          rows={showPreview ? 12 : 20}
+          minHeight={320}
           placeholder={
             activeLocale === 'en'
               ? '# Privacy Policy'
               : '# Informativa sulla Privacy'
           }
+          tools={[
+            'bold',
+            'violet',
+            'link',
+            'heading',
+            'list',
+            'quote',
+            'code',
+          ]}
         />
-      </div>
-
-      {showPreview && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6">
-          <h3 className="text-lg font-bold text-accent-violet mb-4">
-            Live Preview
-          </h3>
-          <div className="prose dark:prose-invert max-w-none bg-surface-base rounded-lg p-4 md:p-6 border border-border-subtle ">
-            <MarkdownRenderer
-              markdown={activeLocale === 'en' ? enMarkdown : itMarkdown}
-            />
-          </div>
-        </div>
-      )}
+      </EditorGroup>
 
       <ConfirmDialog
         isOpen={showConfirmRevert}

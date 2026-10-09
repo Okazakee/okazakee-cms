@@ -2,9 +2,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  finalizeStagedPostImage,
   getAdminClient,
   getCmsActionContext,
   prepareImageUpload,
+  removePrefixBestEffort,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   removeStorageObjectBestEffort,
@@ -13,6 +15,15 @@ import {
   uploadImmutablePreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import {
+  applyBodyImageRewrites,
+  bodyUploadStaged,
+  captionOverridesFor,
+  cleanupOrphanedBodyImages,
+  removeBodyUploads,
+  uploadBodyImages,
+  validateBodyImagePayload,
+} from '@/app/actions/cms/utils/postBodyFiles';
 import {
   batchFailureSummary,
   batchHadCommits,
@@ -28,7 +39,11 @@ import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
+import { BLOG_STAGING_PREFIX, blogPostPrefix } from '@/libs/cms/storage/paths';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { BodyImageUpload } from '@/utils/cms/postBody';
+import { hasPendingRefs } from '@/utils/cms/postBody';
 import { createClient } from '@/utils/supabase/server';
 
 type BlogOperation =
@@ -59,6 +74,8 @@ type BlogOperation =
         blurhashURL?: string;
         /** Client-generated temporary id; echoed back in `created`/`createdIds`. */
         tempId?: string;
+        /** Blob-staged body images; uploaded to the post folder after INSERT. */
+        bodyFiles?: BodyImageUpload[];
       }>;
       updates: Array<{
         id: number;
@@ -66,6 +83,8 @@ type BlogOperation =
         file?: File | null;
         currentImageUrl?: string;
         blurhashURL?: string;
+        /** Blob-staged body images; uploaded straight into the post folder. */
+        bodyFiles?: BodyImageUpload[];
       }>;
       deletes: number[];
     };
@@ -240,6 +259,15 @@ export async function blogActions(
   }
 }
 
+/** Storage origin for body orphan cleanup; null skips it (best-effort). */
+function readStorageOrigin(): string | null {
+  try {
+    return getCmsStorageOrigin();
+  } catch {
+    return null;
+  }
+}
+
 async function batchPublishBlog(
   operation: Extract<BlogOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<BlogResult> {
@@ -247,6 +275,7 @@ async function batchPublishBlog(
   try {
     const context = await getCmsActionContext('post-writer');
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     for (const [index, item] of operation.creates.entries()) {
       const tempId = normalizeTempId(item.tempId, 'blog', index);
@@ -256,6 +285,21 @@ async function batchPublishBlog(
           kind: 'create',
           tempId,
           error: validation.error ?? 'Invalid data',
+        });
+        continue;
+      }
+
+      // Blob-staged body images resolve here; unresolved refs must fail
+      // before the cover upload so nothing is written for a broken draft.
+      const bodyPayloadError = validateBodyImagePayload(item.bodyFiles, [
+        item.data.body_en,
+        item.data.body_it,
+      ]);
+      if (bodyPayloadError) {
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: bodyPayloadError,
         });
         continue;
       }
@@ -272,8 +316,8 @@ async function batchPublishBlog(
 
       const upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
-        'Website Assets/blog',
+        bucket,
+        BLOG_STAGING_PREFIX,
         item.data.title_en || 'untitled',
         prepared.image
       );
@@ -292,13 +336,84 @@ async function batchPublishBlog(
         .single();
 
       if (error) {
-        await removeStorageObjectBestEffort(admin, 'website', upload.path);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
         markFailed(evidence, {
           kind: 'create',
           tempId,
           error: error.message,
         });
         continue;
+      }
+
+      // The row id exists only after the INSERT, so staged body images are
+      // uploaded into the per-post folder now and the markdown is rewritten
+      // to the committed URLs. Any failure rolls the row back: a created
+      // row must never keep `pending:` refs behind.
+      let bodyRewrites = new Map<string, string>();
+      let bodyStaged: string[] = [];
+      try {
+        const bodyUpload = await uploadBodyImages(
+          admin,
+          bucket,
+          blogPostPrefix(data.id as number),
+          item.data.title_en || 'untitled',
+          item.bodyFiles,
+          captionOverridesFor([item.data.body_en, item.data.body_it])
+        );
+        bodyStaged = bodyUpload.staged;
+        bodyRewrites = bodyUpload.rewrites;
+        const rewrittenBodies = applyBodyImageRewrites(
+          { body_en: item.data.body_en, body_it: item.data.body_it },
+          bodyRewrites
+        );
+        if (
+          rewrittenBodies.body_en !== item.data.body_en ||
+          rewrittenBodies.body_it !== item.data.body_it
+        ) {
+          const { error: bodyError } = await admin
+            .from('blog_posts')
+            .update({
+              body_en: rewrittenBodies.body_en,
+              body_it: rewrittenBodies.body_it,
+            })
+            .eq('id', data.id);
+          if (bodyError) throw bodyError;
+        }
+      } catch (error) {
+        await admin.from('blog_posts').delete().eq('id', data.id);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
+        await removeBodyUploads(admin, bucket, [
+          ...bodyStaged,
+          ...bodyUploadStaged(error),
+        ]);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Body image publish failed',
+        });
+        continue;
+      }
+
+      // The row id exists only after the INSERT, so the staged upload is
+      // moved into its per-post folder now. The row keeps the staging URL
+      // when the move fails (still valid; the next update moves it).
+      const finalized = await finalizeStagedPostImage(
+        admin,
+        bucket,
+        upload.path,
+        blogPostPrefix(data.id as number)
+      );
+      if (finalized) {
+        const { error: finalizeError } = await admin
+          .from('blog_posts')
+          .update({ image: finalized.publicUrl })
+          .eq('id', data.id);
+        if (finalizeError) {
+          console.error('Error finalizing blog cover path:', finalizeError);
+        }
       }
 
       markCreated(evidence, tempId, data.id);
@@ -315,20 +430,91 @@ async function batchPublishBlog(
         continue;
       }
 
+      const bodyPayloadError = validateBodyImagePayload(item.bodyFiles, [
+        item.data.body_en,
+        item.data.body_it,
+      ]);
+      if (bodyPayloadError) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: bodyPayloadError,
+        });
+        continue;
+      }
+
       let uploaded: {
         publicUrl: string;
         path: string;
         blurhash: string;
       } | null = null;
       const updateData: UpdateBlogData = { ...item.data };
-      // Trusted replacement source: the previous object URL is read from the
-      // DB, never trusted from the client payload, so a forged
-      // `currentImageUrl` cannot delete an unrelated object.
+      // Trusted replacement source: the previous row (cover + bodies) is
+      // read from the DB, never trusted from the client payload, so a
+      // forged `currentImageUrl` cannot delete an unrelated object and the
+      // orphan diff below compares against committed state.
       let previousImage: string | null = null;
+      let oldBodies: Array<string | undefined> = [];
+      let bodyStaged: string[] = [];
+
+      const { data: currentRow, error: fetchError } = await admin
+        .from('blog_posts')
+        .select('image, body_en, body_it')
+        .eq('id', item.id)
+        .single();
+
+      if (fetchError || !currentRow) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: fetchError?.message ?? 'Blog post not found',
+        });
+        continue;
+      }
+      previousImage = (currentRow.image as string | null) ?? null;
+      oldBodies = [
+        currentRow.body_en as string | undefined,
+        currentRow.body_it as string | undefined,
+      ];
+
+      if (item.bodyFiles && item.bodyFiles.length > 0) {
+        try {
+          const bodyUpload = await uploadBodyImages(
+            admin,
+            bucket,
+            blogPostPrefix(item.id),
+            item.data.title_en || `blog-${item.id}`,
+            item.bodyFiles,
+            captionOverridesFor([item.data.body_en, item.data.body_it])
+          );
+          bodyStaged = bodyUpload.staged;
+          const rewritten = applyBodyImageRewrites(
+            { body_en: updateData.body_en, body_it: updateData.body_it },
+            bodyUpload.rewrites
+          );
+          updateData.body_en = rewritten.body_en;
+          updateData.body_it = rewritten.body_it;
+        } catch (error) {
+          await removeBodyUploads(admin, bucket, [
+            ...bodyStaged,
+            ...bodyUploadStaged(error),
+          ]);
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Body image upload failed',
+          });
+          continue;
+        }
+      }
 
       if (item.file) {
         const prepared = await prepareImageUpload(item.file, item.blurhashURL);
         if (!prepared.success) {
+          await removeBodyUploads(admin, bucket, bodyStaged);
           markFailed(evidence, {
             kind: 'update',
             id: item.id,
@@ -337,26 +523,10 @@ async function batchPublishBlog(
           continue;
         }
 
-        const { data: currentRow, error: fetchError } = await admin
-          .from('blog_posts')
-          .select('image')
-          .eq('id', item.id)
-          .single();
-
-        if (fetchError) {
-          markFailed(evidence, {
-            kind: 'update',
-            id: item.id,
-            error: fetchError.message,
-          });
-          continue;
-        }
-        previousImage = (currentRow?.image as string | null) ?? null;
-
         const upload = await uploadImmutablePreparedImage(
           admin,
-          'website',
-          'Website Assets/blog',
+          bucket,
+          blogPostPrefix(item.id),
           item.data.title_en || `blog-${item.id}`,
           prepared.image
         );
@@ -377,8 +547,9 @@ async function batchPublishBlog(
 
       if (error) {
         if (uploaded) {
-          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+          await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
+        await removeBodyUploads(admin, bucket, bodyStaged);
         markFailed(evidence, {
           kind: 'update',
           id: item.id,
@@ -392,8 +563,23 @@ async function batchPublishBlog(
         await removePublicFileIfDifferent(
           admin,
           previousImage,
-          'website',
+          bucket,
           uploaded.path
+        );
+      }
+
+      // Body objects the new markdown dropped (same-prefix only, covers
+      // always kept). Best-effort, never fails the publish.
+      const storageOrigin = readStorageOrigin();
+      if (storageOrigin) {
+        await cleanupOrphanedBodyImages(
+          admin,
+          bucket,
+          storageOrigin,
+          blogPostPrefix(item.id),
+          oldBodies,
+          [updateData.body_en, updateData.body_it],
+          [previousImage, uploaded?.publicUrl]
         );
       }
 
@@ -423,9 +609,7 @@ async function batchPublishBlog(
             });
           }
         }
-        const deletable = operation.deletes.filter((id) =>
-          existingIds.has(id)
-        );
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
         if (deletable.length > 0) {
           const { data: deletedRows, error } = await admin
             .from('blog_posts')
@@ -454,7 +638,15 @@ async function batchPublishBlog(
                 await removePublicFileIfPresent(
                   admin,
                   row.image as string | null,
-                  'website'
+                  bucket
+                );
+                // Per-post folder: covers body assets the image column never
+                // referenced. Legacy rows may also hold a pre-reorg URL, which
+                // the cover removal above already handled.
+                await removePrefixBestEffort(
+                  admin,
+                  bucket,
+                  blogPostPrefix(row.id as number)
                 );
               }
             }
@@ -506,10 +698,13 @@ async function batchPublishBlog(
     };
   }
 }
-async function getBlogData(supabase: SupabaseClient): Promise<BlogResult> {
+async function getBlogData(_supabase: SupabaseClient): Promise<BlogResult> {
   try {
-    // For CMS, fetch all blog posts without limit
-    const { data: blogPosts, error } = await supabase
+    // CMS lists include drafts: published-only RLS hides them from session
+    // reads, so this goes through the admin client after the requireAuth
+    // gate in blogActions (service-role-after-check). Authorized CMS users
+    // only; the public site never calls this path.
+    const { data: blogPosts, error } = await getAdminClient()
       .from('blog_posts')
       .select('*')
       .order('created_at', { ascending: false });
@@ -532,10 +727,12 @@ async function getBlogData(supabase: SupabaseClient): Promise<BlogResult> {
   }
 }
 
-async function getAuthors(supabase: SupabaseClient): Promise<BlogResult> {
+async function getAuthors(_supabase: SupabaseClient): Promise<BlogResult> {
   try {
-    // Fetch all users who have profiles (have logged in at least once)
-    const { data: profiles, error } = await supabase
+    // Author picker: admin client after the requireAuth gate. Column set is
+    // the picker contract (id/display_name/avatar_url); email never leaves
+    // the allowlist through this path.
+    const { data: profiles, error } = await getAdminClient()
       .from('user_profiles')
       .select('id, display_name, avatar_url')
       .order('display_name', { ascending: true });
@@ -569,6 +766,13 @@ async function createBlog(
     }
 
     const { id: userId } = await requireAllowedPostWriter();
+    // Legacy single-shot path has no body-file upload: refuse staged refs.
+    if (hasPendingRefs(data.body_en, data.body_it)) {
+      return {
+        success: false,
+        error: 'Body images must be published through batch publish',
+      };
+    }
     const insertData = {
       ...data,
       blurhashURL: data.blurhashURL ?? '',
@@ -613,6 +817,13 @@ async function updateBlog(
     const validation = validateBlogData(data);
     if (!validation.isValid) {
       return { success: false, error: validation.error };
+    }
+    // Legacy single-shot path has no body-file upload: refuse staged refs.
+    if (hasPendingRefs(data.body_en, data.body_it)) {
+      return {
+        success: false,
+        error: 'Body images must be published through batch publish',
+      };
     }
 
     const admin = getAdminClient();
@@ -661,6 +872,7 @@ async function deleteBlog(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: existingBlog, error: fetchError } = await admin
       .from('blog_posts')
       .select('id, image')
@@ -681,8 +893,9 @@ async function deleteBlog(
     await removePublicFileIfPresent(
       admin,
       existingBlog.image as string | null,
-      'website'
+      bucket
     );
+    await removePrefixBestEffort(admin, bucket, blogPostPrefix(id));
 
     const revalidation = await invalidatePublicContent({
       entity: 'blog',
@@ -721,6 +934,7 @@ async function uploadBlogImageForNewPost(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     // Shared format-aware pipeline: extension + MIME follow the actual
     // processed format (WebP passthrough or Sharp fallback to PNG).
@@ -734,8 +948,8 @@ async function uploadBlogImageForNewPost(
 
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
-      'Website Assets/blog',
+      bucket,
+      BLOG_STAGING_PREFIX,
       titleEn || 'untitled',
       prepared.image
     );
@@ -769,12 +983,13 @@ async function rollbackBlogCreate(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     // The row is the authoritative state: delete it first, then remove the
     // uploaded image best-effort. Storage-first would leave a surviving row
     // pointing at a deleted object if the DB delete failed.
     const { error } = await admin.from('blog_posts').delete().eq('id', postId);
     if (error) throw error;
-    await removeStorageObjectBestEffort(admin, 'website', imagePath);
+    await removeStorageObjectBestEffort(admin, bucket, imagePath);
     return { success: true };
   } catch (error) {
     console.error('Error rolling back blog create:', error);
@@ -808,6 +1023,7 @@ async function uploadBlogImage(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     const { data: existingBlog, error: fetchError } = await admin
       .from('blog_posts')
@@ -835,8 +1051,8 @@ async function uploadBlogImage(
     // using the trusted DB value rather than the client payload.
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
-      'Website Assets/blog',
+      bucket,
+      blogPostPrefix(blogId),
       existingBlog.title_en || `blog-${blogId}`,
       prepared.image
     );
@@ -855,14 +1071,14 @@ async function uploadBlogImage(
 
     if (updateError) {
       // Best-effort staged cleanup must never mask the DB error.
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
       existingBlog.image,
-      'website',
+      bucket,
       upload.path
     );
 

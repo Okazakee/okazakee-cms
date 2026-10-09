@@ -39,6 +39,7 @@ import {
 
 type AllowlistEntry = {
   email?: string;
+  github_user_id?: string;
   github_username?: string;
   role: string;
 };
@@ -48,17 +49,17 @@ function setupAllowlist(entries: AllowlistEntry[]) {
     expect(table).toBe('cms_allowed_users');
     return {
       select: () => ({
-        eq: (_col: string, value: string) => ({
+        eq: (col: string, value: string) => ({
           maybeSingle: vi.fn(
             async (): Promise<{ data: CmsAllowlistMatch | null }> => {
               const hit = entries.find(
-                (e) => e.email === value || e.github_username === value
+                (e) => (e as Record<string, unknown>)[col] === value
               );
               return {
                 data: hit
                   ? {
                       role: hit.role as CmsAllowlistMatch['role'],
-                      matchSource: hit.email === value ? 'email' : 'github',
+                      matchSource: col === 'email' ? 'email' : 'github',
                     }
                   : null,
               };
@@ -74,7 +75,9 @@ function setupSessionUser(
   user: {
     id: string;
     email?: string | null;
-    user_name?: string | null;
+    emailConfirmed?: boolean;
+    githubId?: string | null;
+    githubUsername?: string | null;
   } | null
 ) {
   mocks.session.auth.getUser.mockResolvedValue(
@@ -84,9 +87,31 @@ function setupSessionUser(
             user: {
               id: user.id,
               email: user.email ?? null,
-              user_metadata: user.user_name
-                ? { user_name: user.user_name }
-                : {},
+              email_confirmed_at:
+                user.email && user.emailConfirmed !== false
+                  ? '2026-01-01T00:00:00Z'
+                  : null,
+              confirmed_at:
+                user.email && user.emailConfirmed !== false
+                  ? '2026-01-01T00:00:00Z'
+                  : null,
+              app_metadata: {},
+              user_metadata: {},
+              identities:
+                user.githubId || user.githubUsername
+                  ? [
+                      {
+                        id: 'iid',
+                        user_id: user.id,
+                        identity_id: 'iid',
+                        provider: 'github',
+                        identity_data: {
+                          sub: user.githubId ?? undefined,
+                          user_name: user.githubUsername ?? undefined,
+                        },
+                      },
+                    ]
+                  : [],
             },
           },
           error: null,
@@ -115,6 +140,54 @@ describe('getCmsActionContext — trust boundary after allowlist hardening', () 
     expect(mocks.admin.from).toHaveBeenCalledWith('cms_allowed_users');
     // The session client was never touched for table access.
     expect(mocks.session.from).not.toHaveBeenCalled();
+  });
+
+  it('immutable GitHub ID authorizes before email or handle', async () => {
+    setupAllowlist([{ github_user_id: '123', role: 'admin' }]);
+    setupSessionUser({
+      id: 'u-id',
+      email: 'someone@example.com',
+      githubId: '123',
+      githubUsername: 'someone',
+    });
+
+    const context = await getCmsActionContext('admin');
+    expect(context.role).toBe('admin');
+    expect(context.user.githubUserId).toBe('123');
+  });
+
+  it('spoofed user_metadata never authorizes', async () => {
+    setupAllowlist([{ github_username: 'octocat', role: 'editor' }]);
+    // No verified identity: metadata alone must not match.
+    mocks.session.auth.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: 'u-spoof',
+          email: null,
+          app_metadata: {},
+          user_metadata: { user_name: 'octocat' },
+          identities: [],
+        },
+      },
+      error: null,
+    });
+
+    await expect(getCmsActionContext('admin')).rejects.toThrow(
+      'Unauthorized: Admin access required'
+    );
+  });
+
+  it('unverified email never authorizes', async () => {
+    setupAllowlist([{ email: 'admin@example.com', role: 'admin' }]);
+    setupSessionUser({
+      id: 'u-unverified',
+      email: 'admin@example.com',
+      emailConfirmed: false,
+    });
+
+    await expect(getCmsActionContext('admin')).rejects.toThrow(
+      'Unauthorized: Admin access required'
+    );
   });
 
   it('authenticated editor: post-writer succeeds, admin fails', async () => {
@@ -180,9 +253,9 @@ describe('getCmsActionContext — trust boundary after allowlist hardening', () 
     expect(mocks.admin.from).toHaveBeenCalledWith('cms_allowed_users');
   });
 
-  it('requireAllowedPostWriter returns role for an editor', async () => {
+  it('requireAllowedPostWriter returns role for a legacy-handle editor', async () => {
     setupAllowlist([{ github_username: 'octo-editor', role: 'editor' }]);
-    setupSessionUser({ id: 'u6', user_name: 'octo-editor' });
+    setupSessionUser({ id: 'u6', githubUsername: 'octo-editor' });
 
     await expect(requireAllowedPostWriter()).resolves.toEqual({
       id: 'u6',

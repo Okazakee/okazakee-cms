@@ -10,11 +10,13 @@ export function ListPostImage({
   imageUrl,
   blurhashURL,
   alt,
+  compact = false,
 }: {
   imageFile?: File | null;
   imageUrl?: string | null;
   blurhashURL?: string | null;
   alt: string;
+  compact?: boolean;
 }) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -30,7 +32,9 @@ export function ListPostImage({
   const src = objectUrl ?? imageUrl ?? null;
   if (!src) {
     return (
-      <div className="h-48 flex items-center justify-center bg-surface-base ">
+      <div
+        className={`${compact ? 'h-16 w-20 shrink-0' : 'h-48'} flex items-center justify-center bg-surface-base`}
+      >
         <ImageIcon className="h-8 w-8 text-accent-violet" />
       </div>
     );
@@ -41,7 +45,7 @@ export function ListPostImage({
       alt={alt}
       width={300}
       height={200}
-      className="w-full h-48 object-cover"
+      className={`${compact ? 'h-16 w-20 shrink-0' : 'w-full h-48'} object-cover`}
       placeholder={blurhashURL && !objectUrl ? 'blur' : 'empty'}
       blurDataURL={objectUrl ? undefined : (blurhashURL ?? undefined)}
       unoptimized={src.startsWith('blob:')}

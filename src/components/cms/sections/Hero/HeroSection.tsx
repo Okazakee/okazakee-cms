@@ -1,24 +1,38 @@
 'use client';
 
-import { Copy, Download } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { heroActions } from '@/app/actions/cms/sections/heroActions';
+import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  editorInputClass,
+  editorPrimaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { HeroPreview } from '@/components/common/cms/previews/HeroPreview';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { useCmsStore } from '@/store/cmsStore';
+import { mergeHeroSettings, useCmsStore } from '@/store/cmsStore';
+import type { HeroShape } from '@/types/fetchedData.types';
+import {
+  countHeroRoleEntries,
+  heroRolePath,
+  heroShapes,
+  normalizeHeroShape,
+} from '@/utils/heroDisplay';
+
+const locales = ['en', 'it'] as const;
 
 export default function HeroSection() {
   const t = useTranslations('cms');
@@ -26,9 +40,9 @@ export default function HeroSection() {
 
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const [shape, setShape] = useState<HeroShape>('pebble');
 
   const imgUpload = useFileUpload({
     accept: 'image/*',
@@ -43,6 +57,7 @@ export default function HeroSection() {
     isLoading: transLoading,
     getField,
     setField,
+    deleteField,
     saveTranslations,
     revertTranslations,
   } = useSectionTranslations('hero-section');
@@ -52,20 +67,99 @@ export default function HeroSection() {
   useEffect(() => {
     if (!heroSection || initRef.current) return;
     initRef.current = true;
+    setShape(normalizeHeroShape(heroSection.shape));
     if (heroSection.mainImage) {
       imgUpload.setFileFromUrl(heroSection.mainImage);
     }
   }, [heroSection, imgUpload]);
 
   const mainImageUrl = imgUpload.previewUrl ?? heroSection?.mainImage ?? '';
-  const isDirty = imgUpload.file !== null || transDirty;
+  const roleCount = Math.max(
+    countHeroRoleEntries(translations.en),
+    countHeroRoleEntries(translations.it)
+  );
+  const displayDirty = shape !== normalizeHeroShape(heroSection?.shape);
+  const isDirty = imgUpload.file !== null || transDirty || displayDirty;
 
   useSectionDirty('hero', isDirty);
+
+  const addRole = () => {
+    for (const locale of locales) setField(locale, heroRolePath(roleCount), '');
+  };
+
+  const removeRole = (index: number) => {
+    for (const locale of locales) {
+      for (let slot = index; slot < roleCount - 1; slot++) {
+        setField(
+          locale,
+          heroRolePath(slot),
+          getField(locale, heroRolePath(slot + 1))
+        );
+      }
+      deleteField(locale, heroRolePath(roleCount - 1));
+    }
+  };
+
+  const moveRole = (index: number, direction: -1 | 1) => {
+    const swap = index + direction;
+    if (swap < 0 || swap >= roleCount) return;
+
+    for (const locale of locales) {
+      const current = getField(locale, heroRolePath(index));
+      setField(
+        locale,
+        heroRolePath(index),
+        getField(locale, heroRolePath(swap))
+      );
+      setField(locale, heroRolePath(swap), current);
+    }
+  };
 
   const handlePublish = useCallback(async () => {
     setIsUpdating(true);
     setError(null);
     useCmsStore.getState().setError(null);
+
+    // Offline showcase: materialize the portrait as an object URL and
+    // commit the shape locally; translations save through the demo hook.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        if (imgUpload.file) {
+          const url = URL.createObjectURL(imgUpload.file);
+          setHeroSection(
+            mergeHeroSettings(useCmsStore.getState().heroSection, {
+              mainImage: url,
+              blurhashURL:
+                imgUpload.blurhash ??
+                useCmsStore.getState().heroSection?.blurhashURL ??
+                null,
+            })
+          );
+          imgUpload.clearFile();
+          imgUpload.setFileFromUrl(url);
+        }
+        if (displayDirty) {
+          setHeroSection(
+            mergeHeroSettings(useCmsStore.getState().heroSection, { shape })
+          );
+        }
+        const transErrors = await saveTranslations();
+        if (transErrors.length > 0) {
+          const message = transErrors.join('\n');
+          setError(message);
+          useCmsStore.getState().setError(message);
+        }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t('hero.errorUpdateHero');
+        setError(message);
+        useCmsStore.getState().setError(message);
+      } finally {
+        setIsUpdating(false);
+      }
+      return;
+    }
 
     try {
       let revalidationMessage: string | null = null;
@@ -74,11 +168,6 @@ export default function HeroSection() {
           type: 'UPDATE_WITH_FILES',
           files: {
             mainImage: imgUpload.file,
-          },
-          currentData: {
-            mainImage: heroSection?.mainImage || '',
-            resume_en: heroSection?.resume_en || '',
-            resume_it: heroSection?.resume_it || '',
           },
           blurhashURL: imgUpload.blurhash ?? undefined,
         });
@@ -95,21 +184,48 @@ export default function HeroSection() {
         const data = result.data as {
           propic?: string;
           blurhashURL?: string;
-          resume_en?: string;
-          resume_it?: string;
         };
 
-        setHeroSection({
-          mainImage: data.propic || heroSection?.mainImage || null,
-          blurhashURL: data.blurhashURL || heroSection?.blurhashURL || null,
-          resume_en: data.resume_en || heroSection?.resume_en || null,
-          resume_it: data.resume_it || heroSection?.resume_it || null,
-        });
+        setHeroSection(
+          mergeHeroSettings(useCmsStore.getState().heroSection, {
+            mainImage:
+              data.propic ??
+              useCmsStore.getState().heroSection?.mainImage ??
+              null,
+            blurhashURL:
+              data.blurhashURL ??
+              useCmsStore.getState().heroSection?.blurhashURL ??
+              null,
+          })
+        );
 
         imgUpload.clearFile();
         if (data.propic) {
           imgUpload.setFileFromUrl(data.propic);
         }
+      }
+
+      // Written after the asset commit so the store always ends on the newest
+      // display draft instead of the snapshot this callback closed over.
+      if (displayDirty) {
+        const result = await heroActions({
+          type: 'UPDATE_DISPLAY',
+          data: { shape },
+        });
+
+        if (!result.success) {
+          const message = result.error || t('hero.errorUpdateHero');
+          setError(message);
+          useCmsStore.getState().setError(message);
+          return;
+        }
+
+        revalidationMessage =
+          revalidationWarning(result) ?? revalidationMessage;
+
+        setHeroSection(
+          mergeHeroSettings(useCmsStore.getState().heroSection, { shape })
+        );
       }
 
       const transErrors = await saveTranslations();
@@ -128,29 +244,45 @@ export default function HeroSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [imgUpload, heroSection, saveTranslations, setHeroSection, t]);
+  }, [
+    displayDirty,
+    heroSection,
+    imgUpload,
+    saveTranslations,
+    setHeroSection,
+    shape,
+    t,
+  ]);
 
   const handleRevert = useCallback(() => {
     setShowConfirmRevert(false);
     imgUpload.clearFile();
     revertTranslations();
+    setShape(normalizeHeroShape(heroSection?.shape));
     if (heroSection?.mainImage) {
       imgUpload.setFileFromUrl(heroSection.mainImage);
     }
     setError(null);
-  }, [imgUpload, revertTranslations, heroSection]);
+  }, [heroSection, imgUpload, revertTranslations]);
 
   useSectionCallbacks('hero', handlePublish, handleRevert);
 
-  const copyUrl = (url: string) => {
-    navigator.clipboard
-      .writeText(url)
-      .catch(() => setError(t('hero.errorCopyUrl')));
-  };
+  const openImage = useCallback(() => {
+    if (mainImageUrl)
+      window.open(mainImageUrl, '_blank', 'noopener,noreferrer');
+  }, [mainImageUrl]);
 
-  const downloadImage = async (url: string) => {
+  const copyImageUrl = useCallback(() => {
+    if (!mainImageUrl) return;
+    navigator.clipboard
+      .writeText(mainImageUrl)
+      .catch(() => setError(t('hero.errorCopyUrl')));
+  }, [mainImageUrl, t]);
+
+  const downloadPortrait = useCallback(async () => {
+    if (!mainImageUrl) return;
     try {
-      const res = await fetch(url);
+      const res = await fetch(mainImageUrl);
       const blob = await res.blob();
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -163,12 +295,12 @@ export default function HeroSection() {
     } catch {
       setError(t('hero.errorDownloadImage'));
     }
-  };
+  }, [mainImageUrl, t]);
 
   if (!heroSection) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-accent-violet border-t-transparent" />
       </div>
     );
   }
@@ -187,25 +319,29 @@ export default function HeroSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {/* Hero Image */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4">
-          {t('hero.heroImageTitle')}
-        </h2>
-        <div className="flex flex-col lg:flex-row items-start gap-6">
-          <div className="w-full lg:w-72 flex-shrink-0">
+      <div className="flex justify-end">
+        <LocaleToggle activeLocale={activeLocale} onChange={setActiveLocale} />
+      </div>
+
+      <div className="flex flex-col gap-6">
+        <EditorGroup
+          title={t('editor.groups.portrait')}
+          description={t('hero.shapeHint')}
+        >
+          <div className="w-full">
             <FileDropzone
+              label={t('hero.heroImageTitle')}
               previewUrl={imgUpload.previewUrl}
               blurhash={imgUpload.blurhash}
               isDragging={imgUpload.isDragging}
               isProcessing={imgUpload.isProcessing}
+              hasPendingFile={Boolean(imgUpload.file)}
               error={imgUpload.error}
               currentUrl={heroSection.mainImage}
               dropzoneProps={{
@@ -217,92 +353,137 @@ export default function HeroSection() {
               fileInputRef={imgUpload.fileInputRef}
               onClear={imgUpload.clearFile}
               onBrowse={imgUpload.openFileDialog}
+              onCopyUrl={copyImageUrl}
+              onOpen={openImage}
+              onDownload={downloadPortrait}
+              showUrl={mainImageUrl || null}
+              actionsLayout="side"
             />
           </div>
-          {mainImageUrl && (
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => copyUrl(mainImageUrl)}
-                className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors"
-              >
-                <Copy className="w-3 h-3 inline mr-1" />
-                {t('hero.copyUrl')}
-              </button>
-              <button
-                type="button"
-                onClick={() => downloadImage(mainImageUrl)}
-                className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
-              >
-                <Download className="w-3 h-3 inline mr-1" />
-                {t('hero.download')}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('hero.translationsSection')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-
-        {transLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
+          <div className="max-w-md">
+            <label
+              htmlFor="hero-shape"
+              className="block text-sm font-medium text-text-main mb-1"
+            >
+              {t('hero.shapeLabel')}
+            </label>
+            <Dropdown
+              id="hero-shape"
+              triggerClassName={editorInputClass}
+              onChange={(value) => setShape(normalizeHeroShape(value))}
+              value={shape}
+              options={heroShapes.map((preset) => ({
+                value: preset,
+                label: t(`hero.shapeOptions.${preset}`),
+              }))}
+            />
           </div>
-        ) : (
-          <div className="space-y-6">
-            <h3 className="text-base font-semibold text-text-main ">
-              {t('hero.topSection')}
-            </h3>
+        </EditorGroup>
+
+        <EditorGroup
+          title={t('editor.groups.identity')}
+          description={t('hero.topSection')}
+        >
+          {transLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : (
             <TranslationField
               label={t('hero.nameLabel')}
               enValue={getField('en', 'top.name')}
               itValue={getField('it', 'top.name')}
               onChangeEn={(v) => setField('en', 'top.name', v)}
               onChangeIt={(v) => setField('it', 'top.name', v)}
+              enPlaceholder={t('hero.namePlaceholder')}
+              itPlaceholder={t('hero.namePlaceholder')}
               activeLocale={activeLocale}
+              markerHighlight
             />
-            <TranslationField
-              label={t('hero.roleLabel')}
-              enValue={getField('en', 'top.role')}
-              itValue={getField('it', 'top.role')}
-              onChangeEn={(v) => setField('en', 'top.role', v)}
-              onChangeIt={(v) => setField('it', 'top.role', v)}
-              activeLocale={activeLocale}
-            />
+          )}
+        </EditorGroup>
 
-            <h3 className="text-base font-semibold text-text-main pt-2">
-              {t('hero.aboutMeSection')}
-            </h3>
-            <TranslationField
-              label={t('hero.aboutMeTitleLabel')}
-              enValue={getField('en', 'aboutme.title')}
-              itValue={getField('it', 'aboutme.title')}
-              onChangeEn={(v) => setField('en', 'aboutme.title', v)}
-              onChangeIt={(v) => setField('it', 'aboutme.title', v)}
-              activeLocale={activeLocale}
-            />
+        <EditorGroup
+          title={t('editor.groups.roles')}
+          description={t('hero.rolesHint')}
+          count={roleCount}
+          actions={
+            !transLoading ? (
+              <button
+                className={editorPrimaryButtonClass}
+                onClick={addRole}
+                type="button"
+              >
+                <Plus className="w-4 h-4" />
+                {t('hero.addRole')}
+              </button>
+            ) : undefined
+          }
+        >
+          {transLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {Array.from({ length: roleCount }, (_, index) => (
+                <div
+                  className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end"
+                  key={heroRolePath(index)}
+                >
+                  <div className="min-w-0 flex-1">
+                    <TranslationField
+                      label={`${t('hero.roleLabel')} ${index + 1}`}
+                      enValue={getField('en', heroRolePath(index))}
+                      itValue={getField('it', heroRolePath(index))}
+                      onChangeEn={(v) => setField('en', heroRolePath(index), v)}
+                      onChangeIt={(v) => setField('it', heroRolePath(index), v)}
+                      enPlaceholder={t('hero.rolePlaceholder')}
+                      itPlaceholder={t('hero.rolePlaceholder')}
+                      activeLocale={activeLocale}
+                      markerHighlight
+                    />
+                  </div>
+                  <div className="self-end pb-1">
+                    <CardToolbar
+                      showReorder
+                      onMoveUp={() => moveRole(index, -1)}
+                      onMoveDown={() => moveRole(index, 1)}
+                      onDelete={() => removeRole(index)}
+                      isFirst={index === 0}
+                      isLast={index === roleCount - 1}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </EditorGroup>
+
+        <EditorGroup
+          title={t('editor.groups.about')}
+          description={t('hero.aboutMeSection')}
+        >
+          {transLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : (
             <TranslationField
               label={t('hero.aboutMeParagraphLabel')}
               enValue={getField('en', 'aboutme.paragraph')}
               itValue={getField('it', 'aboutme.paragraph')}
               onChangeEn={(v) => setField('en', 'aboutme.paragraph', v)}
               onChangeIt={(v) => setField('it', 'aboutme.paragraph', v)}
+              enPlaceholder={t('hero.aboutMeParagraphPlaceholder')}
+              itPlaceholder={t('hero.aboutMeParagraphPlaceholder')}
               activeLocale={activeLocale}
               type="textarea"
               rows={8}
+              markerHighlight
             />
-          </div>
-        )}
+          )}
+        </EditorGroup>
       </div>
 
       <ConfirmDialog
@@ -314,22 +495,6 @@ export default function HeroSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('hero.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'hero-section',
-          drafts: translations,
-        }}
-      >
-        <HeroPreview
-          mainImage={mainImageUrl}
-          blurhashURL={imgUpload.blurhash ?? heroSection.blurhashURL ?? ''}
-        />
-      </PreviewModal>
     </fieldset>
   );
 }

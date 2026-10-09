@@ -1,45 +1,58 @@
 'use client';
 
-import { ExternalLink, Plus, Trash2, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { contactsActions } from '@/app/actions/cms/sections/contactsActions';
-import { heroActions } from '@/app/actions/cms/sections/heroActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import {
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { FileDropzone } from '@/components/cms/shared/FileDropzone';
-import { IconPicker } from '@/components/cms/shared/IconPicker';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { ContactsPreview } from '@/components/common/cms/previews/ContactsPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
-import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoContacts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Contact } from '@/types/fetchedData.types';
+import { isValidHttpUrl } from '@/utils/cms/validation';
+
+function ContactPreview({ icon, bgColor }: { icon: string; bgColor: string }) {
+  return (
+    <div
+      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg font-bold text-sm text-white"
+      style={{ backgroundColor: bgColor }}
+    >
+      {icon.trim() && isValidHttpUrl(icon) && (
+        // biome-ignore lint/performance/noImgElement: SVG URLs are supplied by editors.
+        <img src={icon.trim()} alt="" className="h-6 w-6 object-contain" />
+      )}
+    </div>
+  );
+}
 
 export default function ContactsSection() {
   const t = useTranslations('cms');
-  const { heroSection, setHeroSection } = useCmsStore();
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
 
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
@@ -50,35 +63,16 @@ export default function ContactsSection() {
   const [isAdding, setIsAdding] = useState(false);
   const [newForm, setNewForm] = useState({
     label: '',
-    icon: 'Link',
+    icon: '',
     link: '',
     bg_color: '#000000',
   });
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
-
-  const resumeEnUpload = useFileUpload({ accept: '.pdf', maxSizeMB: 10 });
-  const resumeItUpload = useFileUpload({ accept: '.pdf', maxSizeMB: 10 });
-  const resumeInitRef = useRef(false);
-
-  const {
-    translations,
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('contacts-section');
 
   const isDirty =
     modifiedIds.size > 0 ||
     newContacts.length > 0 ||
     deletedIds.size > 0 ||
-    orderChanged ||
-    transDirty ||
-    resumeEnUpload.file !== null ||
-    resumeItUpload.file !== null;
+    orderChanged;
   useSectionDirty('contacts', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -90,12 +84,27 @@ export default function ContactsSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture contacts, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setContacts(JSON.parse(JSON.stringify(demoContacts)));
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await contactsActions({ type: 'GET' });
         if (!current()) return;
         if (!r.success) throw new Error(r.error || 'Failed');
         const server = r.data as Contact[];
-        setContacts(drafts ? mergeServerWithDrafts(server, drafts) : server);
+        const merged = drafts ? mergeServerWithDrafts(server, drafts) : server;
+        setContacts(
+          merged.sort(
+            (a, b) =>
+              (a.position ?? Number.MAX_SAFE_INTEGER) -
+                (b.position ?? Number.MAX_SAFE_INTEGER) || a.id - b.id
+          )
+        );
       } catch (err) {
         if (current())
           setError(err instanceof Error ? err.message : 'Failed to fetch');
@@ -110,18 +119,9 @@ export default function ContactsSection() {
     fetchData();
   }, [fetchData]);
 
-  useEffect(() => {
-    if (!heroSection || resumeInitRef.current) return;
-    resumeInitRef.current = true;
-    if (heroSection.resume_en)
-      resumeEnUpload.setFileFromUrl(heroSection.resume_en);
-    if (heroSection.resume_it)
-      resumeItUpload.setFileFromUrl(heroSection.resume_it);
-  }, [heroSection, resumeEnUpload, resumeItUpload]);
-
   const handleAdd = () => {
     if (!newForm.label || !newForm.icon || !newForm.link) {
-      setError('Label, icon, and link are required');
+      setError(t('skills.errorRequiredFields'));
       return;
     }
     const temp: Contact = {
@@ -131,7 +131,7 @@ export default function ContactsSection() {
     };
     setContacts((prev) => [...prev, temp]);
     setNewContacts((prev) => [...prev, temp]);
-    setNewForm({ label: '', icon: 'Link', link: '', bg_color: '#000000' });
+    setNewForm({ label: '', icon: '', link: '', bg_color: '#000000' });
     setIsAdding(false);
   };
 
@@ -160,6 +160,7 @@ export default function ContactsSection() {
       return next;
     });
     setContacts((prev) => prev.filter((c) => c.id !== id));
+    setOrderChanged(true);
   };
 
   const move = (id: number, dir: -1 | 1) => {
@@ -178,45 +179,32 @@ export default function ContactsSection() {
     setIsUpdating(true);
     setError(null);
 
+    // Offline showcase: remap temp ids, drop deletes, persist the visible
+    // order as positions, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let nextFakeId = Math.max(0, ...contacts.map((c) => c.id)) + 1;
+      const next = contacts
+        .filter((c) => !deletedIds.has(c.id))
+        .map((c, index) => ({
+          ...c,
+          id: c.id < 0 ? nextFakeId++ : c.id,
+          position: index,
+        }));
+      setContacts(next);
+      setNewContacts([]);
+      setModifiedIds(new Set());
+      setDeletedIds(new Set());
+      setOrderChanged(false);
+      setIsUpdating(false);
+      return;
+    }
+
     // Absolute positions from the current full-list order, so newly added
     // contacts interleave correctly instead of being re-indexed from zero.
     const positions = new Map(contacts.map((c, i) => [c.id, i]));
 
     try {
-      // Resume uploads via hero actions
-      if (resumeEnUpload.file || resumeItUpload.file) {
-        const result = await heroActions({
-          type: 'UPDATE_WITH_FILES',
-          files: {
-            ...(resumeEnUpload.file ? { resume_en: resumeEnUpload.file } : {}),
-            ...(resumeItUpload.file ? { resume_it: resumeItUpload.file } : {}),
-          },
-          currentData: {
-            mainImage: heroSection?.mainImage || '',
-            resume_en: heroSection?.resume_en || '',
-            resume_it: heroSection?.resume_it || '',
-          },
-        });
-        if (!result.success) {
-          errors.push(result.error || t('hero.errorUpdateHero'));
-        } else {
-          const data = result.data as {
-            resume_en?: string;
-            resume_it?: string;
-          };
-          setHeroSection({
-            mainImage: heroSection?.mainImage || null,
-            blurhashURL: heroSection?.blurhashURL || null,
-            resume_en: data.resume_en || heroSection?.resume_en || null,
-            resume_it: data.resume_it || heroSection?.resume_it || null,
-          });
-          const heroWarning = revalidationWarning(result);
-          if (heroWarning) useCmsStore.getState().setWarning(heroWarning);
-          resumeEnUpload.clearFile();
-          resumeItUpload.clearFile();
-        }
-      }
-
       // Pending creates always use the latest edited contact, never the stale
       // newContacts snapshot.
       const createTempIds = newContacts.map((c) => String(c.id));
@@ -289,12 +277,12 @@ export default function ContactsSection() {
         errors.push(...reconcile.failureMessages);
 
         // Keep the reorder flag until every sent position committed.
-        if (orderChanged) {
-          const reordered = new Set(evidence.reordered.map(String));
-          retainedOrder = reorderIds.some(
-            (item) => !reordered.has(String(item.id))
-          );
-        }
+        const reordered = new Set(evidence.reordered.map(String));
+        retainedOrder =
+          reorderIds.some((item) => !reordered.has(String(item.id))) ||
+          retainedCreates.length > 0 ||
+          retainedDeletes.length > 0 ||
+          evidence.failed.some((failure) => failure.kind === 'reorder');
 
         const retainedCreateSet = new Set(retainedCreates);
         const retainedModifiedSet = new Set(retainedUpdates.map(String));
@@ -303,8 +291,13 @@ export default function ContactsSection() {
         );
         const draftModified = new Map(
           contacts
-            .filter((c) => retainedModifiedSet.has(String(c.id)))
-            .map((c) => [c.id, c])
+            .filter(
+              (c) => retainedModifiedSet.has(String(c.id)) || retainedOrder
+            )
+            .map((c): [number, Contact] => {
+              const id = Number(evidence.createdIds[String(c.id)] ?? c.id);
+              return [id, { ...c, id, position: positions.get(c.id) ?? 0 }];
+            })
         );
         await fetchData({
           creates: draftCreates,
@@ -318,11 +311,6 @@ export default function ContactsSection() {
         setModifiedIds(new Set(retainedUpdates));
         setDeletedIds(new Set(retainedDeletes));
         setOrderChanged(retainedOrder);
-      }
-
-      if (transDirty) {
-        const tErrs = await saveTranslations();
-        errors.push(...tErrs);
       }
 
       const batchWarning = revalidationWarning(batch);
@@ -353,37 +341,26 @@ export default function ContactsSection() {
     deletedIds,
     modifiedIds,
     orderChanged,
-    transDirty,
-    saveTranslations,
     fetchData,
-    resumeEnUpload,
-    resumeItUpload,
-    heroSection,
-    setHeroSection,
     t,
   ]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setContacts(JSON.parse(JSON.stringify(demoContacts)));
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewContacts([]);
     setDeletedIds(new Set());
     setOrderChanged(false);
-    resumeEnUpload.clearFile();
-    resumeItUpload.clearFile();
-    if (heroSection?.resume_en)
-      resumeEnUpload.setFileFromUrl(heroSection.resume_en);
-    if (heroSection?.resume_it)
-      resumeItUpload.setFileFromUrl(heroSection.resume_it);
-    revertTranslations();
     setError(null);
   };
 
   useSectionCallbacks('contacts', handlePublish, handleRevert);
-
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none text-sm';
 
   if (isLoading)
     return (
@@ -406,155 +383,132 @@ export default function ContactsSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('common.translations')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-        {transLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <TranslationField
-              label={t('contacts.translationTitleLabel')}
-              enValue={getField('en', 'title')}
-              itValue={getField('it', 'title')}
-              onChangeEn={(v) => setField('en', 'title', v)}
-              onChangeIt={(v) => setField('it', 'title', v)}
-              activeLocale={activeLocale}
-            />
-            <TranslationField
-              label={t('contacts.translationSubtitleLabel')}
-              enValue={getField('en', 'subtitle')}
-              itValue={getField('it', 'subtitle')}
-              onChangeEn={(v) => setField('en', 'subtitle', v)}
-              onChangeIt={(v) => setField('it', 'subtitle', v)}
-              type="textarea"
-              rows={3}
-              activeLocale={activeLocale}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Contact Links */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('contacts.title')}
-        </h2>
-        {!isAdding && (
-          <button
-            type="button"
-            onClick={() => setIsAdding(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-          >
-            <Plus className="w-4 h-4" />
-            {t('contacts.addNewContact')}
-          </button>
-        )}
-      </div>
+      <EditorToolbar
+        title={t('contacts.title')}
+        count={contacts.length}
+        actions={
+          !isAdding ? (
+            <button
+              type="button"
+              onClick={() => setIsAdding(true)}
+              className={editorPrimaryButtonClass}
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {t('contacts.addNewContact')}
+            </button>
+          ) : undefined
+        }
+      />
 
       {isAdding && (
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-3">
+        <div className={`${editorRowClass} space-y-4`}>
+          <EditorToolbar
+            title={t('contacts.addNewContact')}
+            actions={
+              <ContactPreview icon={newForm.icon} bgColor={newForm.bg_color} />
+            }
+          />
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              {t('contacts.iconNameLabel')}
-            </label>
-            <IconPicker
-              value={newForm.icon}
-              onChange={(v) => setNewForm((p) => ({ ...p, icon: v }))}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label className={editorLabelClass} htmlFor="contact-new-label">
               {t('contacts.labelFieldLabel')}
             </label>
             <input
+              id="contact-new-label"
               type="text"
               value={newForm.label}
               onChange={(e) =>
                 setNewForm((p) => ({ ...p, label: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('contacts.labelPlaceholder')}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label className={editorLabelClass} htmlFor="contact-new-link">
               {t('contacts.linkLabel')}
             </label>
             <input
+              id="contact-new-link"
               type="url"
               value={newForm.link}
               onChange={(e) =>
                 setNewForm((p) => ({ ...p, link: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('contacts.linkPlaceholder')}
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              {t('common.color')}
-            </label>
-            <div className="flex items-center gap-2">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className={editorLabelClass} htmlFor="contact-new-icon">
+                {t('contacts.iconUrlLabel')}
+              </label>
               <input
-                type="color"
-                value={newForm.bg_color}
+                id="contact-new-icon"
+                type="url"
+                value={newForm.icon}
                 onChange={(e) =>
-                  setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                  setNewForm((p) => ({ ...p, icon: e.target.value }))
                 }
-                className="w-10 h-10 rounded cursor-pointer border-0"
-              />
-              <input
-                type="text"
-                value={newForm.bg_color}
-                onChange={(e) =>
-                  setNewForm((p) => ({ ...p, bg_color: e.target.value }))
-                }
-                className={`flex-1 ${inputClass}`}
-                placeholder="#000000"
+                className={editorInputClass}
+                placeholder={t('contacts.iconUrlPlaceholder')}
               />
             </div>
+            <div>
+              <label className={editorLabelClass} htmlFor="contact-new-color">
+                {t('common.color')}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  aria-label={t('common.color')}
+                  value={newForm.bg_color}
+                  onChange={(e) =>
+                    setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                  }
+                  className="h-10 w-10 flex-shrink-0 cursor-pointer rounded border-0"
+                />
+                <input
+                  id="contact-new-color"
+                  type="text"
+                  value={newForm.bg_color}
+                  onChange={(e) =>
+                    setNewForm((p) => ({ ...p, bg_color: e.target.value }))
+                  }
+                  className={editorInputClass}
+                  placeholder="#000000"
+                />
+              </div>
+            </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={handleAdd}
-              className="px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg"
+              className={editorPrimaryButtonClass}
             >
-              {t('common.add')}
+              {t('editor.addDraft')}
             </button>
             <button
               type="button"
+              aria-label={t('common.cancel')}
               onClick={() => {
                 setIsAdding(false);
                 setNewForm({
                   label: '',
-                  icon: 'Link',
+                  icon: '',
                   link: '',
                   bg_color: '#000000',
                 });
               }}
-              className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg"
+              className={editorSecondaryButtonClass}
             >
-              <X className="w-4 h-4" />
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -563,63 +517,95 @@ export default function ContactsSection() {
       {contacts.length === 0 ? (
         <EmptyState message={t('contacts.title')} />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {contacts.map((c, idx) => (
-            <div
-              key={c.id}
-              className="bg-surface-card rounded-xl p-4 space-y-3"
-            >
-              <div className="flex items-center gap-3">
+            <div key={c.id} className={`${editorRowClass} space-y-4`}>
+              <div className="flex items-center justify-between gap-3">
+                <ContactPreview icon={c.icon} bgColor={c.bg_color} />
                 <CardToolbar
                   showReorder
                   onMoveUp={() => move(c.id, -1)}
                   onMoveDown={() => move(c.id, 1)}
+                  onDelete={() => handleDelete(c.id)}
                   isFirst={idx === 0}
                   isLast={idx === contacts.length - 1}
                 />
-                <div
-                  className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 text-white font-bold text-sm"
-                  style={{ backgroundColor: c.bg_color }}
+              </div>
+              <div>
+                <label
+                  className={editorLabelClass}
+                  htmlFor={`contact-${c.id}-label`}
                 >
-                  {c.label.charAt(0)}
-                </div>
+                  {t('contacts.labelFieldLabel')}
+                </label>
                 <input
+                  id={`contact-${c.id}-label`}
                   type="text"
                   value={c.label}
                   onChange={(e) => handleChange(c.id, 'label', e.target.value)}
-                  className={`flex-1 ${inputClass}`}
+                  className={editorInputClass}
                   placeholder={t('contacts.labelPlaceholder')}
                 />
-                <button
-                  type="button"
-                  onClick={() => handleDelete(c.id)}
-                  className="p-2 text-red-400 hover:text-red-300 flex-shrink-0"
-                  title={t('common.delete')}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
               </div>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div>
+                <label
+                  className={editorLabelClass}
+                  htmlFor={`contact-${c.id}-link`}
+                >
+                  {t('contacts.linkLabel')}
+                </label>
                 <input
+                  id={`contact-${c.id}-link`}
                   type="url"
                   value={c.link}
                   onChange={(e) => handleChange(c.id, 'link', e.target.value)}
-                  className={`flex-1 ${inputClass}`}
+                  className={editorInputClass}
                   placeholder={t('contacts.linkPlaceholder')}
                 />
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label
+                    className={editorLabelClass}
+                    htmlFor={`contact-${c.id}-icon`}
+                  >
+                    {t('contacts.iconUrlLabel')}
+                  </label>
                   <input
-                    type="color"
-                    value={c.bg_color}
-                    onChange={(e) =>
-                      handleChange(c.id, 'bg_color', e.target.value)
-                    }
-                    className="w-10 h-10 rounded cursor-pointer border-0 flex-shrink-0"
+                    id={`contact-${c.id}-icon`}
+                    type="url"
+                    value={c.icon}
+                    onChange={(e) => handleChange(c.id, 'icon', e.target.value)}
+                    className={editorInputClass}
+                    placeholder={t('contacts.iconUrlPlaceholder')}
                   />
-                  <div className="w-full sm:w-44">
-                    <IconPicker
-                      value={c.icon}
-                      onChange={(v) => handleChange(c.id, 'icon', v)}
+                </div>
+                <div>
+                  <label
+                    className={editorLabelClass}
+                    htmlFor={`contact-${c.id}-color`}
+                  >
+                    {t('common.color')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      aria-label={t('common.color')}
+                      value={c.bg_color}
+                      onChange={(e) =>
+                        handleChange(c.id, 'bg_color', e.target.value)
+                      }
+                      className="h-10 w-10 flex-shrink-0 cursor-pointer rounded border-0"
+                    />
+                    <input
+                      id={`contact-${c.id}-color`}
+                      type="text"
+                      value={c.bg_color}
+                      onChange={(e) =>
+                        handleChange(c.id, 'bg_color', e.target.value)
+                      }
+                      className={editorInputClass}
+                      placeholder="#000000"
                     />
                   </div>
                 </div>
@@ -628,91 +614,6 @@ export default function ContactsSection() {
           ))}
         </div>
       )}
-
-      {/* Resume PDFs */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <h2 className="text-lg md:text-xl font-bold text-accent-violet mb-4">
-          {t('hero.resumeLinksTitle')}
-        </h2>
-        <div className="grid md:grid-cols-2 gap-6">
-          <div>
-            <h3 className="text-sm font-medium text-text-main mb-2">
-              {t('hero.uploadResumeItalian')}
-            </h3>
-            <FileDropzone
-              previewUrl={resumeItUpload.previewUrl}
-              isDragging={resumeItUpload.isDragging}
-              isProcessing={resumeItUpload.isProcessing}
-              error={resumeItUpload.error}
-              currentUrl={heroSection?.resume_it ?? undefined}
-              dropzoneProps={{
-                onDragOver: resumeItUpload.dropzoneProps.onDragOver,
-                onDragLeave: resumeItUpload.dropzoneProps.onDragLeave,
-                onDrop: resumeItUpload.dropzoneProps.onDrop,
-              }}
-              fileInputProps={{
-                ...resumeItUpload.fileInputProps,
-                accept: '.pdf',
-              }}
-              fileInputRef={resumeItUpload.fileInputRef}
-              onClear={resumeItUpload.clearFile}
-              onBrowse={resumeItUpload.openFileDialog}
-              compact
-            />
-            {heroSection?.resume_it && !resumeItUpload.file && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                <a
-                  href={heroSection.resume_it}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors inline-flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  {t('contacts.openResume')}
-                </a>
-              </div>
-            )}
-          </div>
-          <div>
-            <h3 className="text-sm font-medium text-text-main mb-2">
-              {t('hero.uploadResumeEnglish')}
-            </h3>
-            <FileDropzone
-              previewUrl={resumeEnUpload.previewUrl}
-              isDragging={resumeEnUpload.isDragging}
-              isProcessing={resumeEnUpload.isProcessing}
-              error={resumeEnUpload.error}
-              currentUrl={heroSection?.resume_en ?? undefined}
-              dropzoneProps={{
-                onDragOver: resumeEnUpload.dropzoneProps.onDragOver,
-                onDragLeave: resumeEnUpload.dropzoneProps.onDragLeave,
-                onDrop: resumeEnUpload.dropzoneProps.onDrop,
-              }}
-              fileInputProps={{
-                ...resumeEnUpload.fileInputProps,
-                accept: '.pdf',
-              }}
-              fileInputRef={resumeEnUpload.fileInputRef}
-              onClear={resumeEnUpload.clearFile}
-              onBrowse={resumeEnUpload.openFileDialog}
-              compact
-            />
-            {heroSection?.resume_en && !resumeEnUpload.file && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                <a
-                  href={heroSection.resume_en}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 text-sm bg-surface-base text-text-main rounded-lg hover:bg-surface-card transition-colors inline-flex items-center gap-1"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  {t('contacts.openResume')}
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
       <ConfirmDialog
         isOpen={showConfirmRevert}
@@ -723,18 +624,6 @@ export default function ContactsSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('contacts.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'contacts-section',
-          drafts: translations,
-        }}
-      >
-        <ContactsPreview contacts={contacts} />
-      </PreviewModal>
     </fieldset>
   );
 }

@@ -1,16 +1,19 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+} from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
+import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { RequestFormPreview } from '@/components/common/cms/previews/canonical/RequestForm';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
-import { useCmsStore } from '@/store/cmsStore';
 
 const requestFields = [
   'eyebrow',
@@ -36,61 +39,59 @@ const requestFields = [
   'submit',
   'comingSoon',
 ];
-const siteGroups = [
-  {
-    namespace: 'posts-section',
-    fields: [
-      'button',
-      'no-posts',
-      'source',
-      'demo',
-      'store',
-      'fdroid',
-      'ios',
-      'preCopy',
-      'ratelimit',
-    ],
-  },
-  {
-    namespace: 'errors',
-    fields: [
-      'code',
-      'notFoundLabel',
-      'notFoundTitle',
-      'notFoundText',
-      'goBack',
-      'home',
-      'errorLabel',
-      'errorTitle',
-      'errorText',
-      'retry',
-      'postErrorTitle',
-      'postErrorText',
-      'postNotFoundText',
-    ],
-  },
-  { namespace: 'privacyPolicy', fields: ['description'] },
-];
 
-function CopyEditor({
+const GROUP_BY_KEY: Record<string, 'intro' | 'submission'> = {
+  eyebrow: 'intro',
+  title: 'intro',
+  subtitle: 'intro',
+  consent: 'submission',
+  submit: 'submission',
+  comingSoon: 'submission',
+};
+
+const requestLabelKeys: Record<string, string> = {
+  name: 'hero.nameLabel',
+  email: 'account.emailLabel',
+  company: 'career.companyLabel',
+  website: 'career.websiteUrlLabel',
+  eyebrow: 'copy.requestForm.eyebrowLabel',
+  title: 'copy.requestForm.titleLabel',
+  subtitle: 'copy.requestForm.subtitleLabel',
+  namePlaceholder: 'copy.requestForm.namePlaceholderLabel',
+  emailPlaceholder: 'copy.requestForm.emailPlaceholderLabel',
+  companyPlaceholder: 'copy.requestForm.companyPlaceholderLabel',
+  websitePlaceholder: 'copy.requestForm.websitePlaceholderLabel',
+  type: 'copy.requestForm.typeLabel',
+  typeOptions: 'copy.requestForm.typeOptionsLabel',
+  budget: 'copy.requestForm.budgetLabel',
+  budgetOptions: 'copy.requestForm.budgetOptionsLabel',
+  timeline: 'copy.requestForm.timelineLabel',
+  timelineOptions: 'copy.requestForm.timelineOptionsLabel',
+  request: 'copy.requestForm.requestLabel',
+  requestPlaceholder: 'copy.requestForm.requestPlaceholderLabel',
+  consent: 'copy.requestForm.consentLabel',
+  submit: 'copy.requestForm.submitLabel',
+  comingSoon: 'copy.requestForm.comingSoonLabel',
+};
+
+export function CopyEditor({
   namespace,
   sectionKey,
   fields,
   showAll = false,
-  preview = false,
+  labelKeys = {},
 }: {
   namespace: string;
   sectionKey: string;
   fields: string[];
   showAll?: boolean;
-  preview?: boolean;
+  labelKeys?: Record<string, string>;
 }) {
   const t = useTranslations('cms');
   const tr = useSectionTranslations(namespace);
   const [locale, setLocale] = useState<'en' | 'it'>('en');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
   useSectionDirty(sectionKey, tr.isDirty);
 
   const publish = useCallback(async () => {
@@ -112,93 +113,126 @@ function CopyEditor({
   };
   useSectionCallbacks(sectionKey, publish, revert);
 
-  const keys = Array.from(
-    new Set([
-      ...fields,
-      ...(showAll
-        ? [
-            ...Object.keys(tr.translations.en),
-            ...Object.keys(tr.translations.it),
-          ]
-        : fields.flatMap((field) =>
-            [
-              ...Object.keys(tr.translations.en),
-              ...Object.keys(tr.translations.it),
-            ].filter((key) => key.startsWith(`${field.split('.')[0]}.`))
-          )),
-    ])
-  ).sort();
+  const keys = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...fields,
+          ...(showAll
+            ? [
+                ...Object.keys(tr.translations.en),
+                ...Object.keys(tr.translations.it),
+              ]
+            : fields.flatMap((field) =>
+                [
+                  ...Object.keys(tr.translations.en),
+                  ...Object.keys(tr.translations.it),
+                ].filter((key) => key.startsWith(`${field.split('.')[0]}.`))
+              )),
+        ])
+      ).sort(),
+    [fields, showAll, tr.translations]
+  );
 
-  return (
-    <fieldset
-      disabled={busy || tr.isLoading}
-      className="min-w-0 rounded-2xl border border-border-subtle bg-surface-card p-6"
-    >
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-text-white">
-          {t(`copy.namespaces.${namespace || 'common'}`)}
-        </h2>
-        <LocaleToggle activeLocale={locale} onChange={setLocale} />
-      </div>
-      <ErrorBanner
-        message={error || tr.error}
-        onDismiss={() => setError(null)}
-      />
-      <div className="grid gap-5 sm:grid-cols-2">
-        {keys.map((key) => (
-          <label
-            key={key}
-            className="block min-w-0 space-y-2 text-xs text-text-muted"
-          >
-            <span className="break-words">{key}</span>
+  const grouped = useMemo(() => {
+    const groups: Record<
+      'intro' | 'formFields' | 'submission' | 'other',
+      string[]
+    > = { intro: [], formFields: [], submission: [], other: [] };
+    const knownRoots = new Set<string>();
+    for (const field of fields) knownRoots.add(field.split('.')[0]);
+    for (const key of keys) {
+      const fixedGroup = Object.hasOwn(GROUP_BY_KEY, key)
+        ? GROUP_BY_KEY[key]
+        : undefined;
+      groups[
+        fixedGroup ??
+          (knownRoots.has(key.split('.')[0]) ? 'formFields' : 'other')
+      ].push(key);
+    }
+    return groups;
+  }, [fields, keys]);
+
+  const renderGroup = (groupKeys: string[]) => (
+    <div className="grid gap-4 sm:grid-cols-2">
+      {groupKeys.map((key) => {
+        const rootKey = key.split('.')[0];
+        const labelKey = Object.hasOwn(labelKeys, rootKey)
+          ? labelKeys[rootKey]
+          : undefined;
+        const label =
+          labelKey && t.has(labelKey)
+            ? t(labelKey)
+            : key
+                .split('.')
+                .map((segment) =>
+                  segment
+                    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+                    .replace(/[_-]+/g, ' ')
+                )
+                .join(' › ');
+        return (
+          <label key={key} className="block min-w-0 space-y-1.5">
+            <span className="block text-sm font-medium capitalize text-text-main">
+              {label}
+            </span>
+            <span className="block font-mono text-[11px] break-words text-text-dim">
+              {namespace || 'common'}.{key}
+            </span>
             <textarea
               aria-label={`${namespace || 'common'}.${key} (${locale.toUpperCase()})`}
               value={tr.getField(locale, key)}
               onChange={(e) => tr.setField(locale, key, e.target.value)}
               rows={/subtitle|Text|description|consent/.test(key) ? 3 : 1}
-              className="min-h-11 w-full resize-y rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-main focus:border-accent-violet focus:outline-none"
+              className={`${editorInputClass} min-h-11 resize-y`}
             />
           </label>
-        ))}
-      </div>
-      <div className="mt-6 flex flex-wrap justify-end gap-3">
-        {preview && (
-          <button
-            type="button"
-            onClick={() => setPreviewOpen(true)}
-            className="min-h-11 rounded-lg border border-border-subtle px-4 text-sm text-text-muted"
-          >
-            {t('common.preview')}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={revert}
-          className="min-h-11 rounded-lg border border-border-subtle px-4 text-sm text-text-muted"
-        >
-          {t('common.revert')}
-        </button>
-        <button
-          type="button"
-          onClick={() => void publish().catch(() => {})}
-          disabled={!tr.isDirty}
-          className="min-h-11 rounded-lg bg-accent-violet-deep px-4 text-sm text-white disabled:opacity-50"
-        >
-          {busy ? t('common.publishing') : t('common.publish')}
-        </button>
-      </div>
-      {preview && (
-        <PreviewModal
-          isOpen={previewOpen}
-          onClose={() => setPreviewOpen(false)}
-          title={t('copy.requestTitle')}
-          copy={{ locale, namespace, drafts: tr.translations }}
-        >
-          <div className="mx-auto max-w-5xl">
-            <RequestFormPreview />
-          </div>
-        </PreviewModal>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <fieldset
+      disabled={busy || tr.isLoading}
+      className="m-0 min-w-0 space-y-6 border-0 p-0"
+    >
+      <ErrorBanner
+        message={error || tr.error}
+        onDismiss={() => setError(null)}
+      />
+      <EditorToolbar
+        title={t(`copy.namespaces.${namespace || 'common'}`)}
+        actions={<LocaleToggle activeLocale={locale} onChange={setLocale} />}
+      />
+      {grouped.intro.length > 0 && (
+        <EditorGroup title={t('editor.groups.intro')}>
+          {renderGroup(grouped.intro)}
+        </EditorGroup>
       )}
+      {grouped.formFields.length > 0 && (
+        <EditorGroup title={t('editor.groups.formFields')}>
+          {renderGroup(grouped.formFields)}
+        </EditorGroup>
+      )}
+      {grouped.submission.length > 0 && (
+        <EditorGroup title={t('editor.groups.submission')}>
+          {renderGroup(grouped.submission)}
+        </EditorGroup>
+      )}
+      {grouped.other.length > 0 && (
+        <EditorGroup title={t('editor.groups.other')}>
+          {renderGroup(grouped.other)}
+        </EditorGroup>
+      )}
+      <div className="flex flex-wrap justify-end gap-3">
+        <SectionActions
+          isDirty={tr.isDirty}
+          busy={busy || tr.isLoading}
+          onPublish={publish}
+          onRevert={revert}
+        />
+      </div>
     </fieldset>
   );
 }
@@ -216,38 +250,8 @@ export function RequestCopySection() {
         sectionKey="request-form"
         fields={requestFields}
         showAll
-        preview
+        labelKeys={requestLabelKeys}
       />
-    </div>
-  );
-}
-
-export function SiteCopySection() {
-  const t = useTranslations('cms');
-  const publishAll = useCmsStore((s) => s.publishAll);
-  return (
-    <div className="space-y-6">
-      <SectionHeader
-        title={t('copy.siteTitle')}
-        description={t('copy.siteDescription')}
-        actions={
-          <button
-            type="button"
-            onClick={() => void publishAll()}
-            className="min-h-11 rounded-lg bg-accent-violet-deep px-4 text-sm text-white"
-          >
-            {t('sidebar.publishAll')}
-          </button>
-        }
-      />
-      {siteGroups.map((group) => (
-        <CopyEditor
-          key={group.namespace}
-          namespace={group.namespace}
-          sectionKey={`site-copy:${group.namespace || 'common'}`}
-          fields={group.fields}
-        />
-      ))}
     </div>
   );
 }

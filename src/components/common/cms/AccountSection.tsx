@@ -18,6 +18,9 @@ import { useEffect, useRef, useState } from 'react';
 import { deleteMyAccount } from '@/app/actions/cms/deleteAccount';
 import { getUser } from '@/app/actions/cms/getUser';
 import { updateMyProfile } from '@/app/actions/cms/sections/usersActions';
+import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
+import { RoleChip } from '@/components/cms/shared/RoleChip';
+import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { useCmsStore } from '@/store/cmsStore';
@@ -27,6 +30,7 @@ import { createClient } from '@/utils/supabase/client';
 export default function AccountSection() {
   const t = useTranslations('cms');
   const { user, setUser } = useCmsStore();
+  const demoMode = useCmsStore((state) => state.demoMode);
   const [error, setError] = useState<string | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -51,6 +55,11 @@ export default function AccountSection() {
 
   useEffect(() => {
     if (!user) return;
+    // No Supabase session exists in the showcase: skip the list entirely.
+    if (useCmsStore.getState().demoMode) {
+      setPasskeysLoading(false);
+      return;
+    }
     let cancelled = false;
     createClient()
       .auth.passkey.list()
@@ -110,6 +119,35 @@ export default function AccountSection() {
   const handleAvatarChange = async (file: File) => {
     setIsUploadingAvatar(true);
     setError(null);
+
+    // Offline showcase: point the demo profile at an object URL.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        const processed = await processImageToWebP(file, {
+          maxWidth: 256,
+          maxHeight: 256,
+          quality: 0.85,
+        });
+        if (!processed.success || !processed.file) {
+          throw new Error(processed.error || 'Failed to process image');
+        }
+        const store = useCmsStore.getState();
+        if (store.user) {
+          store.setUser({
+            ...store.user,
+            avatarUrl: URL.createObjectURL(processed.file),
+          });
+        }
+      } catch (err) {
+        console.error('Error uploading avatar:', err);
+        setError(
+          err instanceof Error ? err.message : t('account.errorUploadAvatar')
+        );
+      } finally {
+        setIsUploadingAvatar(false);
+      }
+      return;
+    }
 
     try {
       // Process image to WebP before upload
@@ -185,6 +223,26 @@ export default function AccountSection() {
     setSavingName(true);
     setError(null);
 
+    // Offline showcase: rename the demo profile locally.
+    if (useCmsStore.getState().demoMode) {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const store = useCmsStore.getState();
+        if (store.user) {
+          store.setUser({ ...store.user, displayName: editedName.trim() });
+        }
+        setEditingName(false);
+      } catch (err) {
+        console.error('Error updating display name:', err);
+        setError(
+          err instanceof Error ? err.message : t('account.errorUpdateName')
+        );
+      } finally {
+        setSavingName(false);
+      }
+      return;
+    }
+
     const formData = new FormData();
     formData.append('displayName', editedName.trim());
 
@@ -255,43 +313,36 @@ export default function AccountSection() {
   if (!user) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent-violet" />
+        <span className="h-8 w-8 animate-spin rounded-full border-2 border-accent-violet border-t-transparent" />
       </div>
     );
   }
 
+  const inputClass =
+    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-sm text-text-main focus:border-accent-violet focus:outline-none';
+
   return (
-    <div className="space-y-8 mb-8 md:mb-0 lg:mt-0">
-      <div className="text-center mb-8">
-        <h1 className="hidden lg:block text-4xl font-bold text-accent-violet mb-4">
-          {t('account.title')}
-        </h1>
-        <p className="text-text-muted text-lg">{t('account.subtitle')}</p>
-      </div>
+    <div className="space-y-6">
+      <SectionHeader
+        title={t('account.title')}
+        description={t('account.subtitle')}
+      />
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {/* Error display */}
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4">
-          <p className="text-red-500">{error}</p>
-        </div>
-      )}
-
-      {/* Profile Card */}
-      <div className="bg-surface-card rounded-xl p-6">
-        <h2 className="text-xl font-bold text-accent-violet mb-6 flex items-center gap-2">
-          <User className="w-5 h-5" />
+      <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
+        <h2 className="mb-5 flex items-center gap-2 text-lg font-bold text-text-white">
+          <User className="h-5 w-5 text-text-dim" />
           {t('account.profileInfoTitle')}
         </h2>
 
         <div className="space-y-6">
-          {/* Avatar Section */}
           <div className="flex items-center gap-6">
             <div className="relative">
               <button
                 type="button"
                 onClick={handleAvatarClick}
                 disabled={isUploadingAvatar}
-                className="relative w-24 h-24 rounded-full overflow-hidden bg-surface-raised flex-shrink-0 group cursor-pointer"
+                className="group relative h-24 w-24 shrink-0 cursor-pointer overflow-hidden rounded-full bg-surface-raised"
               >
                 {user.avatarUrl ? (
                   <Image
@@ -302,20 +353,23 @@ export default function AccountSection() {
                     className="object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-accent-violet text-white text-2xl font-bold">
+                  <span className="flex h-full w-full items-center justify-center bg-accent-violet font-heading text-2xl font-semibold text-white">
                     {(user.displayName || 'U').charAt(0).toUpperCase()}
-                  </div>
+                  </span>
                 )}
-                {/* Upload overlay */}
-                <div
-                  className={`absolute inset-0 bg-black/60 flex items-center justify-center transition-opacity ${isUploadingAvatar ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                <span
+                  className={`absolute inset-0 flex items-center justify-center bg-black/60 transition-opacity ${
+                    isUploadingAvatar
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover:opacity-100'
+                  }`}
                 >
                   {isUploadingAvatar ? (
-                    <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   ) : (
-                    <Camera className="w-6 h-6 text-white" />
+                    <Camera className="h-6 w-6 text-white" />
                   )}
-                </div>
+                </span>
               </button>
               <input
                 ref={fileInputRef}
@@ -331,21 +385,20 @@ export default function AccountSection() {
                 className="hidden"
               />
             </div>
-            <div>
-              <p className="text-sm text-text-muted mb-1">
+            <div className="min-w-0">
+              <p className="mb-1 block text-sm font-medium text-text-main">
                 {t('account.profilePictureLabel')}
               </p>
-              <p className="text-xs text-text-muted ">
+              <p className="text-xs text-text-dim">
                 {t('account.clickToUpload')}
               </p>
             </div>
           </div>
 
-          {/* Display Name Section */}
           <div>
             <label
               htmlFor="display-name-input"
-              className="block text-sm font-medium text-text-main mb-2"
+              className="mb-1 block text-sm font-medium text-text-main"
             >
               {t('account.displayNameLabel')}
             </label>
@@ -356,7 +409,7 @@ export default function AccountSection() {
                   type="text"
                   value={editedName}
                   onChange={(e) => setEditedName(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-surface-base border border-accent-violet rounded-lg text-text-main focus:outline-none"
+                  className={`${inputClass} flex-1`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleSaveName();
                     if (e.key === 'Escape') handleCancelEditName();
@@ -366,123 +419,119 @@ export default function AccountSection() {
                   type="button"
                   onClick={handleSaveName}
                   disabled={savingName}
-                  className="p-2 text-green-400 hover:text-green-300 hover:bg-green-500/10 rounded transition-colors disabled:opacity-50"
+                  className="rounded p-2 text-green-400 transition-colors hover:bg-green-500/10 disabled:opacity-50"
                 >
-                  <Check className="w-5 h-5" />
+                  <Check className="h-5 w-5" />
                 </button>
                 <button
                   type="button"
                   onClick={handleCancelEditName}
-                  className="p-2 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition-colors"
+                  className="rounded p-2 text-red-400 transition-colors hover:bg-red-500/10"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <span className="px-3 py-2 bg-surface-base rounded-lg text-text-main flex-1">
+                <span className={`${inputClass} flex items-center`}>
                   {user.displayName}
                 </span>
                 <button
                   type="button"
                   onClick={handleEditNameClick}
-                  className="p-2 text-text-muted hover:text-accent-violet hover:bg-surface-raised rounded transition-colors"
+                  className="rounded p-2 text-text-dim transition-colors hover:bg-surface-raised hover:text-accent-violet"
                 >
-                  <Pencil className="w-4 h-4" />
+                  <Pencil className="h-4 w-4" />
                 </button>
               </div>
             )}
           </div>
 
-          {/* Email Section (Read-only) */}
           {user.email && (
             <div>
-              <div className="block text-sm font-medium text-text-main mb-2">
+              <p className="mb-1 block text-sm font-medium text-text-main">
                 {t('account.emailLabel')}
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 bg-surface-base rounded-lg text-text-muted ">
-                <Mail className="w-4 h-4" />
-                <span>{user.email}</span>
-              </div>
-              <p className="text-xs text-text-muted mt-1">
+              </p>
+              <p className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-muted">
+                <Mail className="h-4 w-4" />
+                <span className="truncate">{user.email}</span>
+              </p>
+              <p className="mt-1 text-xs text-text-dim">
                 {t('account.emailReadOnly')}
               </p>
             </div>
           )}
 
-          {/* GitHub Username Section (Read-only) */}
           {user.githubUsername && (
             <div>
-              <div className="block text-sm font-medium text-text-main mb-2">
+              <p className="mb-1 block text-sm font-medium text-text-main">
                 {t('account.githubUsernameLabel')}
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 bg-surface-base rounded-lg text-text-muted ">
-                <GithubIcon className="w-4 h-4" />
-                <span>@{user.githubUsername}</span>
-              </div>
-              <p className="text-xs text-text-muted mt-1">
+              </p>
+              <p className="flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-base px-3 py-2 text-sm text-text-muted">
+                <GithubIcon className="h-4 w-4" />
+                <span className="truncate">@{user.githubUsername}</span>
+              </p>
+              <p className="mt-1 text-xs text-text-dim">
                 {t('account.githubReadOnly')}
               </p>
             </div>
           )}
 
-          {/* Role Section (Read-only) */}
           <div>
-            <div className="block text-sm font-medium text-text-main mb-2">
+            <p className="mb-1 block text-sm font-medium text-text-main">
               {t('account.roleLabel')}
+            </p>
+            <div className="rounded-lg border border-border-subtle bg-surface-base px-3 py-2">
+              {user.role === 'admin' ? (
+                <RoleChip cmsRole="admin" />
+              ) : user.role === 'editor' ? (
+                <RoleChip cmsRole="editor" />
+              ) : (
+                <span className="px-2 py-0.5 text-xs text-text-dim">
+                  {user.role || 'user'}
+                </span>
+              )}
             </div>
-            <div className="px-3 py-2 bg-surface-base rounded-lg">
-              <span
-                className={`px-2 py-1 rounded text-xs ${
-                  user.role === 'admin'
-                    ? 'bg-yellow-500/20 text-yellow-500'
-                    : 'bg-blue-500/20 text-blue-400'
-                }`}
-              >
-                {user.role || 'user'}
-              </span>
-            </div>
-            <p className="text-xs text-text-muted mt-1">
+            <p className="mt-1 text-xs text-text-dim">
               {t('account.roleReadOnly')}
             </p>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Passkeys */}
-      <div className="bg-surface-card rounded-xl p-6">
-        <h2 className="text-xl font-bold text-text-main mb-4 flex items-center gap-2">
-          <Fingerprint className="w-5 h-5" />
-          {t('account.passkeysTitle')}
-        </h2>
-        <p className="text-text-muted mb-4">{t('account.passkeysDesc')}</p>
+      {/* Passkeys need a real Supabase session: hidden in the showcase. */}
+      {!demoMode && (
+        <section className="rounded-2xl border border-border-subtle bg-surface-card p-6">
+          <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-text-white">
+            <Fingerprint className="h-5 w-5 text-text-dim" />
+            {t('account.passkeysTitle')}
+          </h2>
+        <p className="mb-4 text-sm text-text-muted">
+          {t('account.passkeysDesc')}
+        </p>
 
-        {passkeysError && (
-          <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-3 mb-4">
-            <p className="text-red-500 text-sm">{passkeysError}</p>
-          </div>
-        )}
+        <ErrorBanner message={passkeysError} />
 
         {passkeysLoading ? (
           <div className="flex justify-center py-4">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
+            <span className="h-6 w-6 animate-spin rounded-full border-2 border-accent-violet border-t-transparent" />
           </div>
         ) : passkeys.length === 0 ? (
-          <p className="text-sm text-text-muted mb-4">
+          <p className="mb-4 text-sm text-text-muted">
             {t('account.passkeysEmpty')}
           </p>
         ) : (
-          <ul className="space-y-2 mb-4">
+          <ul className="mb-4 space-y-2">
             {passkeys.map((passkey) => (
               <li
                 key={passkey.id}
-                className="flex items-center justify-between gap-3 px-3 py-2 bg-surface-base rounded-lg"
+                className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-base px-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="text-sm text-text-main truncate">
+                  <p className="truncate text-sm font-medium text-text-main">
                     {passkey.friendly_name || t('account.passkeyUnnamed')}
                   </p>
-                  <p className="text-xs text-text-muted ">
+                  <p className="text-xs text-text-dim">
                     {passkey.last_used_at
                       ? t('account.passkeyLastUsed', {
                           lastUsed: new Date(
@@ -496,10 +545,10 @@ export default function AccountSection() {
                   type="button"
                   onClick={() => setPasskeyToDelete(passkey)}
                   disabled={isDeletingPasskey}
-                  className="p-2 rounded-lg text-red-400 hover:bg-red-500/10 disabled:opacity-50 flex-shrink-0"
+                  className="shrink-0 rounded-lg p-2 text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
                   aria-label={t('account.passkeyDeleteButton')}
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </li>
             ))}
@@ -507,19 +556,19 @@ export default function AccountSection() {
         )}
 
         {passkeyToDelete ? (
-          <div className="flex items-center justify-between gap-3 bg-red-500/10 border border-red-500/50 rounded-lg p-3">
-            <p className="text-sm text-red-400">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3">
+            <p className="min-w-0 text-sm text-red-400">
               {t('account.passkeyDeleteConfirm', {
                 name:
                   passkeyToDelete.friendly_name || t('account.passkeyUnnamed'),
               })}
             </p>
-            <div className="flex gap-2 flex-shrink-0">
+            <div className="flex shrink-0 gap-2">
               <button
                 type="button"
                 onClick={() => setPasskeyToDelete(null)}
                 disabled={isDeletingPasskey}
-                className="px-3 py-1.5 text-sm rounded-lg text-text-muted hover:bg-surface-raised "
+                className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised"
               >
                 {t('common.cancel')}
               </button>
@@ -527,10 +576,10 @@ export default function AccountSection() {
                 type="button"
                 onClick={handleDeletePasskey}
                 disabled={isDeletingPasskey}
-                className="px-3 py-1.5 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center gap-2"
+                className="flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:opacity-50"
               >
                 {isDeletingPasskey && (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                 )}
                 {t('account.passkeyDeleteButton')}
               </button>
@@ -541,53 +590,57 @@ export default function AccountSection() {
             type="button"
             onClick={handleRegisterPasskey}
             disabled={isRegisteringPasskey}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-violet text-white hover:opacity-90 disabled:opacity-50 text-sm"
+            className="flex items-center gap-1.5 rounded-lg bg-accent-violet-deep px-3 py-1.5 text-sm text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
           >
             {isRegisteringPasskey ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
             ) : (
-              <Plus className="w-4 h-4" />
+              <Plus className="h-4 w-4" />
             )}
             {isRegisteringPasskey
               ? t('account.addingPasskey')
               : t('account.addPasskey')}
           </button>
         )}
-      </div>
+      </section>
+      )}
 
-      {/* Danger Zone */}
-      <div className="bg-red-500/10 border border-red-500/50 rounded-xl p-6">
-        <h2 className="text-xl font-bold text-red-400 mb-4 flex items-center gap-2">
-          <Trash2 className="w-5 h-5" />
+      {/* Account deletion is meaningless without a real identity. */}
+      {!demoMode && (
+        <section className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6">
+        <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-red-400">
+          <Trash2 className="h-5 w-5" />
           {t('account.dangerZoneTitle')}
         </h2>
-        <p className="text-text-muted mb-4">{t('account.dangerZoneDesc')}</p>
+        <p className="mb-4 text-sm text-text-muted">
+          {t('account.dangerZoneDesc')}
+        </p>
 
         {showDeleteConfirm ? (
           <div className="space-y-4">
-            <div className="bg-surface-card rounded-lg p-4 border border-red-500/50">
-              <p className="text-red-400 font-semibold mb-2">
+            <div className="rounded-lg border border-red-500/40 bg-surface-card p-4">
+              <p className="mb-2 font-semibold text-red-400">
                 {t('account.confirmDeleteTitle')}
               </p>
-              <p className="text-text-muted text-sm">
+              <p className="text-sm text-text-muted">
                 {t('account.confirmDeleteDesc')}
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={handleDeleteAccount}
                 disabled={isDeleting}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isDeleting ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                     {t('account.deleting')}
                   </>
                 ) : (
                   <>
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="h-4 w-4" />
                     {t('account.confirmDeleteButton')}
                   </>
                 )}
@@ -599,7 +652,7 @@ export default function AccountSection() {
                   setError(null);
                 }}
                 disabled={isDeleting}
-                className="px-4 py-2 bg-surface-raised hover:bg-surface-raised text-text-main font-medium rounded-lg transition-colors disabled:opacity-50"
+                className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised disabled:opacity-50"
               >
                 {t('common.cancel')}
               </button>
@@ -609,13 +662,14 @@ export default function AccountSection() {
           <button
             type="button"
             onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 hover:text-red-300 font-medium rounded-lg transition-colors border border-red-500/50"
+            className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-500/20 hover:text-red-300"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="h-4 w-4" />
             {t('account.deleteAccount')}
           </button>
         )}
-      </div>
+      </section>
+      )}
     </div>
   );
 }

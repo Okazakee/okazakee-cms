@@ -20,6 +20,12 @@ export const supabasePublishableKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 // Server-only secret API key (sb_secret_...) — NEVER in public code.
 export const supabaseServerSecret = process.env.SUPABASE_SECRET_KEY ?? '';
+// Postgres schema the Data API serves. Defaults to `public`; set
+// NEXT_PUBLIC_SUPABASE_DB_SCHEMA to develop against a cloned schema without
+// touching production content. The schema must also be in the project's
+// exposed-schema list or PostgREST answers "permission denied for schema".
+export const supabaseSchema =
+  process.env.NEXT_PUBLIC_SUPABASE_DB_SCHEMA ?? 'public';
 
 export function parsePositiveInt(raw: string | undefined): number | null {
   if (!raw) return null;

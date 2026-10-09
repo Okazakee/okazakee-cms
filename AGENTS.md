@@ -29,21 +29,23 @@ src/
     actions/
       cms/
         login.ts                  # Email/password login + durable rate limit
-        getUser.ts                # Boot data (user + hero preview data)
+        getUser.ts                # Boot data (user + hero section data)
         deleteAccount.ts          # Self-service account deletion
         utils/
           auth.ts                 # Allowlist matching, GitHub helpers
           fileHelpers.ts          # Auth contexts, image processing, uploads
           profileSync.ts          # user_profiles sync after login/OAuth
-        sections/                 # Section actions: blog, portfolio, hero,
-                                  # skills, career, contacts, i18n, users
+                                  # skills, career, contacts, i18n, users,
+                                  # requests (project-request inbox)
   components/
     cms/sections/                 # Editor components per section
-    cms/shared/                   # Shared CMS UI (ErrorBanner, FileDropzone, ...)
-    common/cms/                   # PreviewModal, SidePanel, AccountSection, previews
-    common/                       # Public-section components reused for previews
-    layout/                       # ThemeToggle, MarkdownRenderer, ...
-  hooks/cms/                      # useFileUpload, useSectionTranslations, ...
+    cms/shared/                   # Shared CMS UI (ErrorBanner, FileDropzone,
+                                  # Dropdown, ...)
+    common/cms/                   # SidePanel, AccountSection
+    common/                       # Public-section components reused here
+    layout/                       # ThemeToggle, NextImage, ...
+  hooks/cms/                      # useFileUpload, useSectionTranslations,
+                                  # useRequestEntries (inbox loader + mutations)
   i18n/                           # next-intl config + static CMS messages
   libs/
     content/cacheTags.ts          # Public cache-tag vocabulary (mirrors public repo)
@@ -61,7 +63,6 @@ src/
   utils/
     cms/validation.ts             # Pure validators (sizes, URLs, storage paths)
     cmsRouteMatching.ts           # Pure route rules (public paths, /cms compat)
-    getData.ts                    # CMS-local 'use cache' reads (translations)
     imageProcessor.ts             # Client-side WebP preprocessing
     supabase/server.ts            # SSR session client (publishable key)
   proxy.ts                        # Proxy (middleware): locale + session guard
@@ -111,15 +112,30 @@ src/
   `src/utils/cms/webpAnimation.ts` and must be used by any new upload path.
   Animated frames are decoded into one tall surface, so an animation above
   32 MPx total is rejected before decoding.
-- Local CMS `'use cache'` entries (e.g. `getTranslationsSupabase`) are
-  invalidated from Server Actions with `updateTag(tag)` + `refresh()`
-  (`src/libs/cms/localInvalidation.ts`); remote invalidation goes through
-  `invalidatePublicContent` (signed event, never throws, status returned).
+- The CMS's own cache invalidation runs from Server Actions via
+  `updateTag(tag)` + `refresh()` (`src/libs/cms/localInvalidation.ts`); remote
+  invalidation goes through `invalidatePublicContent` (signed event, never
+  throws, status returned).
+
+- CMS ownership: Hero name, ordered localized roles, about paragraph and
+  portrait shape; ordered Skills categories/entries; Career/Portfolio/Blog
+  entries; ordered Contacts with SVG URLs; privacy-policy bodies. Structural
+  headings/vocabulary and the privacy subtitle are website-local i18n.
+- System → Resume owns EN/IT PDFs and invalidates
+  `resume` / `hero_section` after publication. Layout owns the two optional
+  theme header images (`site_settings.header_logo_dark` / `header_logo_light`,
+  aspect-preserving uploads that fall back to that theme's bundled site image
+  when null) plus the textual VAT. No animation-target or footer-name editor
+  remains.
+- Individual Publish and Publish All require confirmation; registered callbacks
+  remain raw so Publish All confirms once. User removal confirms identity,
+  commits profile deletion before owned-avatar cleanup, and never deletes
+  shared Auth identities from non-public schemas.
 
 ## 5. Commands and Workflows
 
 - Install: `bun install`
-- Dev server: `bun run dev`
+- Dev server: `bun run dev` (pinned to port 3001; the public site owns 3000)
 - Build: `bun run build`
 - Start production: `bun run start`
 - Lint: `bun run lint` (runs `biome lint .`)
@@ -207,7 +223,7 @@ export function SectionHeader({
 - **Section action files:** `{section}Actions.ts`. `blogActions.ts`, `careerActions.ts`
 - **Component files:** PascalCase matching component name. `SectionHeader.tsx`, `TranslationField.tsx`
 - **Hook files:** `use{HookName}.ts`. `useFileUpload.ts`, `useSectionTranslations.ts`
-- **Utility files:** camelCase. `getData.ts`, `imageProcessor.ts`
+- **Utility files:** camelCase. `blurhashUtils.ts`, `imageProcessor.ts`
 - **Constants at module level:** camelCase (not SCREAMING_SNAKE_CASE). `const revalTime = ...`
 
 ## 8. Type Annotations
@@ -380,10 +396,35 @@ urgent it feels.
   `WEBSITE_REVALIDATION_URL`, `WEBSITE_REVALIDATION_SECRET`,
   `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_LOCALES`, `NEXT_PUBLIC_DEFAULT_LOCALE`.
   Full list in `.env.local.example`.
-- **Database migrations:** `supabase/migrations/` — login rate limiting
-  (table, split per-IP/per-email buckets, hardening grants/RLS, scheduled
-  purge). Apply with `supabase db push` or the SQL editor; always documented
-  as reversible.
+- **Local values live in the Vercel project's Development environment**, pulled
+  with `vercel env pull` (it merges: keys the target defines are overwritten,
+  local-only keys are kept). `.env.development.local` — loaded before
+  `.env.local`, ignored by `next build`/`next start` — is the guard against
+  pulling another environment: `--environment=production` overwrites
+  `WEBSITE_REVALIDATION_URL` with the deployed origin and drops
+  `NEXT_PUBLIC_SUPABASE_DB_SCHEMA`, after which `src/config/shared.ts` falls back
+  to `public` and every local edit writes production content. With the deployed
+  revalidation origin, a local edit purges production's cache while the local
+  public site keeps serving the pre-edit render — the symptom is a CMS value
+  that appears not to be used at all.
+- **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
+  (`src/utils/cms/devMigrations.ts`;
+  `src/libs/cms/devMigrations/devCheck.ts`; registry
+  `src/libs/cms/devMigrations/registry.json`, 13 `{version,name,sourceFile}`
+  entries) plus content tables and the dev-only `dev_staging.cms_migration_audit`
+  ledger (eight `verified_existing`, five `applied`: GitHub subjects, Skills
+  reseed, the `20261008135608` content-controls cutover,
+  `20261008145842` header-image restoration and `20261008213304` allowlist
+  ID-sequence usage). Source hashes certify immutable bytes; live effect
+  checks include service-role sequence usage and reflect the latest cutover.
+  Native Supabase history is mixed-scope, not proof of content state.
+  Historical public/unqualified sources must never be replayed against
+  shared `public`. Link once (`supabase login`, `supabase link --project-ref
+  <ref>`); green ends `dev check: N pass / 0 fail / M info`. `--scope` must
+  equal `dev_staging`; the CLI exposes only a read-only `check` command.
+  Future changes remain explicitly reviewed/manual: never `supabase db push`,
+  `migration repair`, or search-path fallback apply. `public`, shared Auth
+  and pre-existing global history are not certified.
 - **Deployment:** Vercel with Next.js framework preset. Build output: `.next/`.
 
 ## 15. Red Lines
@@ -394,6 +435,10 @@ urgent it feels.
 - **Never use relative imports across directory boundaries.** Use `@/` path aliases defined in `tsconfig.json`.
 - **Never call Supabase directly from client components (browser).** Use server actions (`'use server'`) to proxy all Supabase calls.
 - **Never commit `.env.local`** or any file containing secrets.
+- **All new CMS work stays on `staging`.** Before editing, switch to the local
+  `staging` branch and confirm it tracks `origin/staging`; do not create or
+  work on feature branches. Preserve uncommitted work when switching. Commit
+  and push CMS changes only to `staging`, and only push when asked.
 - **Never commit or push directly to `main`.** Work on a branch and open a PR — the only exception is a direct push you explicitly asked for in the session (§13.1).
 - **Never open a PR, or merge one, without the owner's go-ahead.** A pushed branch is not a PR request; wait for confirmation (§13.1).
 - **Never add a `'use server'` directive inside a file that also has `'use client'`.** These directives are mutually exclusive at the file level.
@@ -419,7 +464,7 @@ urgent it feels.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
-# This is NOT the Next.js you know
+## This is NOT the Next.js you know
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 

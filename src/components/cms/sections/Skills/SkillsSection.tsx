@@ -1,28 +1,33 @@
 'use client';
 
-import { ArrowDown, ArrowUp, Edit3, Plus, Trash2, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import { skillsActions } from '@/app/actions/cms/sections/skillsActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
-import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { SkillsPreview } from '@/components/common/cms/previews/SkillsPreview';
 import { readBatchEvidence, reconcileDrafts } from '@/hooks/cms/batchDrafts';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoSkills } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Skill, SkillsCategory } from '@/types/fetchedData.types';
+import { isValidHttpUrl } from '@/utils/cms/validation';
 
 type EditableSkill = Skill & { isEditing?: boolean };
 type EditableCategory = Omit<SkillsCategory, 'skills'> & {
@@ -41,14 +46,12 @@ export default function SkillsSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [renamingCategoryId, setRenamingCategoryId] = useState<number | null>(
     null
   );
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
 
   const [modifiedSkills, setModifiedSkills] = useState<Set<string>>(new Set());
   const [newSkills, setNewSkills] = useState<
@@ -65,17 +68,7 @@ export default function SkillsSection() {
     new Set()
   );
   const [categoryOrderChanged, setCategoryOrderChanged] = useState(false);
-
-  const {
-    translations,
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('skills-section');
+  const [skillOrderChanged, setSkillOrderChanged] = useState(false);
 
   const hasDataChanges =
     modifiedSkills.size > 0 ||
@@ -84,9 +77,10 @@ export default function SkillsSection() {
     modifiedCategories.size > 0 ||
     newCategories.length > 0 ||
     deletedCategories.size > 0 ||
-    categoryOrderChanged;
+    categoryOrderChanged ||
+    skillOrderChanged;
 
-  const isDirty = hasDataChanges || transDirty;
+  const isDirty = hasDataChanges;
 
   useSectionDirty('skills', isDirty);
 
@@ -94,6 +88,19 @@ export default function SkillsSection() {
   const fetchData = useCallback(async () => {
     const current = beginLoad();
     setIsLoading(true);
+    // Offline showcase: fixture categories, no server round-trip.
+    if (useCmsStore.getState().demoMode) {
+      if (!current()) return;
+      const loaded = demoSkills.map((cat) => ({
+        ...cat,
+        skills: cat.skills.map((s) => ({ ...s, isEditing: false })),
+      }));
+      setCategories(loaded);
+      setOriginalCategories(JSON.parse(JSON.stringify(loaded)));
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
     try {
       const result = await skillsActions({ type: 'GET' });
       if (!current()) return;
@@ -123,6 +130,50 @@ export default function SkillsSection() {
     setIsUpdating(true);
     setError(null);
 
+    // Offline showcase: remap temp ids to fake committed ids, drop
+    // deletes, persist the visible order, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let nextFakeId =
+        Math.max(
+          0,
+          ...categories.map((c) => c.id),
+          ...categories.flatMap((c) => c.skills.map((s) => s.id))
+        ) + 1;
+      const catIdMap = new Map<number, number>();
+      for (const c of newCategories) catIdMap.set(c.tempId, nextFakeId++);
+      const next = categories
+        .filter((c) => !deletedCategories.has(c.id))
+        .map((c, catIndex) => {
+          const id = c.id < 0 ? (catIdMap.get(c.id) ?? c.id) : c.id;
+          return {
+            ...c,
+            id,
+            position: catIndex,
+            skills: c.skills
+              .filter((s) => !deletedSkills.has(s.id))
+              .map((s, skillIndex) => ({
+                ...s,
+                id: s.id < 0 ? nextFakeId++ : s.id,
+                category_id: id,
+                position: skillIndex,
+              })),
+          };
+        });
+      setCategories(next);
+      setOriginalCategories(JSON.parse(JSON.stringify(next)));
+      setModifiedSkills(new Set());
+      setNewSkills([]);
+      setDeletedSkills(new Set());
+      setModifiedCategories(new Set());
+      setNewCategories([]);
+      setDeletedCategories(new Set());
+      setCategoryOrderChanged(false);
+      setSkillOrderChanged(false);
+      setIsUpdating(false);
+      return;
+    }
+
     const categoryTempIds = newCategories.map((c) => String(c.tempId));
     const categoryTempSet = new Set(categoryTempIds);
 
@@ -148,10 +199,13 @@ export default function SkillsSection() {
           invert: latest.invert,
           category_id: latest.category_id,
           blurhashURL: latest.blurhashURL || '',
+          link: latest.link ?? null,
+          position: latest.position ?? null,
         },
       };
     });
     const skillTempIds = newSkills.map(({ skill }) => String(skill.id));
+    const skillTempSet = new Set(skillTempIds);
 
     const updateSkillKeys = Array.from(modifiedSkills).filter((key) => {
       const [, skillStr] = key.split('-');
@@ -171,6 +225,7 @@ export default function SkillsSection() {
                 title: skill.title,
                 icon: skill.icon,
                 invert: skill.invert,
+                link: skill.link ?? null,
               },
             },
           ]
@@ -190,6 +245,19 @@ export default function SkillsSection() {
           position: i,
         }))
       : [];
+    // Positions are dense per category and sent for every category, mirroring
+    // categoryOrder: reordering one category backfills the others so the
+    // public nulls-last ordering never splits a category in two groups.
+    const skillOrder = skillOrderChanged
+      ? categories.flatMap((cat) =>
+          cat.skills.map((skill, index) => ({
+            id: skillTempSet.has(String(skill.id))
+              ? `skill:${skill.id}`
+              : skill.id,
+            position: index,
+          }))
+        )
+      : [];
 
     try {
       let retainedCategories = categoryTempIds;
@@ -199,6 +267,7 @@ export default function SkillsSection() {
       let retainedSkillDeletes = deleteSkillIds;
       let retainedCategoryDeletes = deleteCategoryIds;
       let retainedOrder = categoryOrderChanged;
+      let retainedSkillOrder = skillOrderChanged;
       // Committed-only view of the categories, kept in sync with setCategories
       // so the revert baseline never stores stale temp ids.
       let remappedCategories = categories;
@@ -210,6 +279,7 @@ export default function SkillsSection() {
         deleteSkills: deleteSkillIds,
         deleteCategories: deleteCategoryIds,
         categoryOrder,
+        skillOrder,
         updateCategories,
         updateSkills,
       });
@@ -333,11 +403,20 @@ export default function SkillsSection() {
           );
         }
         setCategoryOrderChanged(retainedOrder);
-      }
 
-      if (transDirty) {
-        const tErrs = await saveTranslations();
-        errors.push(...tErrs);
+        if (skillOrderChanged) {
+          // Skill reorder evidence is namespaced (`skill:<id>`) so a skill id
+          // can never be mistaken for a reordered category id.
+          const reordered = new Set(evidence.reordered.map(String));
+          retainedSkillOrder = skillOrder.some((item) => {
+            const resolved =
+              typeof item.id === 'string'
+                ? (skillRemap.get(item.id.replace('skill:', '')) ?? item.id)
+                : item.id;
+            return !reordered.has(`skill:${resolved}`);
+          });
+        }
+        setSkillOrderChanged(retainedSkillOrder);
       }
 
       const revalidationMessage = revalidationWarning(batch);
@@ -351,7 +430,8 @@ export default function SkillsSection() {
         retainedCategoryUpdates.length +
         retainedSkillDeletes.length +
         retainedCategoryDeletes.length +
-        (retainedOrder ? 1 : 0);
+        (retainedOrder ? 1 : 0) +
+        (retainedSkillOrder ? 1 : 0);
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -378,14 +458,17 @@ export default function SkillsSection() {
     modifiedCategories,
     modifiedSkills,
     categoryOrderChanged,
-    transDirty,
-    saveTranslations,
-    t,
+    skillOrderChanged,
   ]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the last committed snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setCategories(JSON.parse(JSON.stringify(originalCategories)));
+    } else {
+      fetchData();
+    }
     setModifiedSkills(new Set());
     setNewSkills([]);
     setDeletedSkills(new Set());
@@ -393,7 +476,7 @@ export default function SkillsSection() {
     setNewCategories([]);
     setDeletedCategories(new Set());
     setCategoryOrderChanged(false);
-    revertTranslations();
+    setSkillOrderChanged(false);
     setError(null);
   };
 
@@ -426,6 +509,11 @@ export default function SkillsSection() {
       setError(t('skills.errorRequiredFields'));
       return;
     }
+    const link = ns.link?.trim() || '';
+    if (!isValidHttpUrl(link)) {
+      setError(t('skills.errorInvalidLink'));
+      return;
+    }
     const tempId = Date.now();
     const skill: EditableSkill = {
       id: tempId,
@@ -434,6 +522,9 @@ export default function SkillsSection() {
       invert: ns.invert || false,
       category_id: catId,
       blurhashURL: ns.blurhashURL || '',
+      link: link === '' ? null : link,
+      // New skills land last in their category; publishing makes that durable.
+      position: cat ? cat.skills.length : 0,
       isEditing: false,
     };
     setCategories((prev) =>
@@ -444,6 +535,7 @@ export default function SkillsSection() {
       )
     );
     setNewSkills((prev) => [...prev, { categoryId: catId, skill }]);
+    setSkillOrderChanged(true);
   };
 
   const toggleEditSkill = (catId: number, skillId: number) => {
@@ -536,10 +628,16 @@ export default function SkillsSection() {
     setCategories((prev) =>
       prev.map((c) =>
         c.id === catId
-          ? { ...c, skills: c.skills.filter((s) => s.id !== skillId) }
+          ? {
+              ...c,
+              skills: c.skills
+                .filter((s) => s.id !== skillId)
+                .map((skill, position) => ({ ...skill, position })),
+            }
           : c
       )
     );
+    setSkillOrderChanged(true);
   };
 
   const createCategory = () => {
@@ -594,7 +692,22 @@ export default function SkillsSection() {
     setModifiedSkills(
       (prev) => new Set([...prev].filter((key) => !key.startsWith(`${catId}-`)))
     );
-    setCategories((prev) => prev.filter((c) => c.id !== catId));
+    setDeletedSkills((prev) => {
+      const next = new Set(prev);
+      for (const skill of categories.find((cat) => cat.id === catId)?.skills ??
+        []) {
+        if (!newSkills.some((draft) => draft.skill.id === skill.id)) {
+          next.add(skill.id);
+        }
+      }
+      return next;
+    });
+    setCategories((prev) =>
+      prev
+        .filter((c) => c.id !== catId)
+        .map((category, position) => ({ ...category, position }))
+    );
+    setCategoryOrderChanged(true);
   };
 
   const moveCategory = (catId: number, dir: -1 | 1) => {
@@ -604,12 +717,34 @@ export default function SkillsSection() {
     if (newIdx < 0 || newIdx >= categories.length) return;
     const next = [...categories];
     [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
-    setCategories(next);
+    setCategories(
+      next.map((category, position) => ({ ...category, position }))
+    );
     setCategoryOrderChanged(true);
   };
 
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none';
+  const moveSkill = (catId: number, skillId: number, dir: -1 | 1) => {
+    const cat = categories.find((c) => c.id === catId);
+    const idx = cat?.skills.findIndex((s) => s.id === skillId) ?? -1;
+    if (!cat || idx < 0 || idx + dir < 0 || idx + dir >= cat.skills.length)
+      return;
+
+    setCategories((prev) =>
+      prev.map((category) => {
+        if (category.id !== catId) return category;
+        const next = [...category.skills];
+        [next[idx], next[idx + dir]] = [next[idx + dir], next[idx]];
+        // Positions are re-densified locally so the public site (which sorts
+        // by position) matches the order shown in the editor, and publishing
+        // persists exactly what the editor displays.
+        return {
+          ...category,
+          skills: next.map((s, i) => ({ ...s, position: i })),
+        };
+      })
+    );
+    setSkillOrderChanged(true);
+  };
 
   if (isLoading) {
     return (
@@ -633,260 +768,244 @@ export default function SkillsSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('common.translations')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-        {transLoading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <TranslationField
-              label={t('skills.translationTitleLabel')}
-              enValue={getField('en', 'title')}
-              itValue={getField('it', 'title')}
-              onChangeEn={(v) => setField('en', 'title', v)}
-              onChangeIt={(v) => setField('it', 'title', v)}
-              activeLocale={activeLocale}
-            />
-            <TranslationField
-              label={t('skills.translationSubtitleLabel')}
-              enValue={getField('en', 'subtitle')}
-              itValue={getField('it', 'subtitle')}
-              onChangeEn={(v) => setField('en', 'subtitle', v)}
-              onChangeIt={(v) => setField('it', 'subtitle', v)}
-              type="textarea"
-              rows={3}
-              activeLocale={activeLocale}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Category Management */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('skills.manageCategoriesTitle')}
-          </h2>
-          {!isCreatingCategory && (
+      <EditorToolbar
+        title={t('skills.manageCategoriesTitle')}
+        count={categories.length}
+        actions={
+          !isCreatingCategory ? (
             <button
               type="button"
               onClick={() => setIsCreatingCategory(true)}
-              className="flex items-center gap-2 px-4 py-2 min-h-[44px] bg-accent-violet-deep hover:bg-accent-violet text-white font-medium rounded-lg transition-colors"
+              className={editorPrimaryButtonClass}
             >
               <Plus className="w-4 h-4" />
               {t('skills.addCategory')}
             </button>
-          )}
-        </div>
-        {isCreatingCategory && (
-          <div className="flex items-center gap-3 mb-4">
-            <input
-              type="text"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              className={`flex-1 ${inputClass}`}
-              placeholder={t('skills.categoryNamePlaceholder')}
-            />
+          ) : undefined
+        }
+      />
+      {isCreatingCategory && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            className={`flex-1 ${editorInputClass}`}
+            placeholder={t('skills.categoryNamePlaceholder')}
+          />
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={createCategory}
-              className="px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+              className={editorPrimaryButtonClass}
             >
-              {t('common.add')}
+              {t('editor.addDraft')}
             </button>
             <button
               type="button"
+              aria-label={t('common.cancel')}
               onClick={() => {
                 setIsCreatingCategory(false);
                 setNewCategoryName('');
               }}
-              className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg font-medium transition-colors"
+              className={editorSecondaryButtonClass}
             >
               <X className="w-4 h-4" />
             </button>
           </div>
-        )}
+        </div>
+      )}
+      {categories.length === 0 && !isCreatingCategory && (
+        <EmptyState message={t('skills.errorCategoryName')} />
+      )}
 
-        {categories.length === 0 && (
-          <EmptyState message={t('skills.errorCategoryName')} />
-        )}
-      </div>
-
-      {/* Categories & Skills */}
-      <div className="space-y-4">
+      <div className="space-y-6">
         {categories.map((cat, idx) => (
-          <div key={cat.id} className="bg-surface-card rounded-xl p-4 md:p-6">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                {renamingCategoryId === cat.id ? (
-                  <input
-                    aria-label={t('skills.categoryNamePlaceholder')}
-                    className={inputClass}
-                    value={cat.name}
-                    onChange={(event) =>
-                      renameCategory(cat.id, event.target.value)
-                    }
-                    onBlur={() => setRenamingCategoryId(null)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') setRenamingCategoryId(null);
-                    }}
-                  />
-                ) : (
-                  <h2 className="text-xl font-bold text-accent-violet">
-                    {cat.name}
-                  </h2>
-                )}
-                <button
-                  type="button"
-                  className="flex h-11 w-11 items-center justify-center text-text-muted hover:text-accent-violet"
-                  aria-label={`${t('skills.renameCategory')}: ${cat.name}`}
-                  onClick={() => setRenamingCategoryId(cat.id)}
-                >
-                  <Edit3 className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => moveCategory(cat.id, -1)}
-                  disabled={idx === 0}
-                  className="p-2 min-h-[44px] text-text-muted hover:text-accent-violet disabled:opacity-30"
-                  title={t('common.moveUp')}
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveCategory(cat.id, 1)}
-                  disabled={idx === categories.length - 1}
-                  className="p-2 min-h-[44px] text-text-muted hover:text-accent-violet disabled:opacity-30"
-                  title={t('common.moveDown')}
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <div className="w-px h-6 bg-surface-raised mx-1" />
-                <button
-                  type="button"
-                  onClick={() => deleteCategory(cat.id)}
-                  className="p-2 min-h-[44px] text-red-400 hover:text-red-300"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {cat.skills.map((skill) => (
-                <div
+          <EditorGroup
+            key={cat.id}
+            count={cat.skills.length}
+            title={
+              renamingCategoryId === cat.id ? (
+                <input
+                  aria-label={t('skills.categoryNamePlaceholder')}
+                  className={editorInputClass}
+                  value={cat.name}
+                  onChange={(event) =>
+                    renameCategory(cat.id, event.target.value)
+                  }
+                  onBlur={() => setRenamingCategoryId(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') setRenamingCategoryId(null);
+                  }}
+                />
+              ) : (
+                cat.name
+              )
+            }
+            actions={
+              <CardToolbar
+                showReorder
+                isFirst={idx === 0}
+                isLast={idx === categories.length - 1}
+                onMoveUp={() => moveCategory(cat.id, -1)}
+                onMoveDown={() => moveCategory(cat.id, 1)}
+                onEdit={() => setRenamingCategoryId(cat.id)}
+                onDelete={() => deleteCategory(cat.id)}
+              />
+            }
+          >
+            <div className="space-y-3">
+              {cat.skills.map((skill, skillIdx) => (
+                <article
                   key={skill.id}
-                  className={`rounded-lg p-4 text-center transition-colors ${
-                    skill.isEditing
-                      ? 'bg-accent-violet/5 border border-accent-violet/20'
-                      : 'bg-surface-base '
+                  aria-labelledby={`skill-heading-${cat.id}-${skill.id}`}
+                  className={`rounded-xl border border-border-subtle bg-surface-base p-4 ${
+                    skill.isEditing ? 'border-accent-violet/40' : ''
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-semibold text-text-main truncate pr-2">
-                      {skill.title}
-                    </h3>
-                    <CardToolbar
-                      onEdit={() => toggleEditSkill(cat.id, skill.id)}
-                      onDelete={() => deleteSkill(cat.id, skill.id)}
-                    />
-                  </div>
-                  {skill.icon && !skill.isEditing && (
-                    <div className="mb-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    {skill.icon ? (
                       <Image
                         src={skill.icon}
-                        width={64}
-                        height={64}
-                        className={`mx-auto rounded-lg ${skill.invert ? 'dark:invert' : ''}`}
-                        alt={skill.title}
+                        width={32}
+                        height={32}
+                        className={`h-8 w-8 flex-shrink-0 rounded object-contain ${skill.invert ? 'dark:invert' : ''}`}
+                        alt=""
                         placeholder={skill.blurhashURL ? 'blur' : 'empty'}
                         blurDataURL={skill.blurhashURL ?? undefined}
                       />
+                    ) : (
+                      <span className="h-8 w-8 flex-shrink-0 rounded bg-surface-raised" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <h3
+                        id={`skill-heading-${cat.id}-${skill.id}`}
+                        className="truncate font-semibold text-text-main"
+                      >
+                        {skill.title || t('skills.skillTitlePlaceholder')}
+                      </h3>
+                      <p className="truncate text-xs text-text-muted">
+                        {skill.link
+                          ? skill.link
+                          : t('skills.skillLinkPlaceholder')}
+                        {skill.invert ? ` · ${t('skills.invertLabel')}` : ''}
+                      </p>
                     </div>
-                  )}
-                  {skill.isEditing ? (
-                    <div className="space-y-3 text-left">
-                      <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1">
-                          {t('skills.skillTitlePlaceholder')}
-                        </label>
-                        <input
-                          type="text"
-                          value={skill.title}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'title',
-                              e.target.value
-                            )
-                          }
-                          className={`${inputClass} text-sm`}
-                        />
+                    <div className="flex w-full justify-end sm:w-auto">
+                      <CardToolbar
+                        showReorder
+                        isFirst={skillIdx === 0}
+                        isLast={skillIdx === cat.skills.length - 1}
+                        onMoveUp={() => moveSkill(cat.id, skill.id, -1)}
+                        onMoveDown={() => moveSkill(cat.id, skill.id, 1)}
+                        onEdit={() => toggleEditSkill(cat.id, skill.id)}
+                        onDelete={() => deleteSkill(cat.id, skill.id)}
+                      />
+                    </div>
+                  </div>
+                  {skill.isEditing && (
+                    <div className="mt-4 space-y-4 text-left">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label
+                            htmlFor={`skill-title-${cat.id}-${skill.id}`}
+                            className={editorLabelClass}
+                          >
+                            {t('skills.skillTitlePlaceholder')}
+                          </label>
+                          <input
+                            id={`skill-title-${cat.id}-${skill.id}`}
+                            type="text"
+                            value={skill.title}
+                            onChange={(e) =>
+                              handleSkillChange(
+                                cat.id,
+                                skill.id,
+                                'title',
+                                e.target.value
+                              )
+                            }
+                            className={editorInputClass}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor={`skill-icon-${cat.id}-${skill.id}`}
+                            className={editorLabelClass}
+                          >
+                            {t('skills.iconUrlLabel')}
+                          </label>
+                          <input
+                            id={`skill-icon-${cat.id}-${skill.id}`}
+                            type="url"
+                            value={skill.icon}
+                            onChange={(e) =>
+                              handleSkillChange(
+                                cat.id,
+                                skill.id,
+                                'icon',
+                                e.target.value
+                              )
+                            }
+                            className={editorInputClass}
+                            placeholder={t('skills.skillIconPlaceholder')}
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-xs font-medium text-text-muted mb-1">
-                          Icon URL
-                        </label>
-                        <input
-                          type="url"
-                          value={skill.icon}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'icon',
-                              e.target.value
-                            )
-                          }
-                          className={`${inputClass} text-xs`}
-                          placeholder="https://example.com/icon.svg"
-                        />
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label
+                            htmlFor={`skill-link-${cat.id}-${skill.id}`}
+                            className={editorLabelClass}
+                          >
+                            {t('skills.skillLinkLabel')}
+                          </label>
+                          <input
+                            id={`skill-link-${cat.id}-${skill.id}`}
+                            type="url"
+                            value={skill.link ?? ''}
+                            onChange={(e) =>
+                              handleSkillChange(
+                                cat.id,
+                                skill.id,
+                                'link',
+                                e.target.value
+                              )
+                            }
+                            className={editorInputClass}
+                            placeholder={t('skills.skillLinkPlaceholder')}
+                          />
+                        </div>
+                        <div className="flex items-end pb-2">
+                          <label className="flex items-center gap-2 text-sm text-text-muted">
+                            <input
+                              type="checkbox"
+                              checked={skill.invert}
+                              onChange={(e) =>
+                                handleSkillChange(
+                                  cat.id,
+                                  skill.id,
+                                  'invert',
+                                  e.target.checked
+                                )
+                              }
+                              className="rounded"
+                            />
+                            {t('skills.invertLabel')}
+                          </label>
+                        </div>
                       </div>
-                      <label className="flex items-center gap-2 text-sm text-text-muted ">
-                        <input
-                          type="checkbox"
-                          checked={skill.invert}
-                          onChange={(e) =>
-                            handleSkillChange(
-                              cat.id,
-                              skill.id,
-                              'invert',
-                              e.target.checked
-                            )
-                          }
-                          className="rounded"
-                        />
-                        {t('skills.invertLabel')}
-                      </label>
                       <div className="flex gap-2">
                         <button
                           type="button"
                           onClick={() => cancelSkillEdit(cat.id, skill.id)}
-                          className="flex-1 py-1.5 text-sm bg-surface-raised text-white rounded-lg hover:bg-surface-raised"
+                          className={`flex-1 ${editorSecondaryButtonClass}`}
                         >
                           <X className="w-3 h-3 inline mr-1" />
                           {t('common.cancel')}
@@ -894,115 +1013,151 @@ export default function SkillsSection() {
                         <button
                           type="button"
                           onClick={() => saveSkillChanges(cat.id, skill.id)}
-                          className="flex-1 py-1.5 text-sm bg-accent-violet text-white rounded-lg hover:bg-accent-violet-deep"
+                          className={`flex-1 ${editorPrimaryButtonClass}`}
                         >
-                          {t('common.done')}
+                          {t('editor.applyDraft')}
                         </button>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-center gap-2">
-                      {skill.invert && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-accent-violet/10 text-accent-violet ">
-                          {t('skills.invertLabel')}
-                        </span>
-                      )}
-                    </div>
                   )}
-                </div>
+                </article>
               ))}
 
-              {/* New Skill Form */}
               {cat.newSkill && (
-                <div className="bg-surface-card rounded-lg p-4 border-2 border-dashed border-accent-violet/40">
-                  <h4 className="text-lg font-semibold text-accent-violet mb-3">
-                    {t('skills.newSkill')}
-                  </h4>
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={cat.newSkill.title || ''}
-                      onChange={(e) =>
-                        setCategories((prev) =>
-                          prev.map((c) =>
-                            c.id === cat.id
-                              ? {
-                                  ...c,
-                                  newSkill: {
-                                    ...c.newSkill!,
-                                    title: e.target.value,
-                                  },
-                                }
-                              : c
-                          )
-                        )
-                      }
-                      className={`${inputClass} text-sm`}
-                      placeholder="Skill title"
-                    />
-                    <div className="flex gap-2 items-start">
-                      {cat.newSkill.icon && (
-                        <Image
-                          src={cat.newSkill.icon}
-                          width={48}
-                          height={48}
-                          className="rounded flex-shrink-0"
-                          alt=""
+                <div className="rounded-xl border border-dashed border-accent-violet/40 bg-surface-base p-4">
+                  <EditorToolbar title={t('skills.newSkill')} />
+                  <div className="mt-4 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label
+                          htmlFor={`new-skill-title-${cat.id}`}
+                          className={editorLabelClass}
+                        >
+                          {t('skills.skillTitlePlaceholder')}
+                        </label>
+                        <input
+                          id={`new-skill-title-${cat.id}`}
+                          type="text"
+                          value={cat.newSkill.title || ''}
+                          onChange={(e) =>
+                            setCategories((prev) =>
+                              prev.map((c) =>
+                                c.id === cat.id
+                                  ? {
+                                      ...c,
+                                      newSkill: {
+                                        ...c.newSkill!,
+                                        title: e.target.value,
+                                      },
+                                    }
+                                  : c
+                              )
+                            )
+                          }
+                          className={editorInputClass}
+                          placeholder={t('skills.skillTitlePlaceholder')}
                         />
-                      )}
-                      <input
-                        type="url"
-                        value={cat.newSkill.icon || ''}
-                        onChange={(e) =>
-                          setCategories((prev) =>
-                            prev.map((c) =>
-                              c.id === cat.id
-                                ? {
-                                    ...c,
-                                    newSkill: {
-                                      ...c.newSkill!,
-                                      icon: e.target.value,
-                                    },
-                                  }
-                                : c
-                            )
-                          )
-                        }
-                        className={`flex-1 ${inputClass} text-xs`}
-                        placeholder="https://example.com/icon.svg"
-                      />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor={`new-skill-icon-${cat.id}`}
+                          className={editorLabelClass}
+                        >
+                          {t('skills.iconUrlLabel')}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          {cat.newSkill.icon && (
+                            <Image
+                              src={cat.newSkill.icon}
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 flex-shrink-0 rounded object-contain"
+                              alt=""
+                            />
+                          )}
+                          <input
+                            id={`new-skill-icon-${cat.id}`}
+                            type="url"
+                            value={cat.newSkill.icon || ''}
+                            onChange={(e) =>
+                              setCategories((prev) =>
+                                prev.map((c) =>
+                                  c.id === cat.id
+                                    ? {
+                                        ...c,
+                                        newSkill: {
+                                          ...c.newSkill!,
+                                          icon: e.target.value,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
+                            }
+                            className={editorInputClass}
+                            placeholder={t('skills.skillIconPlaceholder')}
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <label className="flex items-center gap-2 text-sm text-text-muted ">
-                      <input
-                        type="checkbox"
-                        checked={cat.newSkill.invert || false}
-                        onChange={(e) =>
-                          setCategories((prev) =>
-                            prev.map((c) =>
-                              c.id === cat.id
-                                ? {
-                                    ...c,
-                                    newSkill: {
-                                      ...c.newSkill!,
-                                      invert: e.target.checked,
-                                    },
-                                  }
-                                : c
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label
+                          htmlFor={`new-skill-link-${cat.id}`}
+                          className={editorLabelClass}
+                        >
+                          {t('skills.skillLinkLabel')}
+                        </label>
+                        <input
+                          id={`new-skill-link-${cat.id}`}
+                          type="url"
+                          value={cat.newSkill.link || ''}
+                          onChange={(e) =>
+                            setCategories((prev) =>
+                              prev.map((c) =>
+                                c.id === cat.id
+                                  ? {
+                                      ...c,
+                                      newSkill: {
+                                        ...c.newSkill!,
+                                        link: e.target.value,
+                                      },
+                                    }
+                                  : c
+                              )
                             )
-                          )
-                        }
-                        className="rounded"
-                      />
-                      {t('skills.invertLabel')}
-                    </label>
+                          }
+                          className={editorInputClass}
+                          placeholder={t('skills.skillLinkPlaceholder')}
+                        />
+                      </div>
+                      <div className="flex items-end pb-2">
+                        <label className="flex items-center gap-2 text-sm text-text-muted">
+                          <input
+                            type="checkbox"
+                            checked={cat.newSkill.invert || false}
+                            onChange={(e) =>
+                              setCategories((prev) =>
+                                prev.map((c) =>
+                                  c.id === cat.id
+                                    ? {
+                                        ...c,
+                                        newSkill: {
+                                          ...c.newSkill!,
+                                          invert: e.target.checked,
+                                        },
+                                      }
+                                    : c
+                                )
+                              )
+                            }
+                            className="rounded"
+                          />
+                          {t('skills.invertLabel')}
+                        </label>
+                      </div>
+                    </div>
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => saveNewSkill(cat.id)}
-                        className="flex-1 py-1 text-sm bg-accent-violet text-white rounded-lg hover:bg-accent-violet-deep"
-                      >
-                        {t('common.add')}
-                      </button>
                       <button
                         type="button"
                         onClick={() =>
@@ -1014,28 +1169,36 @@ export default function SkillsSection() {
                             )
                           )
                         }
-                        className="flex-1 py-1 text-sm bg-surface-raised text-white rounded-lg hover:bg-surface-raised"
+                        className={`flex-1 ${editorSecondaryButtonClass}`}
                       >
                         <X className="w-3 h-3 inline mr-1" />
                         {t('common.cancel')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveNewSkill(cat.id)}
+                        className={`flex-1 ${editorPrimaryButtonClass}`}
+                      >
+                        {t('editor.addDraft')}
                       </button>
                     </div>
                   </div>
                 </div>
               )}
             </div>
-
-            <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => addNewSkill(cat.id)}
-                className="flex items-center gap-2 px-4 py-2 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                {t('skills.addSkill')}
-              </button>
-            </div>
-          </div>
+            {!cat.newSkill && (
+              <div className="mt-4">
+                <button
+                  type="button"
+                  onClick={() => addNewSkill(cat.id)}
+                  className={editorSecondaryButtonClass}
+                >
+                  <Plus className="w-4 h-4" />
+                  {t('skills.addSkill')}
+                </button>
+              </div>
+            )}
+          </EditorGroup>
         ))}
       </div>
 
@@ -1048,31 +1211,6 @@ export default function SkillsSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('skills.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'skills-section',
-          drafts: translations,
-        }}
-      >
-        <SkillsPreview
-          categories={categories.map((c) => ({
-            id: c.id,
-            name: c.name,
-            skills: c.skills.map((s) => ({
-              id: s.id,
-              title: s.title,
-              icon: s.icon,
-              invert: s.invert,
-              blurhashURL: s.blurhashURL,
-            })),
-          }))}
-        />
-      </PreviewModal>
     </fieldset>
   );
 }

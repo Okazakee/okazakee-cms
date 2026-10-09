@@ -5,6 +5,10 @@ import { i18nActions } from '@/app/actions/cms/sections/i18nActions';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import {
+  demoHeroTranslations,
+  demoRequestFormTranslations,
+} from '@/libs/demo/fixtures';
+import {
   computeTranslationDelta,
   isEmptyDelta,
 } from '@/libs/cms/translationDelta';
@@ -148,12 +152,25 @@ interface UseSectionTranslationsReturn {
   canEditTranslations: boolean;
   getField: (locale: CmsLocale, path: string) => string;
   setField: (locale: CmsLocale, path: string, value: string) => void;
+  deleteField: (locale: CmsLocale, path: string) => void;
   saveTranslations: () => Promise<string[]>;
   revertTranslations: () => void;
   clearError: () => void;
 }
 
 const EMPTY_LOCALE_FLAT: LocaleFlat = { en: {}, it: {} };
+
+/** Offline showcase slices keyed by translation section. */
+const DEMO_SECTIONS: Record<string, LocaleFlat> = {
+  'hero-section': {
+    en: { ...demoHeroTranslations.en },
+    it: { ...demoHeroTranslations.it },
+  },
+  'request-form': {
+    en: { ...demoRequestFormTranslations.en },
+    it: { ...demoRequestFormTranslations.it },
+  },
+};
 
 function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -165,6 +182,7 @@ export function useSectionTranslations(
   const canEditTranslations = useCmsStore(
     (state) => state.user?.role === 'admin'
   );
+  const demoMode = useCmsStore((state) => state.demoMode);
   const [translations, setTranslations] =
     useState<LocaleFlat>(EMPTY_LOCALE_FLAT);
   const [original, setOriginal] = useState<LocaleFlat>(EMPTY_LOCALE_FLAT);
@@ -175,6 +193,19 @@ export function useSectionTranslations(
   const isDirty = !deepEqual(translations, original);
 
   useEffect(() => {
+    // Offline showcase: fixture slice, no server round-trip.
+    if (demoMode) {
+      const fixture = DEMO_SECTIONS[sectionKey] ?? EMPTY_LOCALE_FLAT;
+      const next: LocaleFlat = {
+        en: { ...fixture.en },
+        it: { ...fixture.it },
+      };
+      setTranslations(JSON.parse(JSON.stringify(next)));
+      setOriginal(JSON.parse(JSON.stringify(next)));
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
     // The i18n GET is admin-only; do not trigger an unauthorized request for
     // editors (their translation controls are hidden anyway).
     if (!canEditTranslations) {
@@ -234,11 +265,12 @@ export function useSectionTranslations(
     return () => {
       cancelled = true;
     };
-  }, [sectionKey, canEditTranslations, beginLoad]);
+  }, [sectionKey, canEditTranslations, beginLoad, demoMode]);
 
   const getField = useCallback(
     (locale: CmsLocale, path: string): string => {
-      return translations[locale]?.[path] ?? '';
+      const fields = translations[locale];
+      return Object.hasOwn(fields, path) ? fields[path] : '';
     },
     [translations]
   );
@@ -253,9 +285,26 @@ export function useSectionTranslations(
     []
   );
 
+  const deleteField = useCallback((locale: CmsLocale, path: string) => {
+    setTranslations((prev) => {
+      const localeFields = prev[locale];
+      if (!(path in localeFields)) return prev;
+      const next = { ...localeFields };
+      delete next[path];
+      return { ...prev, [locale]: next };
+    });
+  }, []);
+
   const saveTranslations = useCallback(async (): Promise<string[]> => {
     const sections = buildTranslationSections(original, translations);
     if (Object.keys(sections).length === 0) return [];
+
+    // Offline showcase: commit locally with a beat for realism.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      setOriginal(JSON.parse(JSON.stringify(translations)));
+      return [];
+    }
 
     let result: Awaited<ReturnType<typeof i18nActions>>;
     try {
@@ -340,6 +389,7 @@ export function useSectionTranslations(
     canEditTranslations,
     getField,
     setField,
+    deleteField,
     saveTranslations,
     revertTranslations,
     clearError,

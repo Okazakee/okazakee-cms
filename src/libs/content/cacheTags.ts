@@ -22,6 +22,8 @@ export const cacheTags = {
   posts: 'posts',
   resume: 'resume',
   heroSection: 'hero_section',
+  /** Header chrome: the per-theme logos (the single `site_settings` row). */
+  siteSettings: 'site-settings',
 } as const;
 
 /** Entity-specific post detail tag: post:blog:<id> / post:portfolio:<id>. */

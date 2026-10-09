@@ -4,7 +4,9 @@ import {
   findAllowedCmsUser,
   getRequestOrigin,
   getSafeCmsNext,
+  getUserGithubId,
   getUserGithubUsername,
+  getVerifiedUserEmail,
   logCmsAuth,
   resolvePostAuthPath,
 } from '@/app/actions/cms/utils/auth';
@@ -49,15 +51,17 @@ export async function GET(request: Request) {
           );
         }
 
-        // Enforce the allowlist by email OR GitHub username. Uses the
-        // server-side admin client: anon/authenticated have no SELECT on
-        // cms_allowed_users (the allowlist is internal data).
+        // Enforce the allowlist: immutable GitHub ID -> verified email
+        // (returns immediately) -> legacy display handle (dual-allowed
+        // transition). Uses the server-side admin client:
+        // anon/authenticated have no SELECT on cms_allowed_users.
+        const githubUserId = getUserGithubId(user);
         const githubUsername = getUserGithubUsername(user);
-        const allowlistMatch = await findAllowedCmsUser(
-          getCmsAdminClient(),
-          user.email,
-          githubUsername
-        );
+        const allowlistMatch = await findAllowedCmsUser(getCmsAdminClient(), {
+          email: getVerifiedUserEmail(user),
+          githubUserId,
+          githubUsernameLegacy: githubUsername,
+        });
 
         logCmsAuth('callback-exchanged', {
           userId: user.id,

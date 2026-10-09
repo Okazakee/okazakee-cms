@@ -1,0 +1,154 @@
+import { describe, expect, it } from 'vitest';
+import {
+  committedImageMarkdown,
+  parseBodyImages,
+  pendingImageMarkdown,
+  quadActiveAt,
+  rewritePendingRef,
+  sanitizeImageAlt,
+  toggleInlineMarker,
+  validateBodyImages,
+  violetActiveAt,
+  wrapCodeFence,
+} from './postBody';
+
+describe('parseBodyImages', () => {
+  it('parses committed and pending refs with caption/hash split', () => {
+    const refs = parseBodyImages(
+      'a\n![Alt text-abc123](https://x.test/f.webp)\n![cap-pending:9](blob:u)\n![](https://x.test/g.webp)'
+    );
+    expect(refs).toHaveLength(3);
+    expect(refs[0]).toMatchObject({
+      caption: 'Alt text',
+      hash: 'abc123',
+      pending: false,
+      pendingId: null,
+    });
+    expect(refs[1]).toMatchObject({
+      caption: 'cap',
+      pending: true,
+      pendingId: '9',
+    });
+    expect(refs[2]).toMatchObject({ caption: '', hash: '' });
+  });
+
+  it('parses the real legacy shape (data-uri blur placeholder)', () => {
+    const refs = parseBodyImages(
+      '![Raspberry Pi Homelab-data:image/png;base64,iVBOR](https://h.test/blog/1/x.webp)'
+    );
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.caption).toBe('Raspberry Pi Homelab');
+    expect(refs[0]?.hash.startsWith('data:image/png')).toBe(true);
+  });
+});
+
+describe('sanitizeImageAlt', () => {
+  it('removes dashes and collapses space, falls back to filename', () => {
+    expect(sanitizeImageAlt('my-photo 2024', 'f.webp')).toBe('my photo 2024');
+    expect(sanitizeImageAlt('  ', 'my_file-name.PNG')).toBe('my file name');
+    expect(sanitizeImageAlt('', '')).toBe('image');
+  });
+});
+
+describe('pending/rewrite round-trip', () => {
+  it('rewrites only the matching pending id', () => {
+    const body = `x\n${pendingImageMarkdown('cap', 'a1', 'blob:u1')}\n${pendingImageMarkdown('cap', 'b2', 'blob:u2')}`;
+    const next = rewritePendingRef(
+      body,
+      'a1',
+      committedImageMarkdown('cap', 'h', 'https://h.test/f.webp')
+    );
+    expect(next).toContain('![cap-h](https://h.test/f.webp)');
+    expect(next).toContain('pending:b2');
+  });
+});
+
+describe('validateBodyImages', () => {
+  it('flags unbalanced syntax and dangling pending refs', () => {
+    const issues = validateBodyImages(
+      'ok ![a-b](https://h.test/x.webp)\nbroken ![alt(url)\n![c-pending:zz](blob:u)',
+      new Set(['aa'])
+    );
+    expect(issues.map((i) => i.line)).toEqual([2, 3]);
+  });
+
+  it('blocks session-local and alt-less images', () => {
+    expect(
+      validateBodyImages('![cap-pending:a](blob:u)', new Set(['a']))
+    ).toEqual([]);
+    const dead = validateBodyImages('![](blob:session-uuid)', new Set());
+    expect(dead).toHaveLength(1);
+    expect(dead[0]?.message).toContain('never uploaded');
+    const noAlt = validateBodyImages('![](https://h.test/x.webp)', new Set());
+    expect(noAlt).toHaveLength(1);
+    expect(noAlt[0]?.message).toContain('alt text');
+  });
+
+  it('passes legacy committed lines untouched', () => {
+    expect(
+      validateBodyImages(
+        '![No dash](https://h.test/x.webp)\n![ext](https://cdn.test/x.png)',
+        new Set()
+      )
+    ).toEqual([]);
+  });
+});
+
+describe('toggleInlineMarker', () => {
+  it('wraps and unwraps bold runs', () => {
+    const wrapped = toggleInlineMarker('hello world', 6, 11, '****');
+    expect(wrapped.text).toBe('hello ****world****');
+    const unwrapped = toggleInlineMarker(
+      wrapped.text,
+      wrapped.caretStart,
+      wrapped.caretEnd,
+      '****'
+    );
+    expect(unwrapped.text).toBe('hello world');
+  });
+
+  it('wraps violet runs and refuses to nest inside bold', () => {
+    expect(toggleInlineMarker('hello world', 6, 11, '*').text).toBe(
+      'hello *world*'
+    );
+    // Selection inside a **** run: refused, text unchanged.
+    expect(toggleInlineMarker('****world****', 5, 10, '*').text).toBe(
+      '****world****'
+    );
+  });
+
+  it('inserts an empty pair on a collapsed caret', () => {
+    expect(toggleInlineMarker('hi', 2, 2, '*')).toEqual({
+      text: 'hi**',
+      caretStart: 3,
+      caretEnd: 3,
+    });
+  });
+});
+
+describe('wrapCodeFence', () => {
+  it('isolates the selection on its own lines with blank gaps', () => {
+    const out = wrapCodeFence('before\nline\n after', 7, 11);
+    expect(out.text).toBe('before\n\n```\nline\n```\n\n after');
+  });
+});
+
+describe('quadActiveAt / violetActiveAt', () => {
+  it('detects wrapped selections and carets inside runs', () => {
+    // Wrapped: toggle would unwrap.
+    expect(quadActiveAt('a ****b**** c', 6, 7)).toBe(true);
+    // Caret inside the run.
+    expect(quadActiveAt('a ****b**** c', 6, 6)).toBe(true);
+    // Between runs: the found marker closes an earlier run.
+    expect(quadActiveAt('a ****b**** c', 12, 12)).toBe(false);
+    expect(quadActiveAt('plain', 2, 2)).toBe(false);
+  });
+
+  it('never reports bold runs as violet', () => {
+    expect(violetActiveAt('a *b* c', 3, 4)).toBe(true);
+    expect(violetActiveAt('a *b* c', 4, 4)).toBe(true);
+    expect(violetActiveAt('a ****b**** c', 7, 7)).toBe(false);
+    expect(violetActiveAt('a **b** c', 4, 5)).toBe(false);
+    expect(violetActiveAt('plain', 2, 2)).toBe(false);
+  });
+});

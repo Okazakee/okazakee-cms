@@ -33,6 +33,8 @@ import type {
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
+import { CAREER_ASSET_ROOT } from '@/libs/cms/storage/paths';
 import type { CareerEntry } from '@/types/fetchedData.types';
 import { isValidBlurhash } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
@@ -83,8 +85,6 @@ type CreateCareerData = {
   description_en: string;
   description_it: string;
   skills: string;
-  company_description_en: string;
-  company_description_it: string;
 };
 
 type UpdateCareerData = Partial<CreateCareerData>;
@@ -261,6 +261,7 @@ async function batchPublishCareer(
   try {
     await getCmsActionContext('admin');
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     for (const [index, item] of operation.creates.entries()) {
       const tempId = normalizeTempId(item.tempId, 'career', index);
@@ -293,8 +294,8 @@ async function batchPublishCareer(
         }
         uploaded = await uploadImmutablePreparedImage(
           admin,
-          'website',
-          'Website Assets/career',
+          bucket,
+          CAREER_ASSET_ROOT,
           item.data.company || 'company',
           prepared.image
         );
@@ -310,7 +311,7 @@ async function batchPublishCareer(
 
       if (error) {
         if (uploaded) {
-          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+          await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
         markFailed(evidence, { kind: 'create', tempId, error: error.message });
         continue;
@@ -368,8 +369,8 @@ async function batchPublishCareer(
 
         uploaded = await uploadImmutablePreparedImage(
           admin,
-          'website',
-          'Website Assets/career',
+          bucket,
+          CAREER_ASSET_ROOT,
           item.data.company || `company-${item.id}`,
           prepared.image
         );
@@ -386,7 +387,7 @@ async function batchPublishCareer(
 
       if (error) {
         if (uploaded) {
-          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+          await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
         markFailed(evidence, {
           kind: 'update',
@@ -400,7 +401,7 @@ async function batchPublishCareer(
         await removePublicFileIfDifferent(
           admin,
           previousLogo,
-          'website',
+          bucket,
           uploaded.path
         );
       }
@@ -431,9 +432,7 @@ async function batchPublishCareer(
             });
           }
         }
-        const deletable = operation.deletes.filter((id) =>
-          existingIds.has(id)
-        );
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
         if (deletable.length > 0) {
           const { data: deletedRows, error } = await admin
             .from('career_entries')
@@ -462,7 +461,7 @@ async function batchPublishCareer(
                 await removePublicFileIfPresent(
                   admin,
                   row.logo as string | null,
-                  'website'
+                  bucket
                 );
               }
             }
@@ -621,6 +620,7 @@ async function deleteCareer(
 ): Promise<CareerResult> {
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: existingCareer, error: fetchError } = await admin
       .from('career_entries')
       .select('id, logo')
@@ -641,7 +641,7 @@ async function deleteCareer(
     await removePublicFileIfPresent(
       admin,
       existingCareer.logo as string | null,
-      'website'
+      bucket
     );
 
     const revalidation = await invalidatePublicContent({
@@ -667,6 +667,7 @@ async function rollbackCareerCreate(entryId: number): Promise<CareerResult> {
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: entry, error: fetchError } = await admin
       .from('career_entries')
       .select('id, logo')
@@ -688,7 +689,7 @@ async function rollbackCareerCreate(entryId: number): Promise<CareerResult> {
       await removePublicFileIfPresent(
         admin,
         entry.logo as string | null,
-        'website'
+        bucket
       );
     }
 
@@ -716,6 +717,7 @@ async function uploadCareerLogo(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: existingCareer, error: fetchError } = await admin
       .from('career_entries')
       .select('id, company, logo')
@@ -756,13 +758,13 @@ async function uploadCareerLogo(
     // DB update cannot leave the row pointing at a deleted object. The
     // previous DB-referenced logo is removed AFTER the commit.
     const fileBase = buildUniqueAssetPath(
-      'Website Assets/career',
+      CAREER_ASSET_ROOT,
       existingCareer.company || 'company'
     );
     const fileName = `${fileBase}.${format === 'png' ? 'png' : 'webp'}`;
 
     const { error: uploadError } = await admin.storage
-      .from('website')
+      .from(bucket)
       .upload(fileName, buffer, {
         cacheControl: '3600',
         contentType: format === 'png' ? 'image/png' : 'image/webp',
@@ -772,7 +774,7 @@ async function uploadCareerLogo(
     if (uploadError) throw uploadError;
 
     const { data: urlData } = admin.storage
-      .from('website')
+      .from(bucket)
       .getPublicUrl(fileName);
 
     const updateData: { logo: string; blurhashurl?: string | null } = {
@@ -786,7 +788,7 @@ async function uploadCareerLogo(
       .eq('id', careerId);
 
     if (updateError) {
-      await removeStorageObjectBestEffort(admin, 'website', fileName);
+      await removeStorageObjectBestEffort(admin, bucket, fileName);
       throw updateError;
     }
 
@@ -795,7 +797,7 @@ async function uploadCareerLogo(
     await removePublicFileIfDifferent(
       admin,
       existingCareer.logo,
-      'website',
+      bucket,
       fileName
     );
 

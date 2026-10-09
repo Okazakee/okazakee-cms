@@ -2,6 +2,15 @@
 
 import { Languages } from 'lucide-react';
 import type { AppLocale } from '@/i18n/routing';
+import {
+  SIDEBAR_MOBILE_LABEL,
+  SIDEBAR_MOBILE_ROW,
+  SIDEBAR_MOBILE_ROW_NEUTRAL,
+  SIDEBAR_ROW,
+  SIDEBAR_ROW_ICON,
+  SIDEBAR_ROW_LABEL,
+  SIDEBAR_ROW_NEUTRAL,
+} from '@/components/layout/sidebarRowStyle';
 import useUiLocaleStore from '@/store/uiLocaleStore';
 
 // CMS UI language selector. Switching mutates uiLocaleStore: CmsIntlProvider
@@ -10,9 +19,12 @@ import useUiLocaleStore from '@/store/uiLocaleStore';
 export default function LanguageToggle({
   compact = false,
   sidebar = false,
+  mobile = false,
 }: {
   compact?: boolean;
   sidebar?: boolean;
+  /** Drawer row: heading-size label, unnumbered like the other footer rows. */
+  mobile?: boolean;
 }) {
   const locale = useUiLocaleStore((s) => s.locale);
   const setLocale = useUiLocaleStore((s) => s.setLocale);
@@ -23,16 +35,34 @@ export default function LanguageToggle({
     setLocale(newLocale);
   };
 
+  // The drawer row, not the desktop one: same heading-size shape as the
+  // section rows, but carrying no `01`–`N` index — the footer controls sit
+  // outside the numbered sequence.
+  if (mobile) {
+    return (
+      <button
+        type="button"
+        onClick={switchLanguage}
+        className={`${SIDEBAR_MOBILE_ROW} ${SIDEBAR_MOBILE_ROW_NEUTRAL}`}
+        data-umami-event="Language toggle"
+      >
+        <span className={SIDEBAR_MOBILE_LABEL}>
+          {isItalian ? 'Italiano' : 'English'}
+        </span>
+      </button>
+    );
+  }
+
   if (sidebar) {
     return (
       <button
         type="button"
         onClick={switchLanguage}
-        className="w-full flex items-center gap-3 p-3 rounded-lg bg-surface-card hover:bg-surface-raised text-text-main hover:text-text-main transition-all duration-200"
+        className={`${SIDEBAR_ROW} ${SIDEBAR_ROW_NEUTRAL}`}
         data-umami-event="Language toggle"
       >
-        <Languages className="w-4 h-4 flex-shrink-0" />
-        <span className="font-medium text-sm truncate">
+        <Languages className={SIDEBAR_ROW_ICON} />
+        <span className={SIDEBAR_ROW_LABEL}>
           {isItalian ? 'Italiano' : 'English'}
         </span>
       </button>

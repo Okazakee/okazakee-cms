@@ -98,8 +98,13 @@ export async function prepareSupabaseProject(ctx) {
   await cp(seedSource, paths.seedFile);
 
   const repoMigrations = path.join(repoRoot, 'supabase', 'migrations');
-  const entries = (await readdir(repoMigrations)).filter((name) =>
-    name.endsWith('.sql')
+  // Dev-clone migrations must never be replayed into this isolated public
+  // baseline: their schema is deliberately absent here.
+  const entries = (await readdir(repoMigrations)).filter(
+    (name) =>
+      name.endsWith('.sql') &&
+      !name.endsWith('_dev_staging.sql') &&
+      name !== '20261005234758_create_cms_migration_audit_ledger.sql'
   );
   entries.sort();
   for (const name of entries) {

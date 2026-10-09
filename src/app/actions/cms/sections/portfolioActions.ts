@@ -2,10 +2,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  finalizeStagedPostImage,
   getAdminClient,
   getCmsActionContext,
-  isValidHttpUrl,
   prepareImageUpload,
+  removePrefixBestEffort,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   removeStorageObjectBestEffort,
@@ -14,6 +15,15 @@ import {
   uploadImmutablePreparedImage,
   validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
+import {
+  applyBodyImageRewrites,
+  bodyUploadStaged,
+  captionOverridesFor,
+  cleanupOrphanedBodyImages,
+  removeBodyUploads,
+  uploadBodyImages,
+  validateBodyImagePayload,
+} from '@/app/actions/cms/utils/postBodyFiles';
 import {
   batchFailureSummary,
   batchHadCommits,
@@ -29,7 +39,15 @@ import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
+import {
+  PORTFOLIO_STAGING_PREFIX,
+  portfolioPostPrefix,
+} from '@/libs/cms/storage/paths';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
+import type { BodyImageUpload } from '@/utils/cms/postBody';
+import { hasPendingRefs } from '@/utils/cms/postBody';
+import { type PostButton, validatePostButtons } from '@/utils/cms/postButtons';
 import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
@@ -60,6 +78,8 @@ type PortfolioOperation =
         blurhashURL?: string;
         /** Client-generated temporary id; echoed back in `created`/`createdIds`. */
         tempId?: string;
+        /** Blob-staged body images; uploaded to the post folder after INSERT. */
+        bodyFiles?: BodyImageUpload[];
       }>;
       updates: Array<{
         id: number;
@@ -67,6 +87,8 @@ type PortfolioOperation =
         file?: File | null;
         currentImageUrl?: string;
         blurhashURL?: string;
+        /** Blob-staged body images; uploaded straight into the post folder. */
+        bodyFiles?: BodyImageUpload[];
       }>;
       deletes: number[];
     };
@@ -81,18 +103,13 @@ type CreatePortfolioData = {
   title_en: string;
   title_it: string;
   image: string;
-  source_link: string;
-  demo_link: string;
   description_en: string;
   description_it: string;
   body_en: string;
   body_it: string;
   blurhashURL: string;
   post_tags: string;
-  store_link: string;
-  fdroid_link?: string | null;
-  website?: string | null;
-  ios_store_link?: string | null;
+  buttons?: PostButton[];
   created_at?: string;
   author_id: string;
   hidden?: boolean;
@@ -103,9 +120,13 @@ type UpdatePortfolioData = Partial<CreatePortfolioData>;
 type PortfolioResult = MutationResult;
 
 // Validation functions
+type PortfolioDataValidation =
+  | { isValid: true; data: CreatePortfolioData | UpdatePortfolioData }
+  | { isValid: false; error: string };
+
 function validatePortfolioData(
   data: CreatePortfolioData | UpdatePortfolioData
-): { isValid: boolean; error?: string } {
+): PortfolioDataValidation {
   // Required fields validation
   if (
     data.title_en !== undefined &&
@@ -178,32 +199,14 @@ function validatePortfolioData(
     };
   }
 
-  // URL validation
-  if (data.source_link?.trim() && !isValidHttpUrl(data.source_link)) {
-    return { isValid: false, error: 'Source link must be a valid URL' };
+  // Buttons validation; returns the normalised list so the write carries
+  // exactly what was checked (preset labels dropped, urls trimmed).
+  const buttons = validatePostButtons(data.buttons);
+  if (!buttons.isValid) {
+    return { isValid: false, error: buttons.error };
   }
 
-  if (data.demo_link?.trim() && !isValidHttpUrl(data.demo_link)) {
-    return { isValid: false, error: 'Demo link must be a valid URL' };
-  }
-
-  if (data.store_link?.trim() && !isValidHttpUrl(data.store_link)) {
-    return { isValid: false, error: 'Store link must be a valid URL' };
-  }
-
-  if (data.fdroid_link?.trim() && !isValidHttpUrl(data.fdroid_link)) {
-    return { isValid: false, error: 'F-Droid link must be a valid URL' };
-  }
-
-  if (data.website?.trim() && !isValidHttpUrl(data.website)) {
-    return { isValid: false, error: 'Website link must be a valid URL' };
-  }
-
-  if (data.ios_store_link?.trim() && !isValidHttpUrl(data.ios_store_link)) {
-    return { isValid: false, error: 'iOS Store link must be a valid URL' };
-  }
-
-  return { isValid: true };
+  return { isValid: true, data: { ...data, buttons: buttons.buttons } };
 }
 
 export async function portfolioActions(
@@ -274,6 +277,15 @@ export async function portfolioActions(
   }
 }
 
+/** Storage origin for body orphan cleanup; null skips it (best-effort). */
+function readStorageOrigin(): string | null {
+  try {
+    return getCmsStorageOrigin();
+  } catch {
+    return null;
+  }
+}
+
 async function batchPublishPortfolio(
   operation: Extract<PortfolioOperation, { type: 'BATCH_PUBLISH' }>
 ): Promise<PortfolioResult> {
@@ -281,6 +293,7 @@ async function batchPublishPortfolio(
   try {
     const context = await getCmsActionContext('post-writer');
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     for (const [index, item] of operation.creates.entries()) {
       const tempId = normalizeTempId(item.tempId, 'portfolio', index);
@@ -290,6 +303,21 @@ async function batchPublishPortfolio(
           kind: 'create',
           tempId,
           error: validation.error ?? 'Invalid data',
+        });
+        continue;
+      }
+
+      // Blob-staged body images resolve here; unresolved refs must fail
+      // before the cover upload so nothing is written for a broken draft.
+      const bodyPayloadError = validateBodyImagePayload(item.bodyFiles, [
+        validation.data.body_en,
+        validation.data.body_it,
+      ]);
+      if (bodyPayloadError) {
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: bodyPayloadError,
         });
         continue;
       }
@@ -306,14 +334,14 @@ async function batchPublishPortfolio(
 
       const upload = await uploadImmutablePreparedImage(
         admin,
-        'website',
-        'Website Assets/portfolio',
-        item.data.title_en || 'untitled',
+        bucket,
+        PORTFOLIO_STAGING_PREFIX,
+        validation.data.title_en || 'untitled',
         prepared.image
       );
 
       const insertData = {
-        ...item.data,
+        ...validation.data,
         author_id: item.data.author_id || context.user.id,
         image: upload.publicUrl,
         blurhashURL: prepared.image.blurhash,
@@ -326,9 +354,87 @@ async function batchPublishPortfolio(
         .single();
 
       if (error) {
-        await removeStorageObjectBestEffort(admin, 'website', upload.path);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
         markFailed(evidence, { kind: 'create', tempId, error: error.message });
         continue;
+      }
+
+      // The row id exists only after the INSERT, so staged body images are
+      // uploaded into the per-post folder now and the markdown is rewritten
+      // to the committed URLs. Any failure rolls the row back: a created
+      // row must never keep `pending:` refs behind.
+      let bodyStaged: string[] = [];
+      try {
+        const bodyUpload = await uploadBodyImages(
+          admin,
+          bucket,
+          portfolioPostPrefix(data.id as number),
+          validation.data.title_en || 'untitled',
+          item.bodyFiles,
+          captionOverridesFor([
+            validation.data.body_en,
+            validation.data.body_it,
+          ])
+        );
+        bodyStaged = bodyUpload.staged;
+        const rewrittenBodies = applyBodyImageRewrites(
+          {
+            body_en: validation.data.body_en,
+            body_it: validation.data.body_it,
+          },
+          bodyUpload.rewrites
+        );
+        if (
+          rewrittenBodies.body_en !== validation.data.body_en ||
+          rewrittenBodies.body_it !== validation.data.body_it
+        ) {
+          const { error: bodyError } = await admin
+            .from('portfolio_posts')
+            .update({
+              body_en: rewrittenBodies.body_en,
+              body_it: rewrittenBodies.body_it,
+            })
+            .eq('id', data.id);
+          if (bodyError) throw bodyError;
+        }
+      } catch (error) {
+        await admin.from('portfolio_posts').delete().eq('id', data.id);
+        await removeStorageObjectBestEffort(admin, bucket, upload.path);
+        await removeBodyUploads(admin, bucket, [
+          ...bodyStaged,
+          ...bodyUploadStaged(error),
+        ]);
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Body image publish failed',
+        });
+        continue;
+      }
+
+      // The row id exists only after the INSERT, so the staged upload is
+      // moved into its per-post folder now. The row keeps the staging URL
+      // when the move fails (still valid; the next update moves it).
+      const finalized = await finalizeStagedPostImage(
+        admin,
+        bucket,
+        upload.path,
+        portfolioPostPrefix(data.id as number)
+      );
+      if (finalized) {
+        const { error: finalizeError } = await admin
+          .from('portfolio_posts')
+          .update({ image: finalized.publicUrl })
+          .eq('id', data.id);
+        if (finalizeError) {
+          console.error(
+            'Error finalizing portfolio cover path:',
+            finalizeError
+          );
+        }
       }
 
       markCreated(evidence, tempId, data.id);
@@ -345,14 +451,88 @@ async function batchPublishPortfolio(
         continue;
       }
 
+      const bodyPayloadError = validateBodyImagePayload(item.bodyFiles, [
+        validation.data.body_en,
+        validation.data.body_it,
+      ]);
+      if (bodyPayloadError) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: bodyPayloadError,
+        });
+        continue;
+      }
+
       let uploaded: { publicUrl: string; path: string } | null = null;
-      const updateData: UpdatePortfolioData = { ...item.data };
-      // Trusted replacement source: previous object URL comes from the DB.
+      const updateData: UpdatePortfolioData = { ...validation.data };
+      // Trusted replacement source: the previous row (cover + bodies) is
+      // read from the DB, never trusted from the client payload.
       let previousImage: string | null = null;
+      let oldBodies: Array<string | undefined> = [];
+      let bodyStaged: string[] = [];
+
+      const { data: currentRow, error: fetchError } = await admin
+        .from('portfolio_posts')
+        .select('image, body_en, body_it')
+        .eq('id', item.id)
+        .single();
+
+      if (fetchError || !currentRow) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: fetchError?.message ?? 'Portfolio post not found',
+        });
+        continue;
+      }
+      previousImage = (currentRow.image as string | null) ?? null;
+      oldBodies = [
+        currentRow.body_en as string | undefined,
+        currentRow.body_it as string | undefined,
+      ];
+
+      if (item.bodyFiles && item.bodyFiles.length > 0) {
+        try {
+          const bodyUpload = await uploadBodyImages(
+            admin,
+            bucket,
+            portfolioPostPrefix(item.id),
+            validation.data.title_en || `portfolio-${item.id}`,
+            item.bodyFiles,
+            captionOverridesFor([
+              validation.data.body_en,
+              validation.data.body_it,
+            ])
+          );
+          bodyStaged = bodyUpload.staged;
+          const rewritten = applyBodyImageRewrites(
+            { body_en: updateData.body_en, body_it: updateData.body_it },
+            bodyUpload.rewrites
+          );
+          updateData.body_en = rewritten.body_en;
+          updateData.body_it = rewritten.body_it;
+        } catch (error) {
+          await removeBodyUploads(admin, bucket, [
+            ...bodyStaged,
+            ...bodyUploadStaged(error),
+          ]);
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Body image upload failed',
+          });
+          continue;
+        }
+      }
 
       if (item.file) {
         const prepared = await prepareImageUpload(item.file, item.blurhashURL);
         if (!prepared.success) {
+          await removeBodyUploads(admin, bucket, bodyStaged);
           markFailed(evidence, {
             kind: 'update',
             id: item.id,
@@ -361,26 +541,10 @@ async function batchPublishPortfolio(
           continue;
         }
 
-        const { data: currentRow, error: fetchError } = await admin
-          .from('portfolio_posts')
-          .select('image')
-          .eq('id', item.id)
-          .single();
-
-        if (fetchError) {
-          markFailed(evidence, {
-            kind: 'update',
-            id: item.id,
-            error: fetchError.message,
-          });
-          continue;
-        }
-        previousImage = (currentRow?.image as string | null) ?? null;
-
         uploaded = await uploadImmutablePreparedImage(
           admin,
-          'website',
-          'Website Assets/portfolio',
+          bucket,
+          portfolioPostPrefix(item.id),
           item.data.title_en || `portfolio-${item.id}`,
           prepared.image
         );
@@ -397,8 +561,9 @@ async function batchPublishPortfolio(
 
       if (error) {
         if (uploaded) {
-          await removeStorageObjectBestEffort(admin, 'website', uploaded.path);
+          await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
+        await removeBodyUploads(admin, bucket, bodyStaged);
         markFailed(evidence, {
           kind: 'update',
           id: item.id,
@@ -411,8 +576,23 @@ async function batchPublishPortfolio(
         await removePublicFileIfDifferent(
           admin,
           previousImage,
-          'website',
+          bucket,
           uploaded.path
+        );
+      }
+
+      // Body objects the new markdown dropped (same-prefix only, covers
+      // always kept). Best-effort, never fails the publish.
+      const storageOrigin = readStorageOrigin();
+      if (storageOrigin) {
+        await cleanupOrphanedBodyImages(
+          admin,
+          bucket,
+          storageOrigin,
+          portfolioPostPrefix(item.id),
+          oldBodies,
+          [updateData.body_en, updateData.body_it],
+          [previousImage, uploaded?.publicUrl]
         );
       }
 
@@ -442,9 +622,7 @@ async function batchPublishPortfolio(
             });
           }
         }
-        const deletable = operation.deletes.filter((id) =>
-          existingIds.has(id)
-        );
+        const deletable = operation.deletes.filter((id) => existingIds.has(id));
         if (deletable.length > 0) {
           const { data: deletedRows, error } = await admin
             .from('portfolio_posts')
@@ -473,7 +651,15 @@ async function batchPublishPortfolio(
                 await removePublicFileIfPresent(
                   admin,
                   row.image as string | null,
-                  'website'
+                  bucket
+                );
+                // Per-post folder: covers body assets the image column never
+                // referenced. Legacy rows may also hold a pre-reorg URL, which
+                // the cover removal above already handled.
+                await removePrefixBestEffort(
+                  admin,
+                  bucket,
+                  portfolioPostPrefix(row.id as number)
                 );
               }
             }
@@ -528,11 +714,14 @@ async function batchPublishPortfolio(
   }
 }
 async function getPortfolioData(
-  supabase: SupabaseClient
+  _supabase: SupabaseClient
 ): Promise<PortfolioResult> {
   try {
-    // For CMS, fetch all portfolio posts without limit
-    const { data: portfolioPosts, error } = await supabase
+    // CMS lists include drafts: published-only RLS hides them from session
+    // reads, so this goes through the admin client after the requireAuth
+    // gate in portfolioActions (service-role-after-check). Authorized CMS
+    // users only; the public site never calls this path.
+    const { data: portfolioPosts, error } = await getAdminClient()
       .from('portfolio_posts')
       .select('*')
       .order('created_at', { ascending: false });
@@ -549,10 +738,12 @@ async function getPortfolioData(
   }
 }
 
-async function getAuthors(supabase: SupabaseClient): Promise<PortfolioResult> {
+async function getAuthors(_supabase: SupabaseClient): Promise<PortfolioResult> {
   try {
-    // Fetch all users who have profiles (have logged in at least once)
-    const { data: profiles, error } = await supabase
+    // Author picker: admin client after the requireAuth gate. Column set is
+    // the picker contract (id/display_name/avatar_url); email never leaves
+    // the allowlist through this path.
+    const { data: profiles, error } = await getAdminClient()
       .from('user_profiles')
       .select('id, display_name, avatar_url')
       .order('display_name', { ascending: true });
@@ -586,9 +777,16 @@ async function createPortfolio(
     }
 
     const { id: userId } = await requireAllowedPostWriter();
+    // Legacy single-shot path has no body-file upload: refuse staged refs.
+    if (hasPendingRefs(data.body_en, data.body_it)) {
+      return {
+        success: false,
+        error: 'Body images must be published through batch publish',
+      };
+    }
     const insertData = {
-      ...data,
-      blurhashURL: data.blurhashURL ?? '',
+      ...validation.data,
+      blurhashURL: validation.data.blurhashURL ?? '',
       author_id: data.author_id || userId,
     };
 
@@ -633,6 +831,13 @@ async function updatePortfolio(
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
+    // Legacy single-shot path has no body-file upload: refuse staged refs.
+    if (hasPendingRefs(data.body_en, data.body_it)) {
+      return {
+        success: false,
+        error: 'Body images must be published through batch publish',
+      };
+    }
 
     const admin = getAdminClient();
     const { data: existingPortfolio, error: fetchError } = await admin
@@ -647,7 +852,7 @@ async function updatePortfolio(
 
     const { data: updatedPortfolio, error } = await admin
       .from('portfolio_posts')
-      .update(data)
+      .update(validation.data)
       .eq('id', id)
       .select()
       .single();
@@ -680,6 +885,7 @@ async function deletePortfolio(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     const { data: existingPortfolio, error: fetchError } = await admin
       .from('portfolio_posts')
       .select('id, image')
@@ -700,8 +906,9 @@ async function deletePortfolio(
     await removePublicFileIfPresent(
       admin,
       existingPortfolio.image as string | null,
-      'website'
+      bucket
     );
+    await removePrefixBestEffort(admin, bucket, portfolioPostPrefix(id));
 
     const revalidation = await invalidatePublicContent({
       entity: 'portfolio',
@@ -740,6 +947,7 @@ async function uploadPortfolioImageForNewPost(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     // Shared format-aware pipeline: extension + MIME follow the actual
     // processed format (WebP passthrough or Sharp fallback to PNG).
@@ -753,8 +961,8 @@ async function uploadPortfolioImageForNewPost(
 
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
-      'Website Assets/portfolio',
+      bucket,
+      PORTFOLIO_STAGING_PREFIX,
       titleEn || 'untitled',
       prepared.image
     );
@@ -788,6 +996,7 @@ async function rollbackPortfolioCreate(
   }
   try {
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
     // The row is the authoritative state: delete it first, then remove the
     // uploaded image best-effort. Storage-first would leave a surviving row
     // pointing at a deleted object if the DB delete failed.
@@ -796,7 +1005,7 @@ async function rollbackPortfolioCreate(
       .delete()
       .eq('id', postId);
     if (error) throw error;
-    await removeStorageObjectBestEffort(admin, 'website', imagePath);
+    await removeStorageObjectBestEffort(admin, bucket, imagePath);
     return { success: true };
   } catch (error) {
     console.error('Error rolling back portfolio create:', error);
@@ -830,6 +1039,7 @@ async function uploadPortfolioImage(
     }
 
     const admin = getAdminClient();
+    const bucket = getCmsStorageBucket();
 
     const { data: existingPortfolio, error: fetchError } = await admin
       .from('portfolio_posts')
@@ -856,8 +1066,8 @@ async function uploadPortfolioImage(
     // object. The previous DB-referenced object is removed AFTER the commit.
     const upload = await uploadImmutablePreparedImage(
       admin,
-      'website',
-      'Website Assets/portfolio',
+      bucket,
+      portfolioPostPrefix(portfolioId),
       existingPortfolio.title_en || `portfolio-${portfolioId}`,
       prepared.image
     );
@@ -876,14 +1086,14 @@ async function uploadPortfolioImage(
 
     if (updateError) {
       // Best-effort staged cleanup must never mask the DB error.
-      await removeStorageObjectBestEffort(admin, 'website', upload.path);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
     await removePublicFileIfDifferent(
       admin,
       existingPortfolio.image,
-      'website',
+      bucket,
       upload.path
     );
 

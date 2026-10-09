@@ -59,8 +59,8 @@ export const testAccounts = [
   },
 ];
 
-/** Storage bucket that mirrors the production asset bucket. */
-export const storageBucket = 'website';
+/** Storage bucket used by the isolated loopback fixture (never prod). */
+export const storageBucket = 'website-dev';
 
 /** Small deterministic assets uploaded to loopback Storage. */
 export const storageAssets = [
@@ -133,6 +133,7 @@ export const cacheTagVocabulary = {
     'posts',
     'resume',
     'hero_section',
+    'site-settings',
   ],
   patterns: [/^post:(blog|portfolio):[^:]+$/, /^author:[^:]+$/],
 };

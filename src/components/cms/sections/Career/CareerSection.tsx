@@ -1,12 +1,22 @@
 'use client';
 
-import { Calendar, Globe, MapPin, Plus, X } from 'lucide-react';
+import { Calendar, Globe, MapPin, Plus } from 'lucide-react';
 import Image from 'next/image';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 import { careerActions } from '@/app/actions/cms/sections/careerActions';
 import { CardToolbar } from '@/components/cms/shared/CardToolbar';
 import { ConfirmDialog } from '@/components/cms/shared/ConfirmDialog';
+import { Dropdown } from '@/components/cms/shared/Dropdown';
+import {
+  EditorGroup,
+  EditorToolbar,
+  editorInputClass,
+  editorLabelClass,
+  editorPrimaryButtonClass,
+  editorRowClass,
+  editorSecondaryButtonClass,
+} from '@/components/cms/shared/EditorBody';
 import { EmptyState } from '@/components/cms/shared/EmptyState';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
 import { FileDropzone } from '@/components/cms/shared/FileDropzone';
@@ -14,8 +24,6 @@ import { LocaleToggle } from '@/components/cms/shared/LocaleToggle';
 import { SectionActions } from '@/components/cms/shared/SectionActions';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { TranslationField } from '@/components/cms/shared/TranslationField';
-import { PreviewModal } from '@/components/common/cms/PreviewModal';
-import { CareerPreview } from '@/components/common/cms/previews/CareerPreview';
 import {
   mergeServerWithDrafts,
   readBatchEvidence,
@@ -25,8 +33,8 @@ import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
-import { useSectionTranslations } from '@/hooks/cms/useSectionTranslations';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { demoCareer } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { CareerEntry, RemoteType } from '@/types/fetchedData.types';
 
@@ -47,8 +55,6 @@ interface CareerFormData {
   endDate: string;
   description_en: string;
   description_it: string;
-  company_description_en: string;
-  company_description_it: string;
   skills: string;
 }
 
@@ -63,8 +69,6 @@ const emptyForm: CareerFormData = {
   endDate: '',
   description_en: '',
   description_it: '',
-  company_description_en: '',
-  company_description_it: '',
   skills: '',
 };
 
@@ -81,13 +85,12 @@ export default function CareerSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [showConfirmRevert, setShowConfirmRevert] = useState(false);
   const [mode, setMode] = useState<FormMode>('list');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState<CareerFormData>(emptyForm);
   const [isCurrentPosition, setIsCurrentPosition] = useState(false);
-  const [activeLocale, setActiveLocale] = useState<'en' | 'it'>('en');
+  const activeLocale = useLocale() === 'it' ? 'it' : 'en';
   const [formLocale, setFormLocale] = useState<'en' | 'it'>('en');
   const [modifiedIds, setModifiedIds] = useState<Set<number>>(new Set());
   const [newEntries, setNewEntries] = useState<
@@ -102,22 +105,8 @@ export default function CareerSection() {
     generateBlurhash: true,
   });
 
-  const {
-    translations,
-    isDirty: transDirty,
-    isLoading: transLoading,
-    error: transError,
-    getField,
-    setField,
-    saveTranslations,
-    revertTranslations,
-  } = useSectionTranslations('career-section');
-
   const isDirty =
-    modifiedIds.size > 0 ||
-    newEntries.length > 0 ||
-    deletedIds.size > 0 ||
-    transDirty;
+    modifiedIds.size > 0 || newEntries.length > 0 || deletedIds.size > 0;
   useSectionDirty('career', isDirty);
 
   const beginLoad = useLatestRequest();
@@ -129,6 +118,14 @@ export default function CareerSection() {
     }) => {
       const current = beginLoad();
       setIsLoading(true);
+      // Offline showcase: fixture entries, no server round-trip.
+      if (useCmsStore.getState().demoMode) {
+        if (!current()) return;
+        setEntries(JSON.parse(JSON.stringify(demoCareer)));
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
       try {
         const r = await careerActions({ type: 'GET' });
         if (!current()) return;
@@ -169,8 +166,6 @@ export default function CareerSection() {
       endDate: entry.endDate ?? '',
       description_en: entry.description_en ?? '',
       description_it: entry.description_it ?? '',
-      company_description_en: entry.company_description_en ?? '',
-      company_description_it: entry.company_description_it ?? '',
       skills: entry.skills ?? '',
     });
     setIsCurrentPosition(!entry.endDate);
@@ -208,8 +203,6 @@ export default function CareerSection() {
       description_en: formData.description_en,
       description_it: formData.description_it,
       skills: formData.skills,
-      company_description_en: formData.company_description_en,
-      company_description_it: formData.company_description_it,
       created_at: new Date().toISOString(),
     };
     setEntries((prev) => [...prev, entry]);
@@ -238,8 +231,6 @@ export default function CareerSection() {
               description_en: formData.description_en,
               description_it: formData.description_it,
               skills: formData.skills,
-              company_description_en: formData.company_description_en,
-              company_description_it: formData.company_description_it,
               logo_file: logoUpload.file || e.logo_file || null,
               blurhashURL: logoUpload.blurhash || e.blurhashURL || '',
             }
@@ -270,6 +261,28 @@ export default function CareerSection() {
     setIsUpdating(true);
     setError(null);
 
+    // Offline showcase: remap temp ids, materialize staged logos as object
+    // URLs, drop deletes, and clear every draft set.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      let nextFakeId =
+        Math.max(0, ...entries.map((e) => e.id)) + 1;
+      const next = entries
+        .filter((e) => !deletedIds.has(e.id))
+        .map((e) => ({
+          ...e,
+          id: e.id < 0 ? nextFakeId++ : e.id,
+          logo: e.logo_file ? URL.createObjectURL(e.logo_file) : e.logo,
+          logo_file: null,
+        }));
+      setEntries(next);
+      setModifiedIds(new Set());
+      setNewEntries([]);
+      setDeletedIds(new Set());
+      setIsUpdating(false);
+      return;
+    }
+
     // Pending creates may have been edited after creation: always derive the
     // payload from the latest `entries` entry, never the stale newEntries copy.
     const createTempIds = newEntries.map((entry) => String(entry.id));
@@ -295,8 +308,6 @@ export default function CareerSection() {
             description_en: entry.description_en || '',
             description_it: entry.description_it || '',
             skills: entry.skills || '',
-            company_description_en: entry.company_description_en || '',
-            company_description_it: entry.company_description_it || '',
           },
         },
       ];
@@ -326,8 +337,6 @@ export default function CareerSection() {
             description_en: entry.description_en || '',
             description_it: entry.description_it || '',
             skills: entry.skills || '',
-            company_description_en: entry.company_description_en || '',
-            company_description_it: entry.company_description_it || '',
           },
         },
       ];
@@ -387,11 +396,6 @@ export default function CareerSection() {
         setDeletedIds(new Set(retainedDeletes));
       }
 
-      if (transDirty) {
-        const tErrs = await saveTranslations();
-        errors.push(...tErrs);
-      }
-
       const revalidationMessage = revalidationWarning(batch);
       if (revalidationMessage)
         useCmsStore.getState().setWarning(revalidationMessage);
@@ -399,8 +403,7 @@ export default function CareerSection() {
       const remaining =
         retainedCreates.length +
         retainedUpdates.length +
-        retainedDeletes.length +
-        (transDirty && !batch.success ? 1 : 0);
+        retainedDeletes.length;
       if (!batch.success || remaining > 0 || errors.length > 0) {
         const message = errors.join('\n') || 'Publish did not fully succeed';
         setError(message);
@@ -415,30 +418,23 @@ export default function CareerSection() {
     } finally {
       setIsUpdating(false);
     }
-  }, [
-    entries,
-    newEntries,
-    deletedIds,
-    modifiedIds,
-    transDirty,
-    saveTranslations,
-    fetchData,
-  ]);
+  }, [entries, newEntries, deletedIds, modifiedIds, fetchData]);
 
   const handleRevert = () => {
     setShowConfirmRevert(false);
-    fetchData();
+    // Offline showcase: restore the fixture snapshot locally.
+    if (useCmsStore.getState().demoMode) {
+      setEntries(JSON.parse(JSON.stringify(demoCareer)));
+    } else {
+      fetchData();
+    }
     setModifiedIds(new Set());
     setNewEntries([]);
     setDeletedIds(new Set());
-    revertTranslations();
     setError(null);
   };
 
   useSectionCallbacks('career', handlePublish, handleRevert);
-
-  const inputClass =
-    'w-full px-3 py-2 bg-surface-base border border-border-subtle rounded-lg text-text-main focus:border-accent-violet focus:outline-none text-sm';
 
   if (isLoading)
     return (
@@ -450,85 +446,80 @@ export default function CareerSection() {
   if (mode === 'create' || mode === 'edit') {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-text-main ">
-            {mode === 'create'
+        <EditorToolbar
+          title={
+            mode === 'create'
               ? t('career.createNewEntry')
-              : t('career.editEntry')}
-          </h2>
-          <div className="flex items-center gap-3">
+              : t('career.editEntry')
+          }
+          actions={
             <LocaleToggle activeLocale={formLocale} onChange={setFormLocale} />
-            <button
-              type="button"
-              onClick={closeForm}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-raised rounded-lg hover:bg-surface-raised text-text-main "
-            >
-              <X className="w-4 h-4" />
-              {t('common.cancel')}
-            </button>
-          </div>
-        </div>
+          }
+        />
         <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-        {/* Role & Company */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('career.jobTitleLabel')} & {t('career.companyLabel')}
-          </h3>
-          <div className="grid md:grid-cols-2 gap-3">
+        <EditorGroup title={t('editor.groups.company')}>
+          <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-title" className={editorLabelClass}>
                 {t('career.jobTitleLabel')}{' '}
                 <span className="text-red-500">*</span>
               </label>
               <input
+                id="career-title"
                 type="text"
                 value={formData.title}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, title: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 placeholder={t('career.jobTitlePlaceholder')}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-company" className={editorLabelClass}>
                 {t('career.companyLabel')}{' '}
                 <span className="text-red-500">*</span>
               </label>
               <input
+                id="career-company"
                 type="text"
                 value={formData.company}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, company: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 placeholder={t('career.companyPlaceholder')}
                 required
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label htmlFor="career-website" className={editorLabelClass}>
               {t('career.websiteUrlLabel')}
             </label>
             <input
+              id="career-website"
               type="url"
               value={formData.website_url}
               onChange={(e) =>
                 setFormData((p) => ({ ...p, website_url: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('career.websiteUrlPlaceholder')}
             />
           </div>
+        </EditorGroup>
+
+        <EditorGroup title={t('career.logoGroupTitle')}>
           <FileDropzone
             label={t('career.selectLogo')}
             previewUrl={logoUpload.previewUrl}
             blurhash={logoUpload.blurhash}
             isDragging={logoUpload.isDragging}
             isProcessing={logoUpload.isProcessing}
+            hasPendingFile={Boolean(logoUpload.file)}
             error={logoUpload.error}
             dropzoneProps={{
               onDragOver: logoUpload.dropzoneProps.onDragOver,
@@ -541,40 +532,38 @@ export default function CareerSection() {
             onBrowse={logoUpload.openFileDialog}
             compact
           />
-        </div>
+        </EditorGroup>
 
-        {/* Time & Location */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('career.startDateLabel')} & {t('career.locationEnLabel')}
-          </h3>
-          <div className="grid md:grid-cols-2 gap-3">
+        <EditorGroup title={t('editor.groups.datesLocation')}>
+          <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-start" className={editorLabelClass}>
                 {t('career.startDateLabel')}{' '}
                 <span className="text-red-500">*</span>
               </label>
               <input
+                id="career-start"
                 type="date"
                 value={formData.startDate}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, startDate: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-main mb-1">
+              <label htmlFor="career-end" className={editorLabelClass}>
                 {t('career.endDateLabel')}
               </label>
               <input
+                id="career-end"
                 type="date"
                 value={formData.endDate}
                 onChange={(e) =>
                   setFormData((p) => ({ ...p, endDate: e.target.value }))
                 }
-                className={inputClass}
+                className={editorInputClass}
                 disabled={isCurrentPosition}
               />
               <label className="flex items-center gap-2 mt-2 text-sm text-text-muted ">
@@ -593,41 +582,36 @@ export default function CareerSection() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
+            <label htmlFor="career-remote" className={editorLabelClass}>
               {t('career.remoteTypeLabel')}
             </label>
-            <select
+            <Dropdown
+              id="career-remote"
               value={formData.remote}
-              onChange={(e) =>
-                setFormData((p) => ({
-                  ...p,
-                  remote: e.target.value as RemoteType,
-                }))
+              onChange={(value) =>
+                setFormData((p) => ({ ...p, remote: value as RemoteType }))
               }
-              className={inputClass}
-            >
-              <option value="full">{t('career.remoteFullOption')}</option>
-              <option value="hybrid">{t('career.remoteHybridOption')}</option>
-              <option value="onSite">{t('career.remoteOnSiteOption')}</option>
-            </select>
+              triggerClassName={editorInputClass}
+              options={[
+                { value: 'full', label: t('career.remoteFullOption') },
+                { value: 'hybrid', label: t('career.remoteHybridOption') },
+                { value: 'onSite', label: t('career.remoteOnSiteOption') },
+              ]}
+            />
           </div>
           <TranslationField
-            label={t('career.locationEnLabel')}
+            label={t('editor.fields.location')}
             enValue={formData.location_en}
             itValue={formData.location_it}
             onChangeEn={(v) => setFormData((p) => ({ ...p, location_en: v }))}
             onChangeIt={(v) => setFormData((p) => ({ ...p, location_it: v }))}
             activeLocale={formLocale}
           />
-        </div>
+        </EditorGroup>
 
-        {/* Content */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">
-            {t('career.descriptionEnLabel')}
-          </h3>
+        <EditorGroup title={t('editor.groups.details')}>
           <TranslationField
-            label={t('career.descriptionEnLabel')}
+            label={t('editor.fields.description')}
             enValue={formData.description_en}
             itValue={formData.description_it}
             onChangeEn={(v) =>
@@ -640,58 +624,42 @@ export default function CareerSection() {
             rows={4}
             activeLocale={formLocale}
           />
-          <TranslationField
-            label={t('career.companyDescEnLabel')}
-            enValue={formData.company_description_en}
-            itValue={formData.company_description_it}
-            onChangeEn={(v) =>
-              setFormData((p) => ({ ...p, company_description_en: v }))
-            }
-            onChangeIt={(v) =>
-              setFormData((p) => ({ ...p, company_description_it: v }))
-            }
-            type="textarea"
-            rows={3}
-            activeLocale={formLocale}
-          />
-        </div>
-
-        {/* Details */}
-        <div className="bg-surface-card rounded-xl p-4 md:p-6 space-y-4">
-          <h3 className="text-lg font-bold text-accent-violet">Skills</h3>
           <div>
-            <label className="block text-sm font-medium text-text-main mb-1">
-              Skills
+            <label htmlFor="career-skills" className={editorLabelClass}>
+              {t('career.skillsLabel')}
             </label>
             <input
+              id="career-skills"
               type="text"
               value={formData.skills}
               onChange={(e) =>
                 setFormData((p) => ({ ...p, skills: e.target.value }))
               }
-              className={inputClass}
+              className={editorInputClass}
               placeholder={t('career.skillsPlaceholder')}
             />
             <p className="text-xs text-text-muted mt-1">
-              Comma-separated list of skills
+              {t('career.skillsHint')}
             </p>
           </div>
-        </div>
+        </EditorGroup>
+
+
 
         <div className="flex gap-3 pt-2">
           <button
             type="button"
             onClick={closeForm}
-            className="px-4 py-2 min-h-[44px] bg-surface-raised hover:bg-surface-raised text-white rounded-lg"
+            className={editorSecondaryButtonClass}
           >
             {t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={mode === 'create' ? handleCreate : handleUpdate}
-            className="px-4 py-2 min-h-[44px] bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
+            className={editorPrimaryButtonClass}
           >
-            {mode === 'create' ? t('common.add') : t('common.done')}
+            {mode === 'create' ? t('editor.addDraft') : t('editor.applyDraft')}
           </button>
         </div>
       </div>
@@ -712,87 +680,26 @@ export default function CareerSection() {
             busy={isUpdating}
             onPublish={handlePublish}
             onRevert={() => setShowConfirmRevert(true)}
-            onPreview={() => setIsPreviewOpen(true)}
           />
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      {transError && <ErrorBanner message={transError} onDismiss={() => {}} />}
-
-      {/* Translations */}
-      <div className="bg-surface-card rounded-xl p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg md:text-xl font-bold text-accent-violet">
-            {t('common.translations')}
-          </h2>
-          <LocaleToggle
-            activeLocale={activeLocale}
-            onChange={setActiveLocale}
-          />
-        </div>
-        {transLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-accent-violet" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <TranslationField
-              label={t('career.translationTitleLabel')}
-              enValue={getField('en', 'title')}
-              itValue={getField('it', 'title')}
-              onChangeEn={(v) => setField('en', 'title', v)}
-              onChangeIt={(v) => setField('it', 'title', v)}
-              activeLocale={activeLocale}
-            />
-            <TranslationField
-              label={t('career.translationSubtitleLabel')}
-              enValue={getField('en', 'subtitle')}
-              itValue={getField('it', 'subtitle')}
-              onChangeEn={(v) => setField('en', 'subtitle', v)}
-              onChangeIt={(v) => setField('it', 'subtitle', v)}
-              type="textarea"
-              rows={3}
-              activeLocale={activeLocale}
-            />
-            {[
-              { key: 'month', label: t('career.monthLabel') },
-              { key: 'months', label: t('career.monthsLabel') },
-              { key: 'year', label: t('career.yearLabel') },
-              { key: 'years', label: t('career.yearsLabel') },
-              { key: 'present', label: t('career.presentLabel') },
-              { key: 'remote.full', label: t('career.remoteFullLabel') },
-              { key: 'remote.hybrid', label: t('career.remoteHybridLabel') },
-              { key: 'remote.onSite', label: t('career.remoteOnSiteLabel') },
-            ].map(({ key, label }) => (
-              <TranslationField
-                key={key}
-                label={label}
-                enValue={getField('en', key)}
-                itValue={getField('it', key)}
-                onChangeEn={(value) => setField('en', key, value)}
-                onChangeIt={(value) => setField('it', key, value)}
-                activeLocale={activeLocale}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* Entries */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-text-main ">
-          {t('career.careerEntriesTitle')}
-        </h2>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-accent-violet-deep hover:bg-accent-violet text-white rounded-lg"
-        >
-          <Plus className="w-4 h-4" />
-          {t('career.addCareerEntry')}
-        </button>
-      </div>
+      <EditorToolbar
+        title={t('career.careerEntriesTitle')}
+        count={entries.length}
+        actions={
+          <button
+            type="button"
+            onClick={openCreate}
+            className={editorPrimaryButtonClass}
+          >
+            <Plus className="w-4 h-4" />
+            {t('career.addCareerEntry')}
+          </button>
+        }
+      />
 
       {entries.length === 0 ? (
         <EmptyState message={t('career.noCareerEntries')} />
@@ -801,7 +708,7 @@ export default function CareerSection() {
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className="bg-surface-card rounded-xl p-4 md:p-6 flex items-start gap-4"
+              className={`${editorRowClass} flex items-start gap-4`}
             >
               {entry.logo ? (
                 <Image
@@ -847,7 +754,9 @@ export default function CareerSection() {
                   </span>
                   <span>
                     <MapPin className="w-3 h-3 inline mr-1" />
-                    {entry.location_en}
+                    {activeLocale === 'it'
+                      ? entry.location_it || entry.location_en
+                      : entry.location_en}
                   </span>
                 </div>
               </div>
@@ -869,18 +778,6 @@ export default function CareerSection() {
         onConfirm={handleRevert}
         onCancel={() => setShowConfirmRevert(false)}
       />
-      <PreviewModal
-        isOpen={isPreviewOpen}
-        onClose={() => setIsPreviewOpen(false)}
-        title={t('career.previewTitle')}
-        copy={{
-          locale: activeLocale,
-          namespace: 'career-section',
-          drafts: translations,
-        }}
-      >
-        <CareerPreview entries={entries} />
-      </PreviewModal>
     </fieldset>
   );
 }

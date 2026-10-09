@@ -14,6 +14,13 @@ type ProcessImageOptions = {
   maxWidth?: number;
   maxHeight?: number;
   quality?: number; // 0-1, default 0.85
+  /**
+   * How the box is filled once both bounds are set. `cover` (default) crops to
+   * the exact box, which suits portrait/thumbnail targets; `inside` shrinks the
+   * whole image into the bounds and keeps its aspect ratio, which wide assets
+   * like header logos need.
+   */
+  fit?: 'cover' | 'inside';
 };
 
 type ProcessImageResult = {
@@ -69,7 +76,15 @@ export async function processImageToWebP(
     let sourceWidth = img.width;
     let sourceHeight = img.height;
 
-    if (maxWidth && maxHeight) {
+    if (maxWidth && maxHeight && options?.fit === 'inside') {
+      // Contain mode: scale the whole image down into the bounds, never up,
+      // so a wide logo keeps its aspect ratio instead of being centre-cropped.
+      const scale = Math.min(1, maxWidth / img.width, maxHeight / img.height);
+      canvasWidth = Math.max(1, Math.round(img.width * scale));
+      canvasHeight = Math.max(1, Math.round(img.height * scale));
+      drawWidth = canvasWidth;
+      drawHeight = canvasHeight;
+    } else if (maxWidth && maxHeight) {
       // Cover mode: scale to cover the area, then crop to exact dimensions
       canvasWidth = maxWidth;
       canvasHeight = maxHeight;

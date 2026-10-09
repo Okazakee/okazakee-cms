@@ -1,0 +1,26 @@
+{
+  "header": {
+    "buttons": [
+      "Home",
+      "Skills",
+      "Carriera",
+      "Portfolio",
+      "Blog",
+      "Contatti",
+      "Curriculum"
+    ],
+    "language": "Lingua",
+    "resume": "Curriculum",
+    "theme": "Tema"
+  },
+  "footer": {
+    "left": "Creato con ❤️ da",
+    "right": "Torna su",
+    "middle": "P.IVA",
+    "source": "Codice Sorgente",
+    "darkmode": "Tema Scuro",
+    "lightmode": "Tema Chiaro",
+    "buttonTitle": "Clicca per copiare la P.IVA",
+    "privacyPolicy": "Informativa sulla Privacy"
+  }
+}
