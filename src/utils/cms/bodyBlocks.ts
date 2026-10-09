@@ -350,6 +350,17 @@ function inlineToMarkdown(node: Node, inPre: boolean): string {
     return childrenMarkdown(element, true);
   }
   const tag = element.tagName;
+  // Structural elements reached from an inline position (legacy nesting)
+  // serialize as their own blocks instead of flattening into text.
+  if (tag === 'FIGURE') return `\n${figureToMarkdown(element)}\n`;
+  if (tag === 'PRE') return `\n${preToMarkdown(element)}\n`;
+  if (tag === 'TABLE') return `\n${tableToMarkdown(element)}\n`;
+  if (tag === 'UL' || tag === 'OL') return `\n${listToMarkdown(element)}\n`;
+  if (tag === 'BLOCKQUOTE') {
+    const text = childrenMarkdown(element, false).trim();
+    return `\n${text.split('\n').map((line) => `> ${line}`).join('\n')}\n`;
+  }
+  if (tag === 'HR') return '\n---\n';
   if (tag === 'STRONG' || tag === 'B') {
     return `****${childrenMarkdown(element, false)}****`;
   }
@@ -403,7 +414,10 @@ function tableToMarkdown(table: HTMLElement): string {
   const rows = Array.from(table.querySelectorAll('tr'));
   const lines = rows.map((row) => {
     const cells = Array.from(row.querySelectorAll('th, td'));
-    return `| ${cells.map((cell) => childrenMarkdown(cell, false).replace(/\|/g, '\\|').trim()).join(' | ')} |`;
+    // Cells are single-line by construction: collapse structural breaks.
+    const text = (cell: Element): string =>
+      childrenMarkdown(cell, false).replace(/\s+/g, ' ').trim();
+    return `| ${cells.map((cell) => text(cell).replace(/\|/g, '\\|')).join(' | ')} |`;
   });
   if (lines.length > 1) {
     const columns = rows[0]?.querySelectorAll('th, td').length ?? 0;
@@ -431,7 +445,16 @@ function listToMarkdown(list: HTMLElement, depth = 0): string {
         parts.push(inlineToMarkdown(grand, false));
       }
     });
-    const text = parts.join('').replace(/\n+$/, '');
+    // Continuation lines stay inside the item via indentation so the
+    // list never splits open on the site.
+    const text = parts
+      .join('')
+      .split('\n')
+      .map((line, index) =>
+        index === 0 || line.startsWith(' ') ? line : `  ${line}`
+      )
+      .join('\n')
+      .replace(/\n+$/, '');
     lines.push(`${'  '.repeat(depth)}${marker} ${text}`);
   });
   return lines.join('\n');
@@ -494,12 +517,45 @@ function blockToMarkdown(element: HTMLElement): string {
     case 'paragraph':
     case 'P':
     case 'DIV':
-    case 'LI':
-      return childrenMarkdown(element, false).trim();
+    case 'LI': {
+      // A structural block nested inside running text (e.g. a figure
+      // dropped mid-paragraph before insertion was block-aware) splits
+      // back out into its own blocks, so captions and hashes are never
+      // flattened into text.
+      const parts: string[] = [];
+      let run = '';
+      const flushRun = () => {
+        if (run.trim() !== '') parts.push(run);
+        run = '';
+      };
+      element.childNodes.forEach((child) => {
+        if (
+          child.nodeType === 1 &&
+          NESTED_BLOCK_OUT.has((child as Element).tagName)
+        ) {
+          flushRun();
+          parts.push(blockToMarkdown(child as HTMLElement));
+        } else {
+          run += inlineToMarkdown(child, false);
+        }
+      });
+      flushRun();
+      return parts.join('\n\n');
+    }
     default:
       return childrenMarkdown(element, false).trim();
   }
 }
+
+const NESTED_BLOCK_OUT = new Set([
+  'FIGURE',
+  'PRE',
+  'TABLE',
+  'UL',
+  'OL',
+  'BLOCKQUOTE',
+  'HR',
+]);
 
 /**
  * Serializes the editor DOM back to storage markdown. Blocks join with

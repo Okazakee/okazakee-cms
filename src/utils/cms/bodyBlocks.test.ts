@@ -77,6 +77,17 @@ describe('markdownToEditorHtml', () => {
       '![New caption-abc123](https://h.test/f.webp)'
     );
   });
+
+  it('splits figures nested mid-paragraph back into blocks', () => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<p data-block="paragraph">before' +
+      '<figure data-block="image" data-hash="h"><img src="https://h.test/f.webp" alt=""><figcaption>Cap</figcaption></figure>' +
+      'after</p>';
+    expect(editorDomToMarkdown(host)).toBe(
+      'before\n\n![Cap-h](https://h.test/f.webp)\n\nafter'
+    );
+  });
 });
 
 describe('editorDomToMarkdown round-trips', () => {

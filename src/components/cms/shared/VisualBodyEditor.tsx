@@ -392,22 +392,109 @@ export function VisualBodyEditor({
     );
   }, [currentBlock, replaceBlock]);
 
+  const insertBlockNode = useCallback(
+    (node: Node) => {
+      const editor = editorRef.current;
+      const selection = window.getSelection();
+      if (!editor || !selection || selection.rangeCount === 0) {
+        editor?.appendChild(node);
+        emit();
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      if (!editor.contains(range.commonAncestorContainer)) return;
+      range.deleteContents();
+      const placeAfter = (anchor: Node) => {
+        selection.removeAllRanges();
+        const after = document.createRange();
+        after.setStartAfter(anchor);
+        after.collapse(true);
+        selection.addRange(after);
+        editor.focus();
+      };
+      // Inside figures, tables, lists or quotes: drop the node after the
+      // whole structural ancestor so blocks never nest inside each other.
+      const hard = findAncestor(selection.anchorNode, editor, (element) =>
+        ['FIGURE', 'TABLE', 'UL', 'OL', 'BLOCKQUOTE', 'PRE'].includes(
+          element.tagName
+        )
+      );
+      if (hard) {
+        hard.after(node);
+        placeAfter(node);
+        emit();
+        return;
+      }
+      // Inside a text block (or bare root): split it, or replace it when
+      // it holds nothing but the caret.
+      const text = findAncestor(selection.anchorNode, editor, (element) =>
+        [
+          'P',
+          'H1',
+          'H2',
+          'H3',
+          'H4',
+          'H5',
+          'H6',
+          'DIV',
+          'LI',
+          'TD',
+          'TH',
+        ].includes(element.tagName)
+      );
+      if (!text) {
+        range.insertNode(node);
+        placeAfter(node);
+        emit();
+        return;
+      }
+      const hasContent = Array.from(text.childNodes).some(
+        (child) =>
+          (child.nodeType === 3 && (child as Text).data.trim() !== '') ||
+          (child.nodeType === 1 && (child as Element).tagName !== 'BR')
+      );
+      if (!hasContent) {
+        text.replaceWith(node);
+        placeAfter(node);
+        emit();
+        return;
+      }
+      const afterRange = document.createRange();
+      afterRange.setStart(range.endContainer, range.endOffset);
+      const last = text.lastChild;
+      if (last) {
+        afterRange.setEndAfter(last);
+        const remainder = afterRange.extractContents();
+        const clone = text.cloneNode(false) as HTMLElement;
+        clone.appendChild(remainder);
+        if (!clone.textContent?.trim()) {
+          clone.appendChild(document.createElement('br'));
+        }
+        text.after(node, clone);
+        placeAfter(node);
+        emit();
+        return;
+      }
+      text.after(node);
+      placeAfter(node);
+      emit();
+    },
+    [emit]
+  );
+
   const insertTable = useCallback(() => {
-    const editor = editorRef.current;
-    const selection = window.getSelection();
-    if (!editor || !selection || selection.rangeCount === 0) return;
-    const range = selection.getRangeAt(0);
-    if (!editor.contains(range.commonAncestorContainer)) return;
     const table = document.createElement('table');
     table.setAttribute('data-block', 'table');
     table.innerHTML =
       '<tbody><tr><th>Header</th><th>Header</th></tr><tr><td></td><td></td></tr></tbody>';
-    range.deleteContents();
-    range.insertNode(table);
+    insertBlockNode(table);
+    const selection = window.getSelection();
     const firstCell = table.querySelector('th');
-    selection.selectAllChildren(firstCell ?? table);
-    selection.collapseToStart();
-  }, []);
+    if (selection && firstCell && document.contains(table)) {
+      selection.selectAllChildren(firstCell);
+      selection.collapseToStart();
+    }
+  }, [insertBlockNode]);
 
   const openLinkBar = useCallback(
     (href: string, fresh: boolean) => {
@@ -483,45 +570,53 @@ export function VisualBodyEditor({
   const insertImageFigure = useCallback(
     (staged: StagedBodyImage, atRange?: Range | null) => {
       const editor = editorRef.current;
-      const selection = window.getSelection();
-      const figureHtml =
-        `<figure data-block="image" contenteditable="false" data-pending="1" data-local-id="${staged.localId}" data-hash="">` +
-        `<img src="${staged.blobUrl}" alt="" draggable="false">` +
-        `<figcaption contenteditable="true" data-caption-hint="${t('markdownCaptionHint')}">${staged.alt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</figcaption>` +
-        `<button type="button" data-remove-image="1" aria-label="Remove image">×</button>` +
-        `</figure>`;
-      if (!editor || !selection || selection.rangeCount === 0) {
-        editor?.insertAdjacentHTML('beforeend', figureHtml);
-        emit();
-        return;
+      if (atRange && editor?.contains(atRange.commonAncestorContainer)) {
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(atRange);
       }
-      const range = atRange ?? selection.getRangeAt(0);
-      if (!editor.contains(range.commonAncestorContainer)) return;
-      range.deleteContents();
-      const wrapper = document.createElement('div');
-      wrapper.innerHTML = figureHtml;
-      const figure = wrapper.firstElementChild;
-      if (!figure) return;
-      range.insertNode(figure);
-      range.setStartAfter(figure);
-      range.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      emit();
+      const figure = document.createElement('figure');
+      figure.setAttribute('data-block', 'image');
+      figure.setAttribute('contenteditable', 'false');
+      figure.setAttribute('data-pending', '1');
+      figure.setAttribute('data-local-id', staged.localId);
+      figure.setAttribute('data-hash', '');
+      const img = document.createElement('img');
+      img.src = staged.blobUrl;
+      img.alt = '';
+      img.draggable = false;
+      const caption = document.createElement('figcaption');
+      caption.setAttribute('contenteditable', 'true');
+      caption.setAttribute(
+        'data-caption-hint',
+        t('markdownCaptionHint')
+      );
+      caption.textContent = staged.alt;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.setAttribute('data-remove-image', '1');
+      remove.setAttribute('aria-label', 'Remove image');
+      remove.textContent = '×';
+      figure.append(img, caption, remove);
+      insertBlockNode(figure);
     },
-    [emit, t]
+    [insertBlockNode, t]
   );
 
   const insertStagedAtRange = useCallback(
     (staged: StagedBodyImage[], range: Range | null) => {
       const editor = editorRef.current;
       if (!editor) return;
-      const live =
-        range && editor.contains(range.commonAncestorContainer)
-          ? range
-          : null;
-      for (const item of staged) insertImageFigure(item, live);
-      // Sequential inserts advance the shared range past each figure.
+      if (
+        range &&
+        editor.contains(range.commonAncestorContainer)
+      ) {
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+      for (const item of staged) insertImageFigure(item);
+      // Sequential inserts advance the live selection past each figure.
     },
     [insertImageFigure]
   );
