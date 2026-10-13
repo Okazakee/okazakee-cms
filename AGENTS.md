@@ -435,10 +435,12 @@ urgent it feels.
 - **Never use relative imports across directory boundaries.** Use `@/` path aliases defined in `tsconfig.json`.
 - **Never call Supabase directly from client components (browser).** Use server actions (`'use server'`) to proxy all Supabase calls.
 - **Never commit `.env.local`** or any file containing secrets.
-- **All new CMS work stays on `staging`.** Before editing, switch to the local
-  `staging` branch and confirm it tracks `origin/staging`; do not create or
-  work on feature branches. Preserve uncommitted work when switching. Commit
-  and push CMS changes only to `staging`, and only push when asked.
+- **Branch selection:** if the user's initial request explicitly names a
+  branch, use it subject to normal safety checks. If it does not say whether
+  to work on the production branch or another branch, ASK which branch before
+  modifying files, committing, or switching branches. Never silently default
+  to `staging`, `main`, or a feature branch; do not ask again once the user
+  has specified. (§13.1)
 - **Never commit or push directly to `main`.** Work on a branch and open a PR — the only exception is a direct push you explicitly asked for in the session (§13.1).
 - **Never open a PR, or merge one, without the owner's go-ahead.** A pushed branch is not a PR request; wait for confirmation (§13.1).
 - **Never add a `'use server'` directive inside a file that also has `'use client'`.** These directives are mutually exclusive at the file level.
