@@ -26,6 +26,8 @@ export default function Postcard({
       ? post.title_en
       : post[`title_${locale}` as keyof typeof post];
 
+  // Slug mirrors okazakee-ws `src/utils/postHref.ts:slugifyTitle` (same two
+  // replacements; the detail route keys on id, so this is SEO-only text).
   const slugifiedTitle = String(initTitle)
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')

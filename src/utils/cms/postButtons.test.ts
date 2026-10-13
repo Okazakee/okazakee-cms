@@ -5,6 +5,12 @@ import {
   validatePostButtons,
 } from './postButtons';
 
+// Cross-repo button contract: mirrors okazakee-ws
+// `src/utils/postButtons.test.ts` (identical kind list, legacy order,
+// `{kind,url,label?}` shape). Intentional asymmetry: this side *rejects*
+// a bad URL/kind/labelless custom at write time, while the site *drops*
+// the entry and falls back to the legacy columns.
+
 const legacyRow = {
   website: 'https://pearlift.app',
   source_link: 'https://github.com/okazakee/pearlift',

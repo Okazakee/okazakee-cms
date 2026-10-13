@@ -148,9 +148,9 @@ export function hasPendingRefs(
 /**
  * Structural validation for image lines. Legacy committed lines always
  * pass through (never break an unrelated edit) EXCEPT two shapes that
- * crash the public renderer or reference dead session objects:
- * - empty alt text (`![](…)`: markdown-to-jsx yields alt=undefined and
- *   PostFigure throws);
+ * reference dead session objects or drop out of the public renderer:
+ * - empty alt text (`![](…)`: markdown-to-jsx yields alt=undefined and the
+ *   public PostFigure returns null, so the image renders nothing);
  * - `blob:`/`data:` sources without a `pending:` marker (never uploaded;
  *   blob: dies with the editing session).
  * Only unbalanced syntax, unresolvable pending refs and those two shapes

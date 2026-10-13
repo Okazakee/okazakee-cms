@@ -40,6 +40,24 @@ describe('parseBodyImages', () => {
     expect(refs[0]?.caption).toBe('Raspberry Pi Homelab');
     expect(refs[0]?.hash.startsWith('data:image/png')).toBe(true);
   });
+
+  it('keeps dash-containing remainders verbatim (site degrades them)', () => {
+    // Cross-repo contract (mirrors okazakee-ws
+    // `src/utils/blurPlaceholder.test.ts`): the CMS keeps the full
+    // remainder after the FIRST dash; the site gates it on its data-URL
+    // regex and degrades non-data-URLs to no placeholder. Same caption on
+    // both sides; never truncated.
+    const refs = parseBodyImages(
+      '![Caption-L6PZ-abc-def](https://h.test/x.webp)\n![Cap-not-a-data-url](https://h.test/y.webp)\n![Cap-](https://h.test/z.webp)'
+    );
+    expect(refs).toHaveLength(3);
+    expect(refs[0]).toMatchObject({ caption: 'Caption', hash: 'L6PZ-abc-def' });
+    expect(refs[1]).toMatchObject({
+      caption: 'Cap',
+      hash: 'not-a-data-url',
+    });
+    expect(refs[2]).toMatchObject({ caption: 'Cap', hash: '' });
+  });
 });
 
 describe('sanitizeImageAlt', () => {

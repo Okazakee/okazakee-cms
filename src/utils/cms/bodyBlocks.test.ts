@@ -124,4 +124,14 @@ describe('editorDomToMarkdown round-trips', () => {
       `x\n\n${committed}\n\n${pending}\n\ny`
     );
   });
+
+  it('documents the trailing-dash normalization of no-dash legacy images', () => {
+    // `figureToMarkdown` joins `caption-hash` unconditionally, so a legacy
+    // image without a dash gains a trailing `-` on its first visual edit.
+    // Semantically neutral (both sides parse `Cap` + empty remainder), but
+    // the stored string changes — pinned here so the churn stays visible.
+    expect(roundTrip('![No dash](https://h.test/f.webp)')).toBe(
+      '![No dash-](https://h.test/f.webp)'
+    );
+  });
 });

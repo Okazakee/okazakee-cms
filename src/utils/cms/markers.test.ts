@@ -6,6 +6,15 @@ import {
   parseMarkerRuns,
 } from './markers';
 
+// Cross-repo marker contract: mirrors okazakee-ws
+// `src/utils/formatLabels.test.ts` (same `****([^*]+)****` semantics).
+// Intentional differences: runs render as `<span data-marker="1">` here
+// vs `<label>` on the site; this file escapes `&<>"` while the site also
+// escapes `'` — inert as text either way.
+
+const PAYLOAD =
+  '<img src=x onerror="document.documentElement.dataset.xss=\'1\'">';
+
 describe('parseMarkerRuns', () => {
   it('splits highlighted runs in order', () => {
     expect(parseMarkerRuns('a ****b**** c ****d**** e')).toEqual([
@@ -14,6 +23,13 @@ describe('parseMarkerRuns', () => {
       { text: ' c ', highlighted: false },
       { text: 'd', highlighted: true },
       { text: ' e', highlighted: false },
+    ]);
+  });
+
+  it('splits adjacent runs without a separator', () => {
+    expect(parseMarkerRuns('****a********b****')).toEqual([
+      { text: 'a', highlighted: true },
+      { text: 'b', highlighted: true },
     ]);
   });
 
@@ -28,6 +44,19 @@ describe('markersToHtml', () => {
   it('wraps runs in marker spans and escapes the rest', () => {
     expect(markersToHtml('Hi ****there**** <you>')).toBe(
       'Hi <span data-marker="1">there</span> &lt;you&gt;'
+    );
+  });
+
+  it('neutralizes markup inside formatted regions', () => {
+    const out = markersToHtml(`Hello ****${PAYLOAD}****`);
+    expect(out).toContain('<span data-marker="1">&lt;img');
+    expect(out).not.toMatch(/<[^>]*\sonerror=/);
+    expect(out).toContain('</span>');
+  });
+
+  it('leaves single quotes literal (the site escapes them)', () => {
+    expect(markersToHtml("a ****b**** 'q'")).toBe(
+      'a <span data-marker="1">b</span> \'q\''
     );
   });
 });
