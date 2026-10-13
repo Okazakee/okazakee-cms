@@ -2,18 +2,18 @@
  * Demo-mode fixture dataset (client-safe: no server imports).
  *
  * Fully invented persona ("Demo Dana") with zero network dependencies:
- * every image is an inline SVG data URI, every blurhash is the shared
- * fallback. Nothing here ever touches Supabase — demo edits live and die
- * in memory. Shapes mirror the real section contracts so demo branches
- * stay honest.
+ * every image is an inline SVG data URI, every placeholder is the shared
+ * fallback data URL. Nothing here ever touches Supabase — demo edits live
+ * and die in memory. Shapes mirror the real section contracts so demo
+ * branches stay honest.
  */
-import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
+import { FALLBACK_BLUR_DATA_URL } from '@/utils/blurhashUtils';
 import type { HeroSettings } from '@/types/fetchedData.types';
 import type { RequestEntry } from '@/types/requestEntry.types';
 import type { ResumeData } from '@/libs/resume/types';
 import type { CMSUser } from '@/app/actions/cms/getUser';
 
-export const DEMO_BLURHASH = FALLBACK_BLURHASH;
+export const DEMO_BLURHASH = FALLBACK_BLUR_DATA_URL;
 
 export const demoUser: CMSUser = {
   id: 'demo-user',
@@ -28,7 +28,7 @@ export const demoUser: CMSUser = {
 
 export const demoHeroSection: HeroSettings = {
   mainImage: '/demo/avatar.svg',
-  blurhashURL: FALLBACK_BLURHASH,
+  blurhashURL: FALLBACK_BLUR_DATA_URL,
   resume_en: null,
   resume_it: null,
   shape: 'pebble',
@@ -87,7 +87,7 @@ export const demoSkills = [
         icon: '/demo/skill-react.svg',
         invert: false,
         category_id: 1,
-        blurhashURL: FALLBACK_BLURHASH,
+        blurhashURL: FALLBACK_BLUR_DATA_URL,
         link: null,
         position: 0,
       },
@@ -97,7 +97,7 @@ export const demoSkills = [
         icon: '/demo/skill-ts.svg',
         invert: false,
         category_id: 1,
-        blurhashURL: FALLBACK_BLURHASH,
+        blurhashURL: FALLBACK_BLUR_DATA_URL,
         link: null,
         position: 1,
       },
@@ -114,7 +114,7 @@ export const demoSkills = [
         icon: '/demo/skill-pg.svg',
         invert: false,
         category_id: 2,
-        blurhashURL: FALLBACK_BLURHASH,
+        blurhashURL: FALLBACK_BLUR_DATA_URL,
         link: null,
         position: 0,
       },
@@ -129,7 +129,7 @@ export const demoCareer = [
     company: 'Fakescale Inc',
     website_url: 'https://example.com',
     logo: '/demo/logo-fs.svg',
-    blurhashURL: FALLBACK_BLURHASH,
+    blurhashURL: FALLBACK_BLUR_DATA_URL,
     location_en: 'Demo City (Remote)',
     location_it: 'Città Demo (Remoto)',
     remote: 'full' as const,
@@ -146,7 +146,7 @@ export const demoCareer = [
     company: 'Lorem Labs',
     website_url: 'https://example.com',
     logo: '/demo/logo-ll.svg',
-    blurhashURL: FALLBACK_BLURHASH,
+    blurhashURL: FALLBACK_BLUR_DATA_URL,
     location_en: 'Nowhere, Earth (OnSite)',
     location_it: 'Nessun Luogo (In sede)',
     remote: 'onSite' as const,
@@ -171,7 +171,7 @@ const demoPostBody = (title: string): string =>
     'const demo = true;',
     '```',
     '',
-    `![Demo figure-${FALLBACK_BLURHASH}](${'/demo/blog-fig.svg'})`,
+    `![Demo figure-${FALLBACK_BLUR_DATA_URL}](${'/demo/blog-fig.svg'})`,
     '',
     'Read [more](https://example.com) here.',
   ].join('\n');
@@ -188,7 +188,7 @@ export const demoBlogPosts = [
     description_it: 'Primo articolo *finto*.',
     body_en: demoPostBody('Hello demo'),
     body_it: demoPostBody('Ciao demo'),
-    blurhashURL: FALLBACK_BLURHASH,
+    blurhashURL: FALLBACK_BLUR_DATA_URL,
     post_tags: '"demo" "cms"',
     views: 123,
     hidden: false,
@@ -205,7 +205,7 @@ export const demoBlogPosts = [
     description_it: 'Secondo articolo *finto*.',
     body_en: demoPostBody('Again demo'),
     body_it: demoPostBody('Ancora demo'),
-    blurhashURL: FALLBACK_BLURHASH,
+    blurhashURL: FALLBACK_BLUR_DATA_URL,
     post_tags: '"demo"',
     views: 45,
     hidden: false,
@@ -224,7 +224,7 @@ export const demoPortfolioPosts = [
     description_it: 'Un progetto *vetrina* che non fa nulla.',
     body_en: demoPostBody('Project demo'),
     body_it: demoPostBody('Demo progetto'),
-    blurhashURL: FALLBACK_BLURHASH,
+    blurhashURL: FALLBACK_BLUR_DATA_URL,
     post_tags: '"demo" "portfolio"',
     buttons: [{ kind: 'source', url: 'https://example.com' }],
     views: 77,

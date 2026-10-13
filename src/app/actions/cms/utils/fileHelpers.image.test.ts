@@ -65,7 +65,7 @@ describe('prepareImageUpload — animated WebP', () => {
     expect(inspected.pageHeight).toBe(18);
   });
 
-  it('derives the blurhash from the animation instead of flattening it', async () => {
+  it('derives the placeholder data URL from the animation instead of flattening it', async () => {
     const result = await prepareImageUpload(
       toFile(animatedWebpBuffer(), 'propic.webp', 'image/webp'),
       undefined,
@@ -75,9 +75,9 @@ describe('prepareImageUpload — animated WebP', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
 
-    // A valid blurhash generated server-side (first frame), not the fallback.
+    // A valid data URL generated server-side (first frame), not the fallback.
     expect(result.image.blurhash).toMatch(
-      /^[0-9A-Za-z#$%*+,\-.:;=?@[\]^_{|}~]{4,100}$/
+      /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/
     );
   });
 
@@ -104,8 +104,9 @@ describe('prepareImageUpload — animated WebP', () => {
     expect(inspected.pageHeight).toBe(512);
   });
 
-  it('prefers a client-provided blurhash over a generated one', async () => {
-    const blurhash = 'LCCFD8rlI$5Q1Rr|ob=y5Rbx$vOE';
+  it('prefers a client-provided placeholder over a generated one', async () => {
+    const blurhash =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
     const result = await prepareImageUpload(
       toFile(animatedWebpBuffer(), 'propic.webp', 'image/webp'),

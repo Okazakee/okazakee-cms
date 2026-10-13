@@ -30,10 +30,10 @@ const BODY_IMAGE_OPTIONS = {
 
 /**
  * Client-side staging for post body images. Picked files are compressed
- * to WebP + blurhashed (blurkit, via the shared canvas pipeline) and
- * referenced in the draft markdown as `blob:` URLs — zero server writes
- * until Publish sends the finished snapshot. Closing or discarding the
- * draft revokes the object URLs and leaves no residue behind.
+ * to WebP with a blur placeholder data URL (blurkit, via the shared
+ * canvas pipeline) and referenced in the draft markdown as `blob:` URLs
+ * — zero server writes until Publish sends the finished snapshot. Closing
+ * or discarding the draft revokes the object URLs and leaves no residue.
  */
 export function useBodyImages() {
   const [pending, setPending] = useState<PendingBodyImage[]>([]);
@@ -90,7 +90,7 @@ export function useBodyImages() {
         const entry: PendingBodyImage = {
           localId,
           file: processed.file,
-          // Empty lets the server derive the real hash (e.g. animated
+          // Empty lets the server derive the placeholder (e.g. animated
           // WebP, which skips client processing to keep every frame).
           blurhash: processed.blurhash ?? '',
           alt,

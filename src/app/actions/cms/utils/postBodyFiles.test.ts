@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
-import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
+import { FALLBACK_BLUR_DATA_URL } from '@/utils/blurhashUtils';
 import type { BodyImageUpload } from '@/utils/cms/postBody';
 import {
   applyBodyImageRewrites,
@@ -19,7 +19,7 @@ function webpFile(name = 'shot.webp'): File {
 }
 
 function stagedFile(localId: string, alt = 'my-photo'): BodyImageUpload {
-  return { localId, file: webpFile(), blurhash: FALLBACK_BLURHASH, alt };
+  return { localId, file: webpFile(), blurhash: FALLBACK_BLUR_DATA_URL, alt };
 }
 
 function makeFake() {
@@ -84,8 +84,8 @@ describe('uploadBodyImages + applyBodyRewrites', () => {
     expect(uploaded[0]?.startsWith(`${BUCKET}/${PREFIX}/`)).toBe(true);
     expect(staged).toHaveLength(1);
     const committed = rewrites.get('a') ?? '';
-    // Alt dashes sanitized, real blurhash embedded, absolute public URL.
-    expect(committed.startsWith(`![my photo-${FALLBACK_BLURHASH}](`)).toBe(
+    // Alt dashes sanitized, placeholder data URL embedded, absolute URL.
+    expect(committed.startsWith(`![my photo-${FALLBACK_BLUR_DATA_URL}](`)).toBe(
       true
     );
     const bodies = applyBodyImageRewrites(

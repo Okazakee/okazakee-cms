@@ -1,13 +1,14 @@
 /**
  * Client-side image processing utility
- * Converts images to WebP format using browser Canvas API and generates blurhash
+ * Converts images to WebP format using browser Canvas API and generates a
+ * ready-to-use blur placeholder (`blurkit.encode(...).dataURL`).
  *
  * Animated WebP files are returned untouched (the canvas would flatten them to
  * a single frame); their resize/encode happens server-side in the sharp
  * pipeline (see src/app/actions/cms/utils/fileHelpers.ts).
  */
 import { encode as blurkitEncode } from 'blurkit/browser';
-import { FALLBACK_BLURHASH } from '@/utils/blurhashUtils';
+import { FALLBACK_BLUR_DATA_URL } from '@/utils/blurhashUtils';
 import { isAnimatedWebpFile } from '@/utils/cms/webpAnimation';
 
 type ProcessImageOptions = {
@@ -46,7 +47,7 @@ export async function processImageToWebP(
     // Animated WebP cannot survive a canvas round-trip: drawing it on a 2D
     // canvas and re-encoding keeps only the first frame. Hand the original
     // file to the server pipeline, which resizes animations frame-by-frame
-    // with sharp and derives the blurhash from the first frame.
+    // with sharp and derives the placeholder data URL from the first frame.
     if (await isAnimatedWebpFile(file)) {
       return { success: true, file };
     }
@@ -178,7 +179,7 @@ export async function processImageToWebP(
 
     URL.revokeObjectURL(objectUrl);
 
-    // Generate blurhash (simplified - you might want to use a proper library)
+    // Generate blur placeholder (ready-to-use data URL)
     const blurhash = await generateBlurhash(canvas);
 
     // Create File object from blob
@@ -202,7 +203,7 @@ export async function processImageToWebP(
 }
 
 /**
- * Generates a real blurhash from a canvas element using the blurhash library
+ * Generates a ready-to-use blur placeholder data URL from a canvas.
  */
 async function generateBlurhash(canvas: HTMLCanvasElement): Promise<string> {
   try {
@@ -212,25 +213,26 @@ async function generateBlurhash(canvas: HTMLCanvasElement): Promise<string> {
         'image/png'
       );
     });
-    const { hash } = await blurkitEncode(blob, { size: 32 });
-    return hash;
+    const { dataURL } = await blurkitEncode(blob, { size: 32 });
+    return dataURL;
   } catch {
-    return FALLBACK_BLURHASH;
+    return FALLBACK_BLUR_DATA_URL;
   }
 }
 
 /**
- * Generates a blurhash from any image File or URL string.
- * Useful for generating blurhash when an image is set via CDN URL rather than file upload.
+ * Generates a blur placeholder data URL from any image File or URL string.
+ * Useful for generating the placeholder when an image is set via CDN URL
+ * rather than file upload.
  */
 export async function generateBlurhashFromImage(
   source: File | string
 ): Promise<string> {
   try {
     const input = typeof source === 'string' ? new URL(source) : source;
-    const { hash } = await blurkitEncode(input, { size: 32 });
-    return hash;
+    const { dataURL } = await blurkitEncode(input, { size: 32 });
+    return dataURL;
   } catch {
-    return FALLBACK_BLURHASH;
+    return FALLBACK_BLUR_DATA_URL;
   }
 }

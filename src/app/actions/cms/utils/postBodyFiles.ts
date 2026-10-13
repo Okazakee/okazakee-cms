@@ -6,7 +6,7 @@
  * so this module owns the commit side:
  * - validate staged files + pending-ref resolution before any upload;
  * - upload into the post folder and rewrite `pending:<id>` refs to
- *   `![alt-blurhash](publicUrl)`;
+ *   `![caption-dataURL](publicUrl)`;
  * - roll back staged objects when the row write fails;
  * - best-effort removal of body objects the new markdown no longer
  *   references (cover paths are always kept).

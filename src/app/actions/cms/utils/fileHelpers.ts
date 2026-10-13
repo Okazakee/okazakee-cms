@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { encode as blurkitEncode } from 'blurkit/node';
 import { getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { FALLBACK_BLURHASH, isValidBlurhash } from '@/utils/blurhashUtils';
+import { FALLBACK_BLUR_DATA_URL, isValidBlurPlaceholder } from '@/utils/blurhashUtils';
 // Pure validation helpers live in @/utils/cms/validation (unit-tested).
 // Re-exported here to keep every existing call site unchanged.
 import {
@@ -300,7 +300,9 @@ export async function processImage(
       format = 'png';
     }
 
-    const { hash: blurhash } = await blurkitEncode(inputBuffer, { size: 32 });
+    const { dataURL: blurhash } = await blurkitEncode(inputBuffer, {
+      size: 32,
+    });
 
     const outMeta = await sharp(processedBuffer).metadata();
 
@@ -322,16 +324,17 @@ export async function processImage(
 }
 
 /**
- * Generates a blurhash from a raw image Buffer (e.g. a pre-processed WebP).
+ * Generates a ready-to-use blur placeholder data URL from a raw image
+ * Buffer (e.g. a pre-processed WebP).
  */
 export async function generateBlurhashFromBuffer(
   buffer: Buffer
 ): Promise<string> {
   try {
-    const { hash } = await blurkitEncode(buffer, { size: 32 });
-    return hash;
+    const { dataURL } = await blurkitEncode(buffer, { size: 32 });
+    return dataURL;
   } catch {
-    return FALLBACK_BLURHASH;
+    return FALLBACK_BLUR_DATA_URL;
   }
 }
 
@@ -356,7 +359,7 @@ export async function prepareImageUpload(
     // generation loss. Animated WebP is NOT passed through here — it falls
     // through to processImage(), which keeps every frame while resizing.
     if (!isAnimatedWebpBytes(buffer)) {
-      const blurhash = isValidBlurhash(blurhashURL)
+      const blurhash = isValidBlurPlaceholder(blurhashURL)
         ? blurhashURL
         : await generateBlurhashFromBuffer(buffer);
 
@@ -384,9 +387,9 @@ export async function prepareImageUpload(
     success: true,
     image: {
       buffer: processed.buffer,
-      blurhash: isValidBlurhash(blurhashURL)
+      blurhash: isValidBlurPlaceholder(blurhashURL)
         ? blurhashURL
-        : processed.blurhash || FALLBACK_BLURHASH,
+        : processed.blurhash || FALLBACK_BLUR_DATA_URL,
       extension: processed.format ?? 'webp',
       contentType: processed.format === 'png' ? 'image/png' : 'image/webp',
     },

@@ -11,6 +11,7 @@ import {
 import Image from 'next/image';
 import { useTranslations } from 'next-intl';
 import type React from 'react';
+import { resolveBlurDataURL } from '@/utils/blurhashUtils';
 
 interface FileDropzoneProps {
   accept?: string;
@@ -59,6 +60,7 @@ export function FileDropzone({
   isProcessing,
   error,
   currentUrl,
+  currentBlurhash,
   dropzoneProps,
   fileInputProps,
   fileInputRef,
@@ -75,7 +77,8 @@ export function FileDropzone({
 }: FileDropzoneProps) {
   const t = useTranslations('cms');
   const displayUrl = previewUrl ?? currentUrl ?? null;
-  const displayBlur = previewUrl ? blurhash : currentUrl ? blurhash : null;
+  const rawBlur = previewUrl ? blurhash : (currentBlurhash ?? null);
+  const displayBlur = resolveBlurDataURL(rawBlur);
   const normalizedDisplayUrl = displayUrl?.split('?')[0].toLowerCase() ?? null;
   const isPdf =
     normalizedDisplayUrl?.endsWith('.pdf') ||

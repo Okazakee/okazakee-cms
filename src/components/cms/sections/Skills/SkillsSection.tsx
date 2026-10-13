@@ -27,6 +27,7 @@ import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { demoSkills } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { Skill, SkillsCategory } from '@/types/fetchedData.types';
+import { resolveBlurDataURL } from '@/utils/blurhashUtils';
 import { isValidHttpUrl } from '@/utils/cms/validation';
 
 type EditableSkill = Skill & { isEditing?: boolean };
@@ -877,8 +878,12 @@ export default function SkillsSection() {
                         height={32}
                         className={`h-8 w-8 flex-shrink-0 rounded object-contain ${skill.invert ? 'dark:invert' : ''}`}
                         alt=""
-                        placeholder={skill.blurhashURL ? 'blur' : 'empty'}
-                        blurDataURL={skill.blurhashURL ?? undefined}
+                        placeholder={
+                          resolveBlurDataURL(skill.blurhashURL)
+                            ? 'blur'
+                            : 'empty'
+                        }
+                        blurDataURL={resolveBlurDataURL(skill.blurhashURL)}
                       />
                     ) : (
                       <span className="h-8 w-8 flex-shrink-0 rounded bg-surface-raised" />

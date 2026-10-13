@@ -5,13 +5,15 @@
  * Bodies are plain markdown with two house conventions (mirroring the
  * public site's MarkdownRenderer):
  * - `****text****` renders white-bold, `*text*` renders violet;
- * - images live on their own line as `![alt-blurhash](url)` where the
- *   FIRST `-` splits alt from blurhash.
+ * - images live on their own line as `![caption-placeholder](url)` where
+ *   the FIRST `-` splits caption from the ready-to-use blur data URL
+ *   (`data:image/...;base64,...`). Legacy raw BlurHash remainders are
+ *   parsed but never treated as valid placeholders by renderers.
  *
  * While editing, not-yet-uploaded images are client-side blobs referenced
  * as `![alt-pending:<id>](blob:…)` (zero server writes until Publish).
  * On publish the server uploads the finished snapshot into the post
- * folder and rewrites pending refs to `![alt-blurhash](publicUrl)`.
+ * folder and rewrites pending refs to `![caption-dataURL](publicUrl)`.
  */
 
 export type BodyImageRef = {
@@ -67,8 +69,8 @@ export function parseBodyImages(body: string): BodyImageRef[] {
 
 /**
  * Sanitizes an image alt for the dash-split contract: dashes become
- * spaces (a dash would shift the blurhash segment), surrounding space is
- * trimmed, empty falls back to the file label.
+ * spaces (a dash would shift the placeholder segment), surrounding space
+ * is trimmed, empty falls back to the file label.
  */
 export function sanitizeImageAlt(alt: string, fallbackLabel: string): string {
   const cleaned = alt.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
@@ -124,9 +126,9 @@ export function committedImageMarkdown(
 export type BodyImageUpload = {
   /** Client-generated id matching the `pending:<id>` markdown ref. */
   localId: string;
-  /** Processed file (WebP via the CMS canvas pipeline, blurhash via blurkit). */
+  /** Processed file (WebP via the CMS canvas pipeline). */
   file: File;
-  /** Blurkit blurhash generated client-side; server falls back if invalid. */
+  /** Blur placeholder data URL generated client-side; server falls back. */
   blurhash: string;
   /** Caption text; dashes are sanitized at commit (dash-split contract). */
   alt: string;

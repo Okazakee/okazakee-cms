@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect } from 'react';
+import { resolveBlurDataURL } from '@/utils/blurhashUtils';
 import { useZoom } from '@/app/hooks/useZoom';
 
 interface ImageModalProps {
@@ -25,6 +26,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     handleTouchEnd,
     blockScroll,
   } = useZoom();
+  const resolved = resolveBlurDataURL(blurDataURL);
 
   useEffect(() => {
     const unblock = blockScroll();
@@ -70,8 +72,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
             <Image
               src={src}
               alt={alt}
-              placeholder="blur"
-              blurDataURL={blurDataURL}
+              placeholder={resolved ? 'blur' : 'empty'}
+              blurDataURL={resolved}
               quality={100}
               fill
               sizes="100vw"

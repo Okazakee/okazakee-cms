@@ -2,6 +2,7 @@ import { Eye } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { BlogPost, PortfolioPost } from '@/types/fetchedData.types';
+import { resolveBlurDataURL } from '@/utils/blurhashUtils';
 import { Tags } from './Tags';
 
 export default function Postcard({
@@ -31,6 +32,7 @@ export default function Postcard({
     .replace(/\s+/g, '-');
 
   const href = `/${locale}/${checkPostType}/${post.id}/${slugifiedTitle}`;
+  const blurDataURL = resolveBlurDataURL(post.blurhashURL);
 
   return (
     <Link
@@ -39,8 +41,8 @@ export default function Postcard({
     >
       <div className="w-full h-44 md:h-60 relative mx-auto mb-3">
         <Image
-          placeholder="blur"
-          blurDataURL={post.blurhashURL}
+          placeholder={blurDataURL ? 'blur' : 'empty'}
+          blurDataURL={blurDataURL}
           src={post.image}
           fill
           loading="lazy"

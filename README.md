@@ -46,10 +46,10 @@ rendering and caching.
   render editor-supplied SVG URLs rather than uploading SVG through Sharp.
   Animated WebP skips the
   canvas step and is resized frame-by-frame by Sharp, so animated profile
-  pictures keep every frame. BlurHash placeholders are generated with
+  pictures keep every frame. Blur placeholders are generated with
   [blurkit](https://github.com/Okazakee/blurkit): Sharp handles server-side
-  resize/format, Blurkit the placeholder hash (`blurkit/node` on upload,
-  `blurkit/browser` client-side)
+  resize/format, Blurkit the ready-to-use placeholder data URL
+  (`blurkit/node` on upload, `blurkit/browser` client-side)
 - **Consistent limits** — 10 MB for images and PDFs, enforced at every layer:
   client (`useFileUpload` `maxSizeMB`), server validators
   (`MAX_UPLOAD_SIZE_BYTES` in `src/utils/cms/validation.ts`) and the

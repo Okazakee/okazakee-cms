@@ -36,7 +36,7 @@ import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import { CAREER_ASSET_ROOT } from '@/libs/cms/storage/paths';
 import type { CareerEntry } from '@/types/fetchedData.types';
-import { isValidBlurhash } from '@/utils/blurhashUtils';
+import { isValidBlurPlaceholder } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
 
 type CareerOperation =
@@ -736,7 +736,7 @@ async function uploadCareerLogo(
     if (isWebP) {
       const arrayBuffer = await file.arrayBuffer();
       buffer = Buffer.from(arrayBuffer);
-      blurhash = isValidBlurhash(blurhashURL)
+      blurhash = isValidBlurPlaceholder(blurhashURL)
         ? blurhashURL
         : await generateBlurhashFromBuffer(buffer);
     } else {
@@ -748,7 +748,7 @@ async function uploadCareerLogo(
         };
       }
       buffer = processed.buffer;
-      blurhash = isValidBlurhash(blurhashURL)
+      blurhash = isValidBlurPlaceholder(blurhashURL)
         ? blurhashURL
         : processed.blurhash;
       format = processed.format ?? 'webp';

@@ -3,6 +3,7 @@
 import { Image as ImageIcon } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { resolveBlurDataURL } from '@/utils/blurhashUtils';
 
 /** Shows post image in CMS list: picked file (object URL) or existing image URL. */
 export function ListPostImage({
@@ -39,6 +40,9 @@ export function ListPostImage({
       </div>
     );
   }
+  const blurDataURL = objectUrl
+    ? undefined
+    : resolveBlurDataURL(blurhashURL);
   return (
     <Image
       src={src}
@@ -46,8 +50,8 @@ export function ListPostImage({
       width={300}
       height={200}
       className={`${compact ? 'h-16 w-20 shrink-0' : 'w-full h-48'} object-cover`}
-      placeholder={blurhashURL && !objectUrl ? 'blur' : 'empty'}
-      blurDataURL={objectUrl ? undefined : (blurhashURL ?? undefined)}
+      placeholder={blurDataURL ? 'blur' : 'empty'}
+      blurDataURL={blurDataURL}
       unoptimized={src.startsWith('blob:')}
     />
   );
