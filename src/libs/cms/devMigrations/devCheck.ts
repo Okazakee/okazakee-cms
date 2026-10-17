@@ -593,6 +593,7 @@ export async function runDevCheck(opts?: {
     await checkRlsPoliciesAcls(queryJson, findings);
     await checkRlsNormalization(queryJson, findings);
     await checkAuthorPolicyIsolation(queryJson, findings);
+    await checkPostVisibility(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
   } catch (e) {
@@ -1013,6 +1014,90 @@ async function checkAuthorPolicyIsolation(
       ? `policy ${AUTHOR_POLICY_TARGET} binds only ${AUTHOR_POLICY_DEV_RELATIONS.join(' + ')} (pg_depend OIDs, no production relation)`
       : `policy ${AUTHOR_POLICY_TARGET} relation bindings = ${JSON.stringify(actual)}; expected=${JSON.stringify(AUTHOR_POLICY_DEV_RELATIONS)}; missing=${JSON.stringify(missing)}; production-leak=${JSON.stringify(leaked)}; unexpected=${JSON.stringify(unexpected)}`
   );
+}
+
+/**
+ * Post-visibility contract for dev_staging (migration
+ * 20261017165547_harden_post_reads_dev_staging): the public read policy on both
+ * post tables must restrict anon/authenticated to `hidden = false`, and must
+ * NOT carry a publish-date predicate — scheduling stays an application concern
+ * so future unhidden posts remain previewable in dev/staging.
+ */
+export const POST_VISIBILITY_POLICY = 'cms_published_read';
+
+export const POST_VISIBILITY_TABLES: string[] = [
+  'blog_posts',
+  'portfolio_posts',
+];
+
+export const POST_VISIBILITY_SUPERSEDED_POLICIES: Array<{
+  table: string;
+  name: string;
+}> = [
+  { table: 'blog_posts', name: 'Allow public read access to blog_posts' },
+  { table: 'portfolio_posts', name: 'Public can read posts' },
+];
+
+async function checkPostVisibility(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const pols = (await queryJson(POLICIES_QUERY)) as Array<{
+    table_name: string;
+    policy_name: string;
+    cmd: string;
+    roles: string | null;
+    using_expr: string | null;
+  }>;
+  const key = (table: string, name: string): string => `${table}.${name}`;
+  const byKey = new Map(
+    pols.map((p) => [key(p.table_name, p.policy_name), p])
+  );
+
+  for (const table of POST_VISIBILITY_TABLES) {
+    const got = byKey.get(key(table, POST_VISIBILITY_POLICY));
+    if (!got) {
+      finding(
+        findings,
+        `R-visibility:${table}`,
+        'FAIL',
+        `policy ${key(table, POST_VISIBILITY_POLICY)} ABSENT in live dev_staging`
+      );
+      continue;
+    }
+    const qual = normalizePolicyExpr(got.using_expr);
+    const diffs: string[] = [];
+    if (got.cmd !== 'r') diffs.push(`cmd got=${got.cmd} exp=r`);
+    if (policyRolesOf(got.roles) !== 'anon,authenticated') {
+      diffs.push(`roles got=${got.roles} exp=anon,authenticated`);
+    }
+    if (!qual.includes('hidden = false')) {
+      diffs.push(`qual missing "hidden = false" (got=${got.using_expr})`);
+    }
+    if (qual.includes('created_at')) {
+      diffs.push('qual carries a created_at publish-date predicate');
+    }
+    finding(
+      findings,
+      `R-visibility:${table}`,
+      diffs.length ? 'FAIL' : 'PASS',
+      diffs.length
+        ? `dev ${table} ${POST_VISIBILITY_POLICY} diverges: ${diffs.join('; ')}`
+        : `dev ${table} ${POST_VISIBILITY_POLICY}: SELECT to anon,authenticated USING (hidden = false), no publish-date predicate`
+    );
+  }
+
+  for (const gone of POST_VISIBILITY_SUPERSEDED_POLICIES) {
+    const got = byKey.get(key(gone.table, gone.name));
+    finding(
+      findings,
+      `R-visibility-absent:${key(gone.table, gone.name)}`,
+      got ? 'FAIL' : 'PASS',
+      got
+        ? `permissive policy ${key(gone.table, gone.name)} still present (cmd=${got.cmd}, using=${got.using_expr})`
+        : `superseded permissive policy ${key(gone.table, gone.name)} absent (replaced by ${POST_VISIBILITY_POLICY})`
+    );
+  }
 }
 
 async function checkRlsPoliciesAcls(
