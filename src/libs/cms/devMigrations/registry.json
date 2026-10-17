@@ -83,5 +83,10 @@
     "name": "harden_post_reads_dev_staging",
     "sourceFile": "supabase/migrations/20261017165547_harden_post_reads_dev_staging.sql",
     "version": "20261017165547"
+  },
+  {
+    "name": "add_body_storage_paths_dev_staging",
+    "sourceFile": "supabase/migrations/20261017170828_add_body_storage_paths_dev_staging.sql",
+    "version": "20261017170828"
   }
 ]

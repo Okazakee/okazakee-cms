@@ -120,8 +120,18 @@ export const EXPECTED_COLS: Record<
     { name: 'position', type: 'integer', nullable: true, def: null },
   ],
   hero_section: [{ name: 'shape', type: 'text', nullable: true, def: null }],
+  blog_posts: [
+    { name: 'body_en', type: 'text', nullable: false, def: null },
+    { name: 'body_it', type: 'text', nullable: true, def: null },
+    { name: 'body_en_path', type: 'text', nullable: true, def: null },
+    { name: 'body_it_path', type: 'text', nullable: true, def: null },
+  ],
   portfolio_posts: [
     { name: 'buttons', type: 'jsonb', nullable: true, def: null },
+    { name: 'body_en', type: 'text', nullable: false, def: null },
+    { name: 'body_it', type: 'text', nullable: true, def: null },
+    { name: 'body_en_path', type: 'text', nullable: true, def: null },
+    { name: 'body_it_path', type: 'text', nullable: true, def: null },
   ],
   site_settings: [
     {
@@ -594,6 +604,7 @@ export async function runDevCheck(opts?: {
     await checkRlsNormalization(queryJson, findings);
     await checkAuthorPolicyIsolation(queryJson, findings);
     await checkPostVisibility(queryJson, findings);
+    await checkBodyPathChecks(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
   } catch (e) {
@@ -1096,6 +1107,106 @@ async function checkPostVisibility(
       got
         ? `permissive policy ${key(gone.table, gone.name)} still present (cmd=${got.cmd}, using=${got.using_expr})`
         : `superseded permissive policy ${key(gone.table, gone.name)} absent (replaced by ${POST_VISIBILITY_POLICY})`
+    );
+  }
+}
+
+/**
+ * Path-integrity contract for the dev body-storage pointers (migration
+ * 20261017170828_add_body_storage_paths_dev_staging). Each CHECK must pin a
+ * non-NULL pointer to this row's own id, its content-type prefix, its language,
+ * a 64-lowercase-hex hash and a `.md` extension.
+ *
+ * The definition comparison normalizes deparser formatting only (drops the
+ * `::text` casts and collapses whitespace); it never rewrites the regex itself.
+ */
+export const EXPECTED_BODY_PATH_CHECKS: Array<{
+  table: string;
+  name: string;
+  column: string;
+  prefix: string;
+  lang: string;
+}> = [
+  {
+    table: 'blog_posts',
+    name: 'blog_posts_body_en_path_check',
+    column: 'body_en_path',
+    prefix: 'blog',
+    lang: 'en',
+  },
+  {
+    table: 'blog_posts',
+    name: 'blog_posts_body_it_path_check',
+    column: 'body_it_path',
+    prefix: 'blog',
+    lang: 'it',
+  },
+  {
+    table: 'portfolio_posts',
+    name: 'portfolio_posts_body_en_path_check',
+    column: 'body_en_path',
+    prefix: 'portfolio',
+    lang: 'en',
+  },
+  {
+    table: 'portfolio_posts',
+    name: 'portfolio_posts_body_it_path_check',
+    column: 'body_it_path',
+    prefix: 'portfolio',
+    lang: 'it',
+  },
+];
+
+async function checkBodyPathChecks(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const cons = (await queryJson(CONSTRAINTS_QUERY)) as Array<{
+    table_name: string;
+    constraint_name: string;
+    contype: string;
+    definition: string;
+  }>;
+  for (const want of EXPECTED_BODY_PATH_CHECKS) {
+    const got = cons.find(
+      (c) => c.table_name === want.table && c.constraint_name === want.name
+    );
+    if (!got) {
+      finding(
+        findings,
+        `K-${want.name}`,
+        'FAIL',
+        `constraint ${want.name} ABSENT in live dev_staging`
+      );
+      continue;
+    }
+    const def = got.definition.replace(/::text/g, '').replace(/\s+/g, ' ');
+    const sibling =
+      want.column === 'body_en_path' ? 'body_it_path' : 'body_en_path';
+    const bad: string[] = [];
+    if (got.contype !== 'c') bad.push(`contype got=${got.contype} exp=c`);
+    if (!def.includes(want.column)) bad.push(`missing ${want.column}`);
+    if (def.includes(sibling)) bad.push(`unexpectedly references ${sibling}`);
+    if (!def.includes(`'^${want.prefix}/'`)) {
+      bad.push(`missing content-type anchor '^${want.prefix}/'`);
+    }
+    if (!def.includes('(id)')) {
+      bad.push('missing row-id participation (id)');
+    }
+    if (!def.includes('[0-9a-f]{64}')) {
+      bad.push('missing 64-lowercase-hex hash class');
+    }
+    if (!def.includes(`'/${want.lang}/[0-9a-f]{64}\\.md$'`)) {
+      bad.push(`missing language/extension segment '/${want.lang}/....md$'`);
+    }
+    if (def.includes('mdx')) bad.push('accepts a .mdx extension');
+    finding(
+      findings,
+      `K-${want.name}`,
+      bad.length ? 'FAIL' : 'PASS',
+      bad.length
+        ? `dev ${want.name} diverges: ${bad.join('; ')}; def=${got.definition}`
+        : `dev ${want.name} pins ${want.column} to '^${want.prefix}/' || (id) || '/${want.lang}/<64 lowercase hex>.md$'`
     );
   }
 }
