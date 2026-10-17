@@ -52,6 +52,15 @@ export const POLICIES_QUERY = `select n.nspname as table_schema, c.relname as ta
  */
 export const POLICY_RELATION_BINDINGS_QUERY = `select p.polname as policy_name, n.nspname as table_schema, c.relname as table_name, rn.nspname as ref_schema, rc.relname as ref_relation from pg_depend d join pg_policy p on d.objid = p.oid and d.classid = 'pg_policy'::regclass join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace join pg_class rc on rc.oid = d.refobjid and d.refclassid = 'pg_class'::regclass join pg_namespace rn on rn.oid = rc.relnamespace where n.nspname = 'dev_staging' and rc.oid <> c.oid order by p.polname, rn.nspname, rc.relname`;
 
+/** Live Storage buckets (all of them, so drift on kept buckets is visible). */
+export const STORAGE_BUCKETS_QUERY = `select id, name, public, file_size_limit, allowed_mime_types::text as allowed_mime_types from storage.buckets order by id`;
+
+/** Policies on storage.objects only. */
+export const STORAGE_POLICIES_QUERY = `select c.relname as table_name, p.polname as policy_name, p.polcmd::text as cmd, (select array_agg(r.rolname order by r.rolname) from pg_roles r where r.oid = any (p.polroles)) as roles, pg_get_expr(p.polqual, p.polrelid) as using_expr, pg_get_expr(p.polwithcheck, p.polrelid) as with_check_expr from pg_policy p join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'storage' and c.relname = 'objects' order by p.polname`;
+
+/** Relation bindings of storage.objects policies (pg_depend OIDs). */
+export const STORAGE_POLICY_RELATION_BINDINGS_QUERY = `select p.polname as policy_name, rn.nspname as ref_schema, rc.relname as ref_relation from pg_depend d join pg_policy p on d.objid = p.oid and d.classid = 'pg_policy'::regclass join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace join pg_class rc on rc.oid = d.refobjid and d.refclassid = 'pg_class'::regclass join pg_namespace rn on rn.oid = rc.relnamespace where n.nspname = 'storage' and c.relname = 'objects' and rc.oid <> c.oid order by p.polname, rn.nspname, rc.relname`;
+
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
 export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq', 'cms_allowed_users_id_seq') order by c.relname`;
@@ -605,6 +614,7 @@ export async function runDevCheck(opts?: {
     await checkAuthorPolicyIsolation(queryJson, findings);
     await checkPostVisibility(queryJson, findings);
     await checkBodyPathChecks(queryJson, findings);
+    await checkDevContentStorage(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
   } catch (e) {
@@ -1190,7 +1200,7 @@ async function checkBodyPathChecks(
     if (!def.includes(`'^${want.prefix}/'`)) {
       bad.push(`missing content-type anchor '^${want.prefix}/'`);
     }
-    if (!def.includes('(id)')) {
+    if (!/\bid\b/.test(def)) {
       bad.push('missing row-id participation (id)');
     }
     if (!def.includes('[0-9a-f]{64}')) {
@@ -1209,6 +1219,203 @@ async function checkBodyPathChecks(
         : `dev ${want.name} pins ${want.column} to '^${want.prefix}/' || (id) || '/${want.lang}/<64 lowercase hex>.md$'`
     );
   }
+}
+
+/**
+ * Dev Storage contract (Phase 5B): the private Markdown body bucket
+ * `website-content-dev` and the single pointer-gated SELECT policy on
+ * storage.objects that lets the public dev site download exactly the body
+ * objects the caller may already see.
+ *
+ * The bucket is provisioned through the Storage API (`bun run
+ * storage:content:dev:setup`), so this check reads live `storage.buckets`
+ * rather than expecting any SQL to have created it.
+ */
+export const CONTENT_BUCKET = 'website-content-dev';
+export const CONTENT_BUCKET_PROD = 'website-content';
+export const CONTENT_BUCKET_FILE_SIZE_LIMIT = 1_048_576;
+export const CONTENT_BUCKET_ALLOWED_MIME_TYPES = ['text/markdown'];
+export const CONTENT_STORAGE_POLICY = 'website_content_dev_body_read';
+export const CONTENT_STORAGE_RELATIONS = [
+  'dev_staging.blog_posts',
+  'dev_staging.portfolio_posts',
+];
+export const CONTENT_STORAGE_OPERATIONS = [
+  'object.get_authenticated_info',
+  'object.get_authenticated',
+];
+
+async function checkDevContentStorage(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const buckets = (await queryJson(STORAGE_BUCKETS_QUERY)) as Array<{
+    id: string;
+    name: string;
+    public: boolean;
+    file_size_limit: number | null;
+    allowed_mime_types: string | null;
+  }>;
+  const bucket = buckets.find((b) => b.id === CONTENT_BUCKET);
+  if (!bucket) {
+    finding(
+      findings,
+      'S-bucket',
+      'FAIL',
+      `storage bucket ${CONTENT_BUCKET} ABSENT — provision it with \`bun run storage:content:dev:setup\``
+    );
+  } else {
+    const mimes = (bucket.allowed_mime_types ?? '')
+      .replace(/^\{|\}$/g, '')
+      .split(',')
+      .map((m) => m.trim().toLowerCase())
+      .filter(Boolean)
+      .sort();
+    const expectedMimes = [...CONTENT_BUCKET_ALLOWED_MIME_TYPES].sort();
+    const bad: string[] = [];
+    if (bucket.name !== CONTENT_BUCKET) bad.push(`name got=${bucket.name}`);
+    if (bucket.public !== false) {
+      bad.push(`public got=${bucket.public} exp=false`);
+    }
+    if (Number(bucket.file_size_limit) !== CONTENT_BUCKET_FILE_SIZE_LIMIT) {
+      bad.push(
+        `file_size_limit got=${bucket.file_size_limit} exp=${CONTENT_BUCKET_FILE_SIZE_LIMIT}`
+      );
+    }
+    if (mimes.join(',') !== expectedMimes.join(',')) {
+      bad.push(
+        `allowed_mime_types got=${bucket.allowed_mime_types} exp={text/markdown} (extras rejected)`
+      );
+    }
+    finding(
+      findings,
+      'S-bucket',
+      bad.length ? 'FAIL' : 'PASS',
+      bad.length
+        ? `storage bucket ${CONTENT_BUCKET} drifts: ${bad.join('; ')}`
+        : `storage bucket ${CONTENT_BUCKET}: private, ${CONTENT_BUCKET_FILE_SIZE_LIMIT}B limit, text/markdown only`
+    );
+  }
+
+  const prodPresent = buckets.some((b) => b.id === CONTENT_BUCKET_PROD);
+  finding(
+    findings,
+    'S-bucket-prod-absent',
+    prodPresent ? 'FAIL' : 'PASS',
+    prodPresent
+      ? `production content bucket ${CONTENT_BUCKET_PROD} exists during the dev-only phase`
+      : `production content bucket ${CONTENT_BUCKET_PROD} absent (deferred to production rollout)`
+  );
+
+  const pols = (await queryJson(STORAGE_POLICIES_QUERY)) as Array<{
+    policy_name: string;
+    cmd: string;
+    roles: string | null;
+    using_expr: string | null;
+    with_check_expr: string | null;
+  }>;
+  const policy = pols.find((p) => p.policy_name === CONTENT_STORAGE_POLICY);
+  if (!policy) {
+    finding(
+      findings,
+      `S-${CONTENT_STORAGE_POLICY}`,
+      'FAIL',
+      `policy storage.objects.${CONTENT_STORAGE_POLICY} ABSENT in live dev`
+    );
+  } else {
+    const qual = (policy.using_expr ?? '').replace(/\s+/g, ' ');
+    const bad: string[] = [];
+    if (policy.cmd !== 'r') bad.push(`cmd got=${policy.cmd} exp=r (SELECT)`);
+    if (policyRolesOf(policy.roles) !== 'anon,authenticated') {
+      bad.push(`roles got=${policy.roles} exp=anon,authenticated`);
+    }
+    if (!qual.includes('bucket_id')) bad.push('qual missing bucket_id predicate');
+    if (!qual.includes(`'${CONTENT_BUCKET}'`)) {
+      bad.push(`qual missing bucket '${CONTENT_BUCKET}'`);
+    }
+    if (!qual.includes('allow_any_operation')) {
+      bad.push('qual missing operation-aware helper storage.allow_any_operation');
+    }
+    for (const op of CONTENT_STORAGE_OPERATIONS) {
+      if (!qual.includes(op)) bad.push(`qual missing operation '${op}'`);
+    }
+    for (const column of ['body_en_path', 'body_it_path']) {
+      if (!qual.includes(column)) bad.push(`qual missing pointer column ${column}`);
+    }
+    if (/hidden/i.test(qual)) {
+      bad.push('qual duplicates hidden semantics instead of inheriting post RLS');
+    }
+    if (/created_at/i.test(qual)) {
+      bad.push('qual duplicates publish-date semantics');
+    }
+    finding(
+      findings,
+      `S-${CONTENT_STORAGE_POLICY}`,
+      bad.length ? 'FAIL' : 'PASS',
+      bad.length
+        ? `storage.objects.${CONTENT_STORAGE_POLICY} diverges: ${bad.join('; ')}; qual=${policy.using_expr}`
+        : `storage.objects.${CONTENT_STORAGE_POLICY}: SELECT to anon,authenticated, bucket + operation + body-pointer gated, no duplicated visibility predicate`
+    );
+  }
+
+  const bindings = (await queryJson(
+    STORAGE_POLICY_RELATION_BINDINGS_QUERY
+  )) as Array<{
+    policy_name: string;
+    ref_schema: string;
+    ref_relation: string;
+  }>;
+  const bound = bindings
+    .filter((b) => b.policy_name === CONTENT_STORAGE_POLICY)
+    .map((b) => `${b.ref_schema}.${b.ref_relation}`)
+    .sort();
+  const missing = CONTENT_STORAGE_RELATIONS.filter((r) => !bound.includes(r));
+  const unexpected = bound.filter(
+    (r) => !CONTENT_STORAGE_RELATIONS.includes(r)
+  );
+  const bindingsOk =
+    bound.length > 0 && missing.length === 0 && unexpected.length === 0;
+  finding(
+    findings,
+    `S-${CONTENT_STORAGE_POLICY}-bindings`,
+    bindingsOk ? 'PASS' : 'FAIL',
+    bindingsOk
+      ? `${CONTENT_STORAGE_POLICY} binds only ${CONTENT_STORAGE_RELATIONS.join(' + ')} (pg_depend OIDs, no production relation)`
+      : `${CONTENT_STORAGE_POLICY} bindings=${JSON.stringify(bound)}; missing=${JSON.stringify(missing)}; unexpected=${JSON.stringify(unexpected)}`
+  );
+
+  const writePolicies = pols.filter(
+    (p) =>
+      p.cmd !== 'r' &&
+      `${p.using_expr ?? ''} ${p.with_check_expr ?? ''}`.includes(CONTENT_BUCKET)
+  );
+  finding(
+    findings,
+    'S-no-write',
+    writePolicies.length ? 'FAIL' : 'PASS',
+    writePolicies.length
+      ? `application write policy targets ${CONTENT_BUCKET}: ${writePolicies
+          .map((p) => `${p.policy_name}/${p.cmd}`)
+          .join(', ')}`
+      : `no anon/authenticated INSERT/UPDATE/DELETE policy targets ${CONTENT_BUCKET} (service_role bypasses Storage RLS)`
+  );
+
+  const bucketPolicies = pols.filter((p) =>
+    `${p.using_expr ?? ''} ${p.with_check_expr ?? ''}`.includes(CONTENT_BUCKET)
+  );
+  const singleOk =
+    bucketPolicies.length === 1 &&
+    bucketPolicies[0]?.policy_name === CONTENT_STORAGE_POLICY;
+  finding(
+    findings,
+    'S-single-policy',
+    singleOk ? 'PASS' : 'FAIL',
+    singleOk
+      ? `exactly one storage.objects policy references ${CONTENT_BUCKET} (${CONTENT_STORAGE_POLICY})`
+      : `policies referencing ${CONTENT_BUCKET}: ${JSON.stringify(
+          bucketPolicies.map((p) => `${p.policy_name}/${p.cmd}`)
+        )}`
+  );
 }
 
 async function checkRlsPoliciesAcls(

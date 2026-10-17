@@ -88,5 +88,10 @@
     "name": "add_body_storage_paths_dev_staging",
     "sourceFile": "supabase/migrations/20261017170828_add_body_storage_paths_dev_staging.sql",
     "version": "20261017170828"
+  },
+  {
+    "name": "add_content_storage_read_policy_dev_staging",
+    "sourceFile": "supabase/migrations/20261017185848_add_content_storage_read_policy_dev_staging.sql",
+    "version": "20261017185848"
   }
 ]

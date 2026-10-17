@@ -11,7 +11,8 @@
     "lint-fix": "biome check . --write --unsafe",
     "format": "biome format . --write",
     "test": "vitest run",
-    "db:dev:check": "bun src/utils/cms/devMigrations.ts check"
+    "db:dev:check": "bun src/utils/cms/devMigrations.ts check",
+    "storage:content:dev:setup": "bun src/utils/cms/storageSetup.ts"
   },
   "dependencies": {
     "@img/sharp-libvips-linux-x64": "1.3.4",
