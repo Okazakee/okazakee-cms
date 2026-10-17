@@ -218,6 +218,143 @@ export const CERTIFIED_INDEX_NAMES: Record<string, true> =
     ].map((name) => [name, true as const])
   );
 
+/**
+ * RLS normalization contract for dev_staging (migration
+ * 20261017140338_normalize_rls_dev_staging).
+ *
+ * `cmd` is the raw pg_policy code (r=SELECT, a=INSERT, w=UPDATE, d=DELETE).
+ * `roles` is compared against the sorted, comma-joined role names — omitted
+ * where the deparse cannot resolve them (a policy granted TO PUBLIC yields
+ * NULL through POLICIES_QUERY's pg_roles join, so presence is asserted
+ * without a role comparison there).
+ *
+ * Expression matching is whitespace-collapsed and `public.`-stripped so it is
+ * not brittle to deparser formatting or schema qualification.
+ */
+type ExpectedPolicy = {
+  table: string;
+  name: string;
+  cmd: string;
+  roles?: string;
+  /** Exact normalized qual (e.g. `true`). */
+  qualEquals?: string;
+  /** Substrings that must appear in the normalized qual. */
+  qualIncludes?: string[];
+  /** Substrings that must appear in the normalized with-check. */
+  withCheckIncludes?: string[];
+  /** Substrings that must NOT appear in the normalized qual. */
+  qualExcludes?: string[];
+};
+
+export const EXPECTED_POLICIES_PRESENT: ExpectedPolicy[] = [
+  {
+    table: 'hero_section',
+    name: 'hero_section_public_read',
+    cmd: 'r',
+    roles: 'anon,authenticated',
+    qualEquals: 'true',
+  },
+  {
+    table: 'hero_section',
+    name: 'hero_section_insert_admins',
+    cmd: 'a',
+    roles: 'authenticated',
+  },
+  {
+    table: 'hero_section',
+    name: 'hero_section_update_admins',
+    cmd: 'w',
+    roles: 'authenticated',
+  },
+  {
+    table: 'hero_section',
+    name: 'hero_section_delete_admins',
+    cmd: 'd',
+    roles: 'authenticated',
+  },
+  {
+    table: 'i18n_translations',
+    name: 'i18n_translations_public_read',
+    cmd: 'r',
+    roles: 'anon,authenticated',
+    qualEquals: 'true',
+  },
+  {
+    table: 'i18n_translations',
+    name: 'Admins can insert i18n_translations',
+    cmd: 'a',
+  },
+  {
+    table: 'i18n_translations',
+    name: 'Admins can update i18n_translations',
+    cmd: 'w',
+  },
+  {
+    table: 'user_profiles',
+    name: 'user_profiles_authenticated_read',
+    cmd: 'r',
+    roles: 'authenticated',
+    qualEquals: 'true',
+  },
+  {
+    table: 'user_profiles',
+    name: 'user_profiles_public_author_read',
+    cmd: 'r',
+    roles: 'anon',
+    qualIncludes: ['EXISTS', 'blog_posts', 'portfolio_posts', 'author_id'],
+    // dev semantics: the author predicate carries no `hidden` filter.
+    qualExcludes: ['hidden'],
+  },
+  {
+    table: 'user_profiles',
+    name: 'user_profiles_self_update',
+    cmd: 'w',
+    roles: 'authenticated',
+    qualIncludes: ['auth.uid()'],
+    withCheckIncludes: ['auth.uid()'],
+  },
+  {
+    table: 'blog_posts',
+    name: 'Admins and mods can insert',
+    cmd: 'a',
+    roles: 'authenticated',
+    withCheckIncludes: ["'role'", "'admin'", "'mod'", 'auth.uid()'],
+  },
+];
+
+/** Redundant/duplicate policies the normalization must remove. */
+export const EXPECTED_POLICIES_ABSENT: Array<{
+  table: string;
+  name: string;
+}> = [
+  {
+    table: 'hero_section',
+    name: 'Allow authenticated users to select from hero_section',
+  },
+  { table: 'hero_section', name: 'Public can read hero_section' },
+  { table: 'hero_section', name: 'hero_section_public_select' },
+  { table: 'i18n_translations', name: 'Admins can select i18n_translations' },
+  { table: 'i18n_translations', name: 'Allow public read access' },
+  { table: 'i18n_translations', name: 'Public can select i18n_translations' },
+  { table: 'user_profiles', name: 'Admins can read all profiles' },
+  { table: 'user_profiles', name: 'Authenticated can read post authors' },
+  { table: 'user_profiles', name: 'Authenticated can read profiles' },
+  { table: 'user_profiles', name: 'Public can read post authors' },
+  { table: 'user_profiles', name: 'Users can read their own profile' },
+  { table: 'user_profiles', name: 'Users can update own profile' },
+];
+
+/** Policies whose helper calls must be wrapped in a scalar subquery (InitPlan). */
+export const INITPLAN_SAFE_POLICIES: Array<{ table: string; name: string }> = [
+  { table: 'hero_section', name: 'hero_section_insert_admins' },
+  { table: 'hero_section', name: 'hero_section_update_admins' },
+  { table: 'hero_section', name: 'hero_section_delete_admins' },
+  { table: 'i18n_translations', name: 'Admins can insert i18n_translations' },
+  { table: 'i18n_translations', name: 'Admins can update i18n_translations' },
+  { table: 'user_profiles', name: 'user_profiles_self_update' },
+  { table: 'blog_posts', name: 'Admins and mods can insert' },
+];
+
 function parseAcl(raw: string): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   const inner = raw.replace(/^\{|\}$/g, '');
@@ -446,6 +583,7 @@ export async function runDevCheck(opts?: {
     await checkConstraintsIndexes(queryJson, findings);
     await checkIndexContract(queryJson, findings);
     await checkRlsPoliciesAcls(queryJson, findings);
+    await checkRlsNormalization(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
   } catch (e) {
@@ -661,6 +799,145 @@ async function checkIndexContract(
       got
         ? `obsolete index ${name} still present in dev dev_staging: ${got.indexdef}`
         : `obsolete index ${name} absent (redundant/unused; dropped by 20261017134507_optimize_indexes_dev_staging)`
+    );
+  }
+}
+
+/** Sorted, comma-joined role names for a pg_policies roles string. */
+function policyRolesOf(raw: string | null): string {
+  return (raw ?? '')
+    .replace(/^\{|\}$/g, '')
+    .split(',')
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+}
+
+/** Collapse deparser whitespace and drop schema qualification for comparison. */
+function normalizePolicyExpr(expr: string | null): string {
+  return (expr ?? '').replace(/\bpublic\./g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Helper calls (`auth.jwt()`, `auth.uid()`, `is_admin_user()`) that appear
+ * OUTSIDE a scalar subquery, i.e. still evaluated once per row. The wrapped
+ * form deparses as `( SELECT <call> AS <alias>)`, so a safe call is always
+ * immediately preceded by `SELECT `.
+ */
+function unwrappedHelperCalls(expr: string | null): string[] {
+  if (!expr) return [];
+  const normalized = normalizePolicyExpr(expr);
+  const bad = new Set<string>();
+  for (const call of ['auth.jwt()', 'auth.uid()', 'is_admin_user()']) {
+    let i = normalized.indexOf(call);
+    while (i >= 0) {
+      const before = normalized.slice(Math.max(0, i - 7), i).toLowerCase();
+      if (!/select $/.test(before)) bad.add(call);
+      i = normalized.indexOf(call, i + 1);
+    }
+  }
+  return [...bad];
+}
+
+/**
+ * Certifies the dev_staging RLS normalization (migration
+ * 20261017140338_normalize_rls_dev_staging): the collapsed policy set is
+ * present, the redundant/duplicate policies are gone, and every retained
+ * `auth.*` / `is_admin_user()` call is wrapped in a scalar subquery so it is
+ * evaluated once instead of per row.
+ */
+async function checkRlsNormalization(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const pols = (await queryJson(POLICIES_QUERY)) as Array<{
+    table_name: string;
+    policy_name: string;
+    cmd: string;
+    roles: string | null;
+    using_expr: string | null;
+    with_check_expr: string | null;
+  }>;
+  const key = (table: string, name: string): string => `${table}.${name}`;
+  const byKey = new Map(
+    pols.map((p) => [key(p.table_name, p.policy_name), p])
+  );
+
+  for (const want of EXPECTED_POLICIES_PRESENT) {
+    const got = byKey.get(key(want.table, want.name));
+    if (!got) {
+      finding(
+        findings,
+        `R-${want.name}`,
+        'FAIL',
+        `policy ${key(want.table, want.name)} ABSENT in live dev_staging`
+      );
+      continue;
+    }
+    const diffs: string[] = [];
+    if (got.cmd !== want.cmd) diffs.push(`cmd got=${got.cmd} exp=${want.cmd}`);
+    if (want.roles !== undefined && policyRolesOf(got.roles) !== want.roles) {
+      diffs.push(`roles got=${got.roles} exp=${want.roles}`);
+    }
+    const qual = normalizePolicyExpr(got.using_expr);
+    const check = normalizePolicyExpr(got.with_check_expr);
+    if (want.qualEquals !== undefined && qual !== want.qualEquals) {
+      diffs.push(`qual got=${got.using_expr} exp=${want.qualEquals}`);
+    }
+    for (const needle of want.qualIncludes ?? []) {
+      if (!qual.includes(needle)) diffs.push(`qual missing ${needle}`);
+    }
+    for (const needle of want.withCheckIncludes ?? []) {
+      if (!check.includes(needle)) diffs.push(`with_check missing ${needle}`);
+    }
+    for (const needle of want.qualExcludes ?? []) {
+      if (qual.includes(needle)) diffs.push(`qual unexpectedly has ${needle}`);
+    }
+    finding(
+      findings,
+      `R-${want.name}`,
+      diffs.length ? 'FAIL' : 'PASS',
+      diffs.length
+        ? `policy ${key(want.table, want.name)} diverges: ${diffs.join('; ')}`
+        : `dev policy present (cmd=${got.cmd}${want.roles !== undefined ? `, roles=${got.roles}` : ''})`
+    );
+  }
+
+  for (const gone of EXPECTED_POLICIES_ABSENT) {
+    const got = byKey.get(key(gone.table, gone.name));
+    finding(
+      findings,
+      `R-absent:${gone.name}`,
+      got ? 'FAIL' : 'PASS',
+      got
+        ? `redundant policy ${key(gone.table, gone.name)} still present in dev_staging (cmd=${got.cmd})`
+        : `redundant policy ${key(gone.table, gone.name)} absent (normalized by 20261017140338)`
+    );
+  }
+
+  for (const want of INITPLAN_SAFE_POLICIES) {
+    const got = byKey.get(key(want.table, want.name));
+    if (!got) {
+      finding(
+        findings,
+        `R-initplan:${want.name}`,
+        'FAIL',
+        `policy ${key(want.table, want.name)} ABSENT — InitPlan form not certifiable`
+      );
+      continue;
+    }
+    const unsafe = [
+      ...unwrappedHelperCalls(got.using_expr),
+      ...unwrappedHelperCalls(got.with_check_expr),
+    ];
+    finding(
+      findings,
+      `R-initplan:${want.name}`,
+      unsafe.length ? 'FAIL' : 'PASS',
+      unsafe.length
+        ? `policy ${key(want.table, want.name)} still evaluates ${unsafe.join(', ')} per row (not wrapped in a scalar subquery)`
+        : `policy ${key(want.table, want.name)} wraps every auth helper in a scalar subquery (InitPlan-safe)`
     );
   }
 }
