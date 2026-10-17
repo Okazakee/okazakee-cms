@@ -160,6 +160,64 @@ export const EXPECTED_CONSTRAINTS = [
   { table: 'project_requests', name: 'project_requests_pkey' },
 ];
 
+/**
+ * Indexes `20261017134507_optimize_indexes_dev_staging` must leave present in
+ * dev_staging, with the exact column list the application query model relies
+ * on. `columns` is compared against the normalized pg_get_indexdef output.
+ *
+ * `project_requests_active_idx` is asserted by the dedicated
+ * `X-project_requests_active_idx` finding in checkConstraintsIndexes (it has a
+ * DESC-ordering contract worth its own id), so it is intentionally not
+ * duplicated here.
+ */
+export const EXPECTED_INDEXES_PRESENT = [
+  {
+    table: 'blog_posts',
+    name: 'blog_posts_author_id_idx',
+    columns: '(author_id)',
+  },
+  {
+    table: 'portfolio_posts',
+    name: 'portfolio_posts_author_id_idx',
+    columns: '(author_id)',
+  },
+  {
+    table: 'skills',
+    name: 'skills_category_position_id_idx',
+    columns: '(category_id, position, id)',
+  },
+  {
+    table: 'skills_categories',
+    name: 'skills_categories_position_idx',
+    columns: '(position)',
+  },
+] as const;
+
+/**
+ * Redundant/unused indexes the same migration drops: absent here means
+ * certified-gone. A surviving index is a FAIL (the redundant `views` indexes
+ * and the PK-duplicate `site_settings_single_row_idx`).
+ */
+export const EXPECTED_INDEXES_ABSENT = [
+  'blog_posts_views_idx',
+  'portfolio_posts_views_idx',
+  'site_settings_single_row_idx',
+] as const;
+
+/**
+ * Every index name this check certifies (present or must-be-absent), plus the
+ * dedicated active-idx finding. The `X-extras` INFO excludes these so it stays
+ * a list of genuine unknowns rather than restating certified state.
+ */
+export const CERTIFIED_INDEX_NAMES: Record<string, true> =
+  Object.fromEntries(
+    [
+      'project_requests_active_idx',
+      ...EXPECTED_INDEXES_PRESENT.map((i) => i.name),
+      ...EXPECTED_INDEXES_ABSENT,
+    ].map((name) => [name, true as const])
+  );
+
 function parseAcl(raw: string): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   const inner = raw.replace(/^\{|\}$/g, '');
@@ -386,6 +444,7 @@ export async function runDevCheck(opts?: {
   try {
     await checkColumns(queryJson, findings);
     await checkConstraintsIndexes(queryJson, findings);
+    await checkIndexContract(queryJson, findings);
     await checkRlsPoliciesAcls(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
@@ -537,7 +596,7 @@ async function checkConstraintsIndexes(
   );
   const others = idx.filter(
     (x) =>
-      x.index_name !== 'project_requests_active_idx' &&
+      CERTIFIED_INDEX_NAMES[x.index_name] !== true &&
       !x.index_name.endsWith('_pkey') &&
       !x.index_name.endsWith('_key')
   );
@@ -547,6 +606,61 @@ async function checkConstraintsIndexes(
       'X-extras',
       'INFO',
       `pre-existing/extra indexes, never deletion authorization: ${others.map((x) => x.index_name).join(',')}`
+    );
+  }
+}
+
+/**
+ * Certifies the dev_staging index contract established by
+ * 20261017134507_optimize_indexes_dev_staging: the FK-support and composite
+ * indexes must be present with their exact column lists, and the redundant
+ * `views` / PK-duplicate indexes must be absent. `project_requests_active_idx`
+ * keeps its own `X-project_requests_active_idx` finding above.
+ */
+async function checkIndexContract(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const idx = (await queryJson(INDEXES_QUERY)) as Array<{
+    table_name: string;
+    index_name: string;
+    indexdef: string;
+    predicate: string | null;
+  }>;
+  const byName = new Map(idx.map((x) => [x.index_name, x]));
+  for (const want of EXPECTED_INDEXES_PRESENT) {
+    const got = byName.get(want.name);
+    // Identifier quoting is dropped so the expectation is not brittle about
+    // keywords the deparser quotes (e.g. `("position")`); column order and the
+    // rest of the definition are still compared verbatim.
+    const def = got ? normDef(got.indexdef).replace(/"/g, '') : '';
+    const ok =
+      !!got &&
+      got.table_name === want.table &&
+      def.includes(want.columns) &&
+      (got.predicate ?? null) === null;
+    finding(
+      findings,
+      `X-${want.name}`,
+      ok ? 'PASS' : 'FAIL',
+      ok
+        ? `dev ${want.name} present on ${want.table} ${want.columns} (raw indexdef, no predicate): ${got?.indexdef}`
+        : `remote=${
+            got
+              ? `${got.table_name} ${got.indexdef} predicate=${got.predicate}`
+              : 'ABSENT'
+          } — expected on ${want.table} ${want.columns}`
+    );
+  }
+  for (const name of EXPECTED_INDEXES_ABSENT) {
+    const got = byName.get(name);
+    finding(
+      findings,
+      `X-absent:${name}`,
+      got ? 'FAIL' : 'PASS',
+      got
+        ? `obsolete index ${name} still present in dev dev_staging: ${got.indexdef}`
+        : `obsolete index ${name} absent (redundant/unused; dropped by 20261017134507_optimize_indexes_dev_staging)`
     );
   }
 }

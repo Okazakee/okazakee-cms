@@ -63,5 +63,10 @@
     "name": "cms_allowed_users_sequence_usage",
     "sourceFile": "supabase/migrations/20261008213304_cms_allowed_users_sequence_usage.sql",
     "version": "20261008213304"
+  },
+  {
+    "name": "optimize_indexes_dev_staging",
+    "sourceFile": "supabase/migrations/20261017134507_optimize_indexes_dev_staging.sql",
+    "version": "20261017134507"
   }
 ]
