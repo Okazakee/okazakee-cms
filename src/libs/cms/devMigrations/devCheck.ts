@@ -44,6 +44,14 @@ export const INDEXES_QUERY = `select n.nspname as table_schema, c.relname as tab
 
 export const POLICIES_QUERY = `select n.nspname as table_schema, c.relname as table_name, p.polname as policy_name, p.polcmd::text as cmd, (select array_agg(r.rolname order by r.rolname) from pg_roles r where r.oid = any (p.polroles)) as roles, pg_get_expr(p.polqual, p.polrelid) as using_expr, pg_get_expr(p.polwithcheck, p.polrelid) as with_check_expr from pg_policy p join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' order by c.relname, p.polname`;
 
+/**
+ * Relation bindings of every dev_staging policy, resolved from the catalog
+ * (pg_depend holds the OIDs the policy expression actually bound at CREATE
+ * time). This is authoritative — unlike a SQL-text scan — so it can prove which
+ * SCHEMA a policy relation lives in. The policy's own table is excluded.
+ */
+export const POLICY_RELATION_BINDINGS_QUERY = `select p.polname as policy_name, n.nspname as table_schema, c.relname as table_name, rn.nspname as ref_schema, rc.relname as ref_relation from pg_depend d join pg_policy p on d.objid = p.oid and d.classid = 'pg_policy'::regclass join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace join pg_class rc on rc.oid = d.refobjid and d.refclassid = 'pg_class'::regclass join pg_namespace rn on rn.oid = rc.relnamespace where n.nspname = 'dev_staging' and rc.oid <> c.oid order by p.polname, rn.nspname, rc.relname`;
+
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
 export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq', 'cms_allowed_users_id_seq') order by c.relname`;
@@ -584,6 +592,7 @@ export async function runDevCheck(opts?: {
     await checkIndexContract(queryJson, findings);
     await checkRlsPoliciesAcls(queryJson, findings);
     await checkRlsNormalization(queryJson, findings);
+    await checkAuthorPolicyIsolation(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
   } catch (e) {
@@ -940,6 +949,70 @@ async function checkRlsNormalization(
         : `policy ${key(want.table, want.name)} wraps every auth helper in a scalar subquery (InitPlan-safe)`
     );
   }
+}
+
+/**
+ * Schema-isolation contract for the dev author-profile policy (migration
+ * 20261017160247_isolate_dev_author_profile_policy): its predicate must bind to
+ * the dev clone's own post tables and never to production's. Compared against
+ * pg_depend relation OIDs so it proves the resolved SCHEMA rather than the
+ * presence of a table name in the deparsed SQL.
+ */
+export const AUTHOR_POLICY_TARGET = 'user_profiles_public_author_read';
+
+export const AUTHOR_POLICY_DEV_RELATIONS: string[] = [
+  'dev_staging.blog_posts',
+  'dev_staging.portfolio_posts',
+];
+
+export const AUTHOR_POLICY_FORBIDDEN_RELATIONS: string[] = [
+  'public.blog_posts',
+  'public.portfolio_posts',
+];
+
+/**
+ * Certifies that the dev author-profile policy reads ONLY the dev clone's post
+ * tables. A surviving `public.*` binding is the environment-isolation leak this
+ * phase removes; a missing dev binding means the policy is absent or still
+ * binds production.
+ */
+async function checkAuthorPolicyIsolation(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const rows = (await queryJson(POLICY_RELATION_BINDINGS_QUERY)) as Array<{
+    policy_name: string;
+    ref_schema: string;
+    ref_relation: string;
+  }>;
+  const actual = rows
+    .filter((r) => r.policy_name === AUTHOR_POLICY_TARGET)
+    .map((r) => `${r.ref_schema}.${r.ref_relation}`)
+    .sort();
+  const missing = AUTHOR_POLICY_DEV_RELATIONS.filter(
+    (rel) => !actual.includes(rel)
+  );
+  const leaked = actual.filter((rel) =>
+    AUTHOR_POLICY_FORBIDDEN_RELATIONS.includes(rel)
+  );
+  const unexpected = actual.filter(
+    (rel) =>
+      !AUTHOR_POLICY_DEV_RELATIONS.includes(rel) &&
+      !AUTHOR_POLICY_FORBIDDEN_RELATIONS.includes(rel)
+  );
+  const ok =
+    actual.length > 0 &&
+    missing.length === 0 &&
+    leaked.length === 0 &&
+    unexpected.length === 0;
+  finding(
+    findings,
+    'R-user_profiles-author-schema',
+    ok ? 'PASS' : 'FAIL',
+    ok
+      ? `policy ${AUTHOR_POLICY_TARGET} binds only ${AUTHOR_POLICY_DEV_RELATIONS.join(' + ')} (pg_depend OIDs, no production relation)`
+      : `policy ${AUTHOR_POLICY_TARGET} relation bindings = ${JSON.stringify(actual)}; expected=${JSON.stringify(AUTHOR_POLICY_DEV_RELATIONS)}; missing=${JSON.stringify(missing)}; production-leak=${JSON.stringify(leaked)}; unexpected=${JSON.stringify(unexpected)}`
+  );
 }
 
 async function checkRlsPoliciesAcls(

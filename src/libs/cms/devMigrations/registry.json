@@ -73,5 +73,10 @@
     "name": "normalize_rls_dev_staging",
     "sourceFile": "supabase/migrations/20261017140338_normalize_rls_dev_staging.sql",
     "version": "20261017140338"
+  },
+  {
+    "name": "isolate_dev_author_profile_policy",
+    "sourceFile": "supabase/migrations/20261017160247_isolate_dev_author_profile_policy.sql",
+    "version": "20261017160247"
   }
 ]
