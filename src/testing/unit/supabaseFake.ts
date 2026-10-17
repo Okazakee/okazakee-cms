@@ -28,6 +28,8 @@ export interface FakeSupabaseState {
     times?: number;
     after?: number;
     throws?: boolean;
+    /** Simulate a successful response that affected no rows. */
+    zeroRows?: boolean;
   } | null;
   failUpload: { pathIncludes?: string; message: string } | null;
 }
@@ -43,6 +45,8 @@ export interface FakeSupabaseOptions {
     times?: number;
     after?: number;
     throws?: boolean;
+    /** Simulate a successful response that affected no rows. */
+    zeroRows?: boolean;
   } | null;
   failUpload?: { pathIncludes?: string; message: string } | null;
 }
@@ -192,6 +196,7 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: unknown }> {
         const remaining = (fail.times ?? 1) - 1;
         if (remaining <= 0) this.state.failNext = null;
         else fail.times = remaining;
+        if (fail.zeroRows) return { data: [], error: null };
         if (fail.throws) throw new Error(fail.message);
         return {
           data: null,

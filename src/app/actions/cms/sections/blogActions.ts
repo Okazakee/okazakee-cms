@@ -45,6 +45,7 @@ import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/buc
 import { BLOG_STAGING_PREFIX, blogPostPrefix } from '@/libs/cms/storage/paths';
 import {
   bodyPointerUpdates,
+  clientBodyPointerRejection,
   modifiedLocales,
   storePostBodies,
 } from '@/libs/cms/storage/postBodyObjects';
@@ -307,6 +308,15 @@ async function batchPublishBlog(
 
     for (const [index, item] of operation.creates.entries()) {
       const tempId = normalizeTempId(item.tempId, 'blog', index);
+      const pointerViolation = clientBodyPointerRejection(item.data);
+      if (pointerViolation) {
+        markFailed(evidence, {
+          kind: 'create',
+          tempId,
+          error: pointerViolation,
+        });
+        continue;
+      }
       const validation = validateBlogData(item.data);
       if (!validation.isValid) {
         markFailed(evidence, {
@@ -423,11 +433,17 @@ async function batchPublishBlog(
           if (rewrittenBodies.body_it !== undefined) {
             commit.body_it = rewrittenBodies.body_it;
           }
-          const { error: bodyError } = await admin
+          const { data: committedRows, error: bodyError } = await admin
             .from('blog_posts')
             .update(commit)
-            .eq('id', data.id);
+            .eq('id', data.id)
+            .select('id');
           if (bodyError) throw bodyError;
+          if (committedRows?.length !== 1) {
+            throw new Error(
+              `Final body commit matched ${committedRows?.length ?? 0} rows; expected exactly 1`
+            );
+          }
         } else if (
           rewrittenBodies.body_en !== item.data.body_en ||
           rewrittenBodies.body_it !== item.data.body_it
@@ -446,11 +462,15 @@ async function batchPublishBlog(
           .from('blog_posts')
           .delete()
           .eq('id', data.id);
-        await removeStorageObjectBestEffort(admin, bucket, upload.path);
-        await removeBodyUploads(admin, bucket, [
-          ...bodyStaged,
-          ...bodyUploadStaged(error),
-        ]);
+        // A surviving provisional row may reference these assets: only clean
+        // them up once the row is confirmed gone.
+        if (!rollbackError) {
+          await removeStorageObjectBestEffort(admin, bucket, upload.path);
+          await removeBodyUploads(admin, bucket, [
+            ...bodyStaged,
+            ...bodyUploadStaged(error),
+          ]);
+        }
         const baseError =
           error instanceof Error ? error.message : 'Body publish failed';
         const rowState =
@@ -461,7 +481,7 @@ async function batchPublishBlog(
           kind: 'create',
           tempId,
           error: rollbackError
-            ? `${baseError} (rollback failed for provisional row ${data.id as number}: ${rollbackError.message}; ${rowState})`
+            ? `${baseError} (rollback failed for provisional row ${data.id as number}: ${rollbackError.message}; assets retained because the surviving row may reference them; manual reconciliation may be needed; ${rowState})`
             : baseError,
         });
         continue;
@@ -490,6 +510,15 @@ async function batchPublishBlog(
     }
 
     for (const item of operation.updates) {
+      const pointerViolation = clientBodyPointerRejection(item.data);
+      if (pointerViolation) {
+        markFailed(evidence, {
+          kind: 'update',
+          id: item.id,
+          error: pointerViolation,
+        });
+        continue;
+      }
       const validation = validateBlogData(item.data);
       if (!validation.isValid) {
         markFailed(evidence, {
@@ -648,6 +677,15 @@ async function batchPublishBlog(
             );
             Object.assign(dbUpdate, bodyPointerUpdates(storedBodies));
           } catch (error) {
+            // The replacement cover was uploaded before this failure; remove
+            // it too. The previously committed cover is untouched.
+            if (uploaded) {
+              await removeStorageObjectBestEffort(
+                admin,
+                bucket,
+                uploaded.path
+              );
+            }
             await removeBodyUploads(admin, bucket, bodyStaged);
             markFailed(evidence, {
               kind: 'update',
@@ -895,6 +933,10 @@ async function createBlog(
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
+    const pointerViolation = clientBodyPointerRejection(data);
+    if (pointerViolation) {
+      return { success: false, error: pointerViolation };
+    }
 
     const { id: userId } = await requireAllowedPostWriter();
     // Legacy single-shot path has no body-file upload: refuse staged refs.
@@ -1002,6 +1044,10 @@ async function updateBlog(
     const validation = validateBlogData(data);
     if (!validation.isValid) {
       return { success: false, error: validation.error };
+    }
+    const pointerViolation = clientBodyPointerRejection(data);
+    if (pointerViolation) {
+      return { success: false, error: pointerViolation };
     }
     // Legacy single-shot path has no body-file upload: refuse staged refs.
     if (hasPendingRefs(data.body_en, data.body_it)) {

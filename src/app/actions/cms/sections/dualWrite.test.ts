@@ -31,6 +31,7 @@ vi.mock('blurkit/node', () => ({
   encode: vi.fn(async () => ({ hash: 'LEHV6nWB2yk8pyo0adR*.7kCMdnj' })),
 }));
 
+import type { BatchCommitEvidence } from '@/libs/cms/batchEvidence';
 import { blogActions } from '@/app/actions/cms/sections/blogActions';
 
 const EDITOR = [{ email: 'admin@example.com', role: 'editor' }];
@@ -357,6 +358,185 @@ describe('blog dual-write: single-shot paths', () => {
     });
 
     expect(result.success).toBe(false);
+    expect(h.fake.state.tables.blog_posts ?? []).toEqual([]);
+  });
+});
+
+describe('blog dual-write: review hardening', () => {
+  const FORGED_EN = `blog/999/en/${'f'.repeat(64)}.md`;
+  const FORGED_IT = `blog/999/it/${'f'.repeat(64)}.md`;
+
+  const seededRow = () => ({
+    blog_posts: [
+      {
+        id: 7,
+        title_en: 'T',
+        body_en: '# old en',
+        body_it: '# old it',
+        body_en_path: `blog/7/en/${'a'.repeat(64)}.md`,
+        body_it_path: `blog/7/it/${'b'.repeat(64)}.md`,
+        image: '',
+        hidden: false,
+      },
+    ],
+  });
+
+  it('rejects forged pointers on batch CREATE before any mutation', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake({ blog_posts: [] });
+    const itemData = { ...blogCreate().data, body_en_path: FORGED_EN };
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [{ ...blogCreate(), data: itemData }],
+      updates: [],
+      deletes: [],
+    });
+    expect(result.success).toBe(false);
+    // Test boundary: batch actions put BatchCommitEvidence in `data`.
+    const evidence = result.data as BatchCommitEvidence;
+    expect(evidence.failed[0]?.error).toContain('server-generated');
+    expect(h.fake.state.tables.blog_posts ?? []).toEqual([]);
+    expect(contentObjectKeys(h.fake)).toEqual([]);
+  });
+
+  it('rejects forged pointers on batch UPDATE before any mutation', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake(seededRow());
+    const forgedUpdate = { body_en: '# new', body_en_path: FORGED_EN };
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [{ id: 7, data: forgedUpdate }],
+      deletes: [],
+    });
+    expect(result.success).toBe(false);
+    const row = h.fake.state.tables.blog_posts[0];
+    expect(row?.body_en_path).toBe(`blog/7/en/${'a'.repeat(64)}.md`);
+    expect(row?.body_en).toBe('# old en');
+    expect(contentObjectKeys(h.fake)).toEqual([]);
+  });
+
+  it('rejects forged pointers on single-shot CREATE', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake({ blog_posts: [] });
+    const payload = { ...blogCreate().data, body_en_path: FORGED_EN };
+    const result = await blogActions({ type: 'CREATE', data: payload });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('server-generated');
+    expect(h.fake.state.tables.blog_posts ?? []).toEqual([]);
+  });
+
+  it('rejects forged pointers on single-shot UPDATE', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake(seededRow());
+    const payload = { body_it: '# new it', body_it_path: FORGED_IT };
+    const result = await blogActions({ type: 'UPDATE', id: 7, data: payload });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('server-generated');
+    const row = h.fake.state.tables.blog_posts[0];
+    expect(row?.body_it_path).toBe(`blog/7/it/${'b'.repeat(64)}.md`);
+  });
+
+  it('removes only the newly uploaded cover when the Markdown upload fails', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    const oldCover = `https://fake.supabase.co/storage/v1/object/public/website-dev/blog/7/old.webp`;
+    h.fake = fake(
+      {
+        blog_posts: [
+          {
+            ...seededRow().blog_posts[0],
+            image: oldCover,
+          },
+        ],
+      },
+      { failUpload: { pathIncludes: '.md', message: 'bucket down' } }
+    );
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [{ id: 7, data: { body_en: '# new en' }, file: webpFile() }],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(false);
+    const uploadedCover = h.fake.state.uploads[0];
+    expect(uploadedCover).toBeTruthy();
+    expect(h.fake.state.removed).toEqual([uploadedCover]);
+    // Previous committed state and its cover remain intact.
+    const row = h.fake.state.tables.blog_posts[0];
+    expect(row?.image).toBe(oldCover);
+    expect(row?.body_en).toBe('# old en');
+    expect(row?.body_en_path).toBe(`blog/7/en/${'a'.repeat(64)}.md`);
+  });
+
+  it('cleans staged assets after a successful provisional rollback', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake({ blog_posts: [] }, {
+      failUpload: { pathIncludes: '.md', message: 'bucket down' },
+    });
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [blogCreate()],
+      updates: [],
+      deletes: [],
+    });
+    expect(result.success).toBe(false);
+    expect(h.fake.state.tables.blog_posts ?? []).toEqual([]);
+    // The staged cover is removed once the row is confirmed gone.
+    expect(h.fake.state.removed.length).toBeGreaterThan(0);
+  });
+
+  it('retains assets and reports the row when the provisional rollback fails', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake({ blog_posts: [] }, {
+      failUpload: { pathIncludes: '.md', message: 'bucket down' },
+      failNext: { table: 'blog_posts', mode: 'delete', message: 'delete blocked' },
+    });
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [blogCreate()],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(false);
+    const row = h.fake.state.tables.blog_posts[0];
+    expect(row).toBeDefined();
+    expect(row?.hidden).toBe(true);
+    // A surviving row may reference the assets, so nothing is deleted.
+    expect(h.fake.state.removed).toEqual([]);
+    const evidence = result.data as BatchCommitEvidence;
+    expect(evidence.failed[0]?.error).toContain(
+      `provisional row ${row?.id as number}`
+    );
+    expect(evidence.failed[0]?.error).toContain('manual reconciliation');
+    expect(h.invalidate).not.toHaveBeenCalled();
+  });
+
+  it('fails the create when the final commit matches zero rows', async () => {
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
+    h.fake = fake({ blog_posts: [] }, {
+      failNext: {
+        table: 'blog_posts',
+        mode: 'update',
+        message: 'no rows',
+        zeroRows: true,
+      },
+    });
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [blogCreate()],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(false);
+    const evidence = result.data as BatchCommitEvidence;
+    expect(evidence.created).toEqual([]);
+    expect(evidence.createdIds).toEqual({});
+    expect(evidence.failed[0]?.error).toContain('expected exactly 1');
+    // Rolled back, never reported as created.
     expect(h.fake.state.tables.blog_posts ?? []).toEqual([]);
   });
 });

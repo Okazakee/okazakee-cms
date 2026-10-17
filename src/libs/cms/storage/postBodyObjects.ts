@@ -50,6 +50,27 @@ export type StorePostBodiesResult = {
   cleared: PostBodyLocale[];
 };
 
+/** Server-generated pointer columns clients must never supply. */
+const BODY_POINTER_FIELDS = ['body_en_path', 'body_it_path'] as const;
+
+/**
+ * Client action payloads are typed but not validated at runtime, and several
+ * paths spread them into DB writes. Own-property detection only: an inherited
+ * `body_en_path` (e.g. from a prototype) is not a payload field.
+ *
+ * Returns an error message, or null when the payload is clean. Pointer paths are
+ * always generated server-side from the final body and the real row id.
+ */
+export function clientBodyPointerRejection(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null) return null;
+  for (const field of BODY_POINTER_FIELDS) {
+    if (Object.hasOwn(data, field)) {
+      return `${field} is server-generated and cannot be supplied by clients`;
+    }
+  }
+  return null;
+}
+
 /** The locales this module will consider. */
 const BODY_LOCALES: PostBodyLocale[] = ['en', 'it'];
 
