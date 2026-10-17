@@ -28,6 +28,27 @@ export const ASSET_BUCKET_DEV = 'website-dev';
 /** Production content bucket — deliberately NOT created in this phase. */
 export const CONTENT_BUCKET_PROD = 'website-content';
 
+/**
+ * Deterministic environment -> content bucket selection, fail-closed. Only the
+ * two consistent production/dev pairs resolve; a mismatched or unknown pair
+ * throws rather than guessing. Pure: it neither provisions nor verifies
+ * anything.
+ */
+export function resolveContentBucket(env: {
+  appEnv: string;
+  schema: string;
+}): string {
+  if (env.appEnv === 'production' && env.schema === 'public') {
+    return CONTENT_BUCKET_PROD;
+  }
+  if (env.appEnv !== 'production' && env.schema === 'dev_staging') {
+    return CONTENT_BUCKET_DEV;
+  }
+  throw new Error(
+    `[content-bucket] refusing to resolve a content bucket for APP_ENV=${env.appEnv} schema=${env.schema} (expected production+public or non-production+dev_staging)`
+  );
+}
+
 export type StorageBucketRow = {
   id: string;
   name: string;

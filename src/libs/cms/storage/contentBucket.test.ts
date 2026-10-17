@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONTENT_BUCKET_DEV,
+  CONTENT_BUCKET_PROD,
   assertContentBucketSetupAllowed,
+  resolveContentBucket,
   runContentBucketSetup,
   setupContentBucket,
   type StorageBucketApi,
@@ -211,5 +213,33 @@ describe('content bucket environment gate', () => {
         fakeStorage(null).api
       )
     ).rejects.toThrow(/missing SUPABASE_SECRET_KEY/);
+  });
+});
+
+describe('content bucket resolution', () => {
+  it('maps the two consistent environment pairs', () => {
+    expect(resolveContentBucket({ appEnv: 'production', schema: 'public' })).toBe(
+      CONTENT_BUCKET_PROD
+    );
+    expect(
+      resolveContentBucket({ appEnv: 'development', schema: 'dev_staging' })
+    ).toBe(CONTENT_BUCKET_DEV);
+    expect(resolveContentBucket({ appEnv: 'staging', schema: 'dev_staging' })).toBe(
+      CONTENT_BUCKET_DEV
+    );
+  });
+
+  it('fails closed on mismatched or unknown pairs', () => {
+    for (const env of [
+      { appEnv: 'development', schema: 'public' },
+      { appEnv: 'production', schema: 'dev_staging' },
+      { appEnv: 'staging', schema: 'public' },
+      { appEnv: 'development', schema: 'qa_staging' },
+      { appEnv: '', schema: '' },
+    ]) {
+      expect(() => resolveContentBucket(env)).toThrow(
+        /refusing to resolve a content bucket/
+      );
+    }
   });
 });
