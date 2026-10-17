@@ -2,7 +2,7 @@
 
 import { Calendar, FileText, Plus } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type Author,
   portfolioActions,
@@ -36,15 +36,26 @@ import {
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
+import {
+  bodyColumnFields,
+  type LoadedBodies,
+  mergeFetchedBodies,
+  publishBodyFields,
+  publishedBodies,
+  retainDraftBodies,
+  rowBodies,
+} from '@/hooks/cms/postBodyState';
 import { useBodyImages } from '@/hooks/cms/useBodyImages';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
+import { usePostBodies } from '@/hooks/cms/usePostBodies';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { bodyLazyLoadEnabled } from '@/libs/cms/postList';
 import { demoPortfolioPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
-import type { PortfolioPost } from '@/types/fetchedData.types';
+import type { PortfolioListPost } from '@/types/fetchedData.types';
 import {
   deriveButtonsFromPost,
   type PostButton,
@@ -53,7 +64,17 @@ import {
 } from '@/utils/cms/postButtons';
 
 type FormMode = 'list' | 'create' | 'edit';
-type EditablePost = PortfolioPost & { image_file?: File | null };
+
+/**
+ * Phase 9B: a metadata-only list row plus the local-only draft bits. The body
+ * fields are OPTIONAL — an absent locale means NOT LOADED, never an
+ * intentionally empty body — so every body read goes through `rowBodies()`.
+ */
+type EditablePost = PortfolioListPost & {
+  body_en?: string;
+  body_it?: string;
+  image_file?: File | null;
+};
 
 interface PortfolioFormData {
   title_en: string;
@@ -113,6 +134,30 @@ export default function PortfolioSection() {
   >([]);
   const [deletedIds, setDeletedIds] = useState<Set<number>>(new Set());
 
+  // Lazy Markdown bodies (Phase 9B). `baselinesRef` holds the committed
+  // Markdown each dirty candidate is compared against; `postsRef` and
+  // `modifiedRef` mirror state that async list loads and publishes read after
+  // a render has been queued, so neither can observe a stale closure.
+  const baselinesRef = useRef<Map<number, LoadedBodies>>(new Map());
+  const postsRef = useRef(posts);
+  postsRef.current = posts;
+  const modifiedRef = useRef(modifiedIds);
+  const markModified = useCallback((next: Set<number>) => {
+    modifiedRef.current = next;
+    setModifiedIds(next);
+  }, []);
+  const {
+    loadingId: loadingBodyId,
+    failure: bodyFailure,
+    load: loadBody,
+    clearFailure: clearBodyFailure,
+  } = usePostBodies(
+    useCallback(
+      (id: number) => portfolioActions({ type: 'GET_BODIES', id }),
+      []
+    )
+  );
+
   const imgUpload = useFileUpload({
     accept: 'image/*',
     maxSizeMB: 10,
@@ -138,6 +183,7 @@ export default function PortfolioSection() {
       // Offline showcase: fixture posts, no server round-trip.
       if (useCmsStore.getState().demoMode) {
         if (!current()) return;
+        baselinesRef.current = new Map();
         setPosts(
           JSON.parse(JSON.stringify(demoPortfolioPosts)).map(
             (p: EditablePost) => ({ ...p, image_file: null })
@@ -155,14 +201,53 @@ export default function PortfolioSection() {
         return;
       }
       try {
-        const r = await portfolioActions({ type: 'GET' });
+        // Phase 9B: the metadata-only projection when the lazy gate is on, the
+        // legacy full read otherwise. Either way no body is fetched here — a
+        // list row without Markdown means "not loaded".
+        const r = await portfolioActions({
+          type: bodyLazyLoadEnabled() ? 'GET_LIST' : 'GET',
+        });
         if (!current()) return;
         if (r.success) {
-          const server = (r.data as PortfolioPost[]).map((p) => ({
-            ...p,
-            image_file: null,
-          }));
-          setPosts(drafts ? mergeServerWithDrafts(server, drafts) : server);
+          // `GET` (flag off) carries bodies, `GET_LIST` does not; the declared
+          // list type only ever promises the metadata columns, so a body is
+          // read strictly through the loader.
+          const server: EditablePost[] = (r.data as PortfolioListPost[]).map(
+            (p) => ({
+              ...p,
+              image_file: null,
+            })
+          );
+          const merged = drafts
+            ? mergeServerWithDrafts(server, drafts)
+            : server;
+          // Bodies may only survive for a post that still holds an unresolved
+          // draft; every other row returns to "not loaded" and loses its
+          // baseline.
+          const stillModified: ReadonlySet<number> = drafts
+            ? new Set(drafts.modified.keys())
+            : modifiedRef.current;
+          const baselines = baselinesRef.current;
+          const nextBaselines = new Map<number, LoadedBodies>();
+          setPosts(
+            merged.map((row) => {
+              const baseline = baselines.get(row.id);
+              const modified = stillModified.has(row.id);
+              const previous = postsRef.current.find((p) => p.id === row.id);
+              if (modified && baseline) nextBaselines.set(row.id, baseline);
+              return {
+                ...row,
+                ...bodyColumnFields(
+                  retainDraftBodies({
+                    existing: previous ? rowBodies(previous) : undefined,
+                    baseline,
+                    modified,
+                  })
+                ),
+              };
+            })
+          );
+          baselinesRef.current = nextBaselines;
         }
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : 'Failed');
@@ -184,11 +269,12 @@ export default function PortfolioSection() {
   const openCreate = () => {
     setFormData({ ...emptyForm, author_id: user?.id ?? '' });
     imgUpload.clearFile();
+    clearBodyFailure();
     setEditingId(null);
     setFormLocale(activeLocale);
     setMode('create');
   };
-  const openEdit = (post: EditablePost) => {
+  const applyEdit = (post: EditablePost) => {
     setFormData({
       title_en: post.title_en ?? '',
       title_it: post.title_it ?? '',
@@ -211,9 +297,44 @@ export default function PortfolioSection() {
     setFormLocale(activeLocale);
     setMode('edit');
   };
+
+  /**
+   * Phase 9B: with the lazy gate on, an existing post's Markdown is fetched
+   * BEFORE the editor opens, so the form is never populated from bodies the
+   * client never loaded. A failed read surfaces the failure and leaves the
+   * editor closed — an unknown body must never become an empty-body save.
+   * Pending creates (local Markdown) and the flag-off path stay synchronous.
+   */
+  const openEdit = async (post: EditablePost) => {
+    if (
+      post.id > 0 &&
+      bodyLazyLoadEnabled() &&
+      !useCmsStore.getState().demoMode
+    ) {
+      clearBodyFailure();
+      const fetched = await loadBody(post.id);
+      if (!fetched) return;
+      // A fresh read rebases the baseline without discarding a local edit the
+      // post still holds as a draft.
+      const merged = mergeFetchedBodies({
+        fetched,
+        baseline: baselinesRef.current.get(post.id),
+        local: rowBodies(post),
+      });
+      baselinesRef.current.set(post.id, merged.baseline);
+      const loaded = bodyColumnFields(merged.current);
+      setPosts((prev) =>
+        prev.map((p) => (p.id === post.id ? { ...p, ...loaded } : p))
+      );
+      applyEdit({ ...post, ...loaded });
+      return;
+    }
+    applyEdit(post);
+  };
   const closeForm = () => {
     setMode('list');
     imgUpload.clearFile();
+    clearBodyFailure();
     setEditingId(null);
   };
 
@@ -280,7 +401,7 @@ export default function PortfolioSection() {
           : p
       )
     );
-    setModifiedIds((prev) => new Set(prev).add(editingId));
+    markModified(new Set(modifiedRef.current).add(editingId));
     closeForm();
   };
 
@@ -292,11 +413,9 @@ export default function PortfolioSection() {
       setDeletedIds((prev) => new Set(prev).add(id));
     }
     // A deleted row must not survive as a pending modification.
-    setModifiedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+    const nextModified = new Set(modifiedRef.current);
+    nextModified.delete(id);
+    markModified(nextModified);
     setPosts((prev) => prev.filter((p) => p.id !== id));
   };
 
@@ -304,13 +423,16 @@ export default function PortfolioSection() {
   // Publish commits it through the normal evidence flow.
   const toggleHidden = (id: number) => {
     setPosts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p))
+      prev.map((p) =>
+        p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p
+      )
     );
-    setModifiedIds((prev) => new Set(prev).add(id));
+    markModified(new Set(modifiedRef.current).add(id));
   };
 
   const handlePublish = useCallback(async () => {
     const errors: string[] = [];
+    const lazyBodyLoad = bodyLazyLoadEnabled();
     setIsUpdating(true);
     setError(null);
 
@@ -329,7 +451,7 @@ export default function PortfolioSection() {
         }))
       );
       setNewPosts([]);
-      setModifiedIds(new Set());
+      markModified(new Set());
       setDeletedIds(new Set());
       bodyImages.reconcile(retained.flatMap((p) => [p.body_en, p.body_it]));
       setIsUpdating(false);
@@ -348,18 +470,15 @@ export default function PortfolioSection() {
           tempId: String(item.post.id),
           file,
           blurhashURL: post.blurhashURL,
-          bodyFiles: bodyImages.referencedPayload([
-            post.body_en,
-            post.body_it,
-          ]),
+          bodyFiles: bodyImages.referencedPayload([post.body_en, post.body_it]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
             image: '',
             description_en: post.description_en,
             description_it: post.description_it,
-            body_en: post.body_en,
-            body_it: post.body_it,
+            body_en: post.body_en ?? '',
+            body_it: post.body_it ?? '',
             blurhashURL: post.blurhashURL || '',
             post_tags: post.post_tags,
             buttons: post.buttons ?? [],
@@ -375,23 +494,32 @@ export default function PortfolioSection() {
     const updates = updateIds.flatMap((id) => {
       const post = posts.find((p) => p.id === id);
       if (!post) return [];
+      // Lazy gate on: only Markdown that is loaded AND differs from its
+      // committed baseline travels, so a metadata-only or visibility-only
+      // change sends no body field and stages no body image — the committed
+      // body and its pointer are left untouched. Gate off: the row still
+      // carries the server bodies, so both fields are sent exactly as before.
+      const body = rowBodies(post);
+      const baseline = lazyBodyLoad ? baselinesRef.current.get(id) : undefined;
+      const bodyFields = lazyBodyLoad
+        ? publishBodyFields(body, baseline)
+        : { en: post.body_en ?? '', it: post.body_it ?? '' };
+      const bodyReferences = lazyBodyLoad
+        ? publishedBodies(body, baseline)
+        : [post.body_en, post.body_it];
       return [
         {
           id,
           file: post.image_file || null,
           currentImageUrl: post.image,
           blurhashURL: post.blurhashURL,
-          bodyFiles: bodyImages.referencedPayload([
-            post.body_en,
-            post.body_it,
-          ]),
+          bodyFiles: bodyImages.referencedPayload(bodyReferences),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
             description_en: post.description_en,
             description_it: post.description_it,
-            body_en: post.body_en,
-            body_it: post.body_it,
+            ...bodyColumnFields(bodyFields),
             buttons: post.buttons ?? [],
             post_tags: post.post_tags,
             created_at: post.created_at,
@@ -469,7 +597,9 @@ export default function PortfolioSection() {
         setNewPosts((prev) =>
           prev.filter((item) => retainedCreateSet.has(String(item.post.id)))
         );
-        setModifiedIds(new Set(retainedUpdates));
+        // Baselines follow the drafts: committed ids lose theirs (fetchData
+        // above already dropped them), retained drafts keep theirs.
+        markModified(new Set(retainedUpdates as number[]));
         setDeletedIds(new Set(retainedDeletes));
         // Drop staged body images no retained draft references anymore;
         // a full success clears everything.
@@ -518,11 +648,13 @@ export default function PortfolioSection() {
     } else {
       fetchData();
     }
-    setModifiedIds(new Set());
+    markModified(new Set());
     setNewPosts([]);
     setDeletedIds(new Set());
     setError(null);
-    // Drafts are gone: every staged blob is residue.
+    // Every draft is gone: its baseline and staged blobs are residue.
+    baselinesRef.current = new Map();
+    clearBodyFailure();
     bodyImages.revokeAll();
   };
 
@@ -604,7 +736,9 @@ export default function PortfolioSection() {
             value={formLocale === 'en' ? formData.body_en : formData.body_it}
             onChange={(v) =>
               setFormData((p) =>
-                formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
+                formLocale === 'en'
+                  ? { ...p, body_en: v }
+                  : { ...p, body_it: v }
               )
             }
             stageImages={bodyImages.stageFiles}
@@ -820,6 +954,9 @@ export default function PortfolioSection() {
         }
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
+      {bodyFailure && (
+        <ErrorBanner message={bodyFailure.error} onDismiss={clearBodyFailure} />
+      )}
 
       <EditorToolbar
         title={t('portfolio.postsTitle')}
@@ -886,12 +1023,24 @@ export default function PortfolioSection() {
                   </div>
                 </div>
                 <div className="flex w-full justify-end sm:w-auto">
-                  <CardToolbar
-                    onToggleHidden={() => toggleHidden(post.id)}
-                    hidden={post.hidden ?? false}
-                    onEdit={() => openEdit(post)}
-                    onDelete={() => handleDelete(post.id)}
-                  />
+                  {loadingBodyId === post.id ? (
+                    <div
+                      role="status"
+                      aria-label={t('common.loading')}
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center"
+                    >
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-accent-violet" />
+                    </div>
+                  ) : (
+                    <CardToolbar
+                      onToggleHidden={() => toggleHidden(post.id)}
+                      hidden={post.hidden ?? false}
+                      onEdit={() => {
+                        void openEdit(post);
+                      }}
+                      onDelete={() => handleDelete(post.id)}
+                    />
+                  )}
                 </div>
               </li>
             );

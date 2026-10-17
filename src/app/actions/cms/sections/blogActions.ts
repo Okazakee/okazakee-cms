@@ -46,6 +46,7 @@ import {
   type MutationResult,
   type RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { BLOG_LIST_COLUMNS } from '@/libs/cms/postList';
 import type { BodyContentStorageApi } from '@/libs/cms/storage/bodyContent';
 import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { BLOG_STAGING_PREFIX, blogPostPrefix } from '@/libs/cms/storage/paths';
@@ -63,6 +64,7 @@ import { createClient } from '@/utils/supabase/server';
 
 type BlogOperation =
   | { type: 'GET' }
+  | { type: 'GET_LIST' }
   | { type: 'GET_AUTHORS' }
   | { type: 'GET_BODIES'; id: number }
   | { type: 'CREATE'; data: CreateBlogData }
@@ -251,6 +253,9 @@ export async function blogActions(
     switch (operation.type) {
       case 'GET':
         return await getBlogData(supabase);
+
+      case 'GET_LIST':
+        return await getBlogList(supabase);
 
       case 'GET_AUTHORS':
         return await getAuthors(supabase);
@@ -966,6 +971,41 @@ async function batchPublishBlog(
     };
   }
 }
+/**
+ * Metadata-only blog list (Phase 9B).
+ *
+ * Same authorization model and sort order as `GET`, but with an explicit
+ * projection that cannot carry a Markdown body or a body pointer: rendering a
+ * list must never fetch post content. `GET` is left untouched for compatibility.
+ */
+async function getBlogList(_supabase: SupabaseClient): Promise<BlogResult> {
+  try {
+    // CMS lists include drafts: published-only RLS hides them from session
+    // reads, so this goes through the admin client after the requireAuth gate
+    // in blogActions (service-role-after-check).
+    const { data, error } = await getAdminClient()
+      .from('blog_posts')
+      .select(BLOG_LIST_COLUMNS)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Database error:', error);
+      return {
+        success: false,
+        error: `Database error: ${error.message}`,
+      };
+    }
+
+    return { success: true, data: data || [] };
+  } catch (error) {
+    console.error('Error fetching blog list:', error);
+    return {
+      success: false,
+      error: `Failed to fetch blog list: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    };
+  }
+}
+
 async function getBlogData(_supabase: SupabaseClient): Promise<BlogResult> {
   try {
     // CMS lists include drafts: published-only RLS hides them from session

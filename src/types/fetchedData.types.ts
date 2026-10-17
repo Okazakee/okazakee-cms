@@ -98,6 +98,14 @@ export type BlogPost = {
   author_id?: string;
 };
 
+/**
+ * Metadata-only list rows (Phase 9B). The CMS list actions project every
+ * non-body column, so a list row deliberately has no `body_*` field: absent
+ * means "not loaded", never "empty".
+ */
+export type BlogListPost = Omit<BlogPost, 'body_en' | 'body_it'>;
+export type PortfolioListPost = Omit<PortfolioPost, 'body_en' | 'body_it'>;
+
 export type Contact = {
   id: number;
   position: number;

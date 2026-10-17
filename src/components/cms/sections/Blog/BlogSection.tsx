@@ -2,7 +2,7 @@
 
 import { Calendar, EyeOff, FileText, Plus } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type Author,
   blogActions,
@@ -39,15 +39,35 @@ import {
 import { useBodyImages } from '@/hooks/cms/useBodyImages';
 import { useFileUpload } from '@/hooks/cms/useFileUpload';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
+import {
+  bodyColumnFields,
+  type LoadedBodies,
+  mergeFetchedBodies,
+  publishBodyFields,
+  publishedBodies,
+  retainDraftBodies,
+  rowBodies,
+} from '@/hooks/cms/postBodyState';
+import { usePostBodies } from '@/hooks/cms/usePostBodies';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
+import { bodyLazyLoadEnabled } from '@/libs/cms/postList';
 import { demoBlogPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
-import type { BlogPost } from '@/types/fetchedData.types';
+import type { BlogListPost } from '@/types/fetchedData.types';
 
 type FormMode = 'list' | 'create' | 'edit';
-type EditablePost = BlogPost & { image_file?: File | null };
+/**
+ * A list row: metadata only under the lazy path, plus the Markdown of the
+ * locales that were actually loaded. `body_en`/`body_it` absent means "not
+ * loaded" — never "empty".
+ */
+type EditablePost = BlogListPost & {
+  body_en?: string;
+  body_it?: string;
+  image_file?: File | null;
+};
 
 interface BlogFormData {
   title_en: string;
@@ -114,6 +134,26 @@ export default function BlogSection() {
   const bodyImages = useBodyImages();
   const [previewOpen, setPreviewOpen] = useState(false);
 
+  // Phase 9B: the committed Markdown each loaded editor was seeded from. Kept
+  // in a ref: the baseline is only ever read while computing a publish or a
+  // reload, never rendered.
+  const baselines = useRef<Map<number, LoadedBodies>>(new Map());
+  // Mirrors of state that `fetchData` must read without re-creating itself
+  // (a stale closure here would mis-flag a draft row as unmodified).
+  const modifiedRef = useRef<ReadonlySet<number>>(new Set());
+  modifiedRef.current = modifiedIds;
+
+  const fetchPostBodies = useCallback(
+    (id: number) => blogActions({ type: 'GET_BODIES', id }),
+    []
+  );
+  const {
+    loadingId: bodyLoadingId,
+    failure: bodyFailure,
+    load: loadBodies,
+    clearFailure: clearBodyFailure,
+  } = usePostBodies(fetchPostBodies);
+
   const isDirty =
     modifiedIds.size > 0 || newPosts.length > 0 || deletedIds.size > 0;
   useSectionDirty('blog', isDirty);
@@ -147,14 +187,45 @@ export default function BlogSection() {
         return;
       }
       try {
-        const r = await blogActions({ type: 'GET' });
+        // Phase 9B: metadata-only rows when the lazy path is on. `GET` keeps
+        // pulling the full rows (bodies included) otherwise.
+        const lazyBodies = bodyLazyLoadEnabled();
+        const r = await blogActions({ type: lazyBodies ? 'GET_LIST' : 'GET' });
         if (!current()) return;
         if (r.success) {
-          const server = (r.data as BlogPost[]).map((p) => ({
-            ...p,
-            image_file: null,
-          }));
-          setPosts(drafts ? mergeServerWithDrafts(server, drafts) : server);
+          const server: EditablePost[] = (r.data as BlogListPost[]).map(
+            (p) => ({
+              ...p,
+              image_file: null,
+            })
+          );
+          setPosts((prev) => {
+            const merged = drafts
+              ? mergeServerWithDrafts(server, drafts)
+              : server;
+            if (!lazyBodies) return merged;
+            // List rows carry no bodies: only an unresolved local body edit
+            // survives a refetch, everything else degrades to "not loaded".
+            const previous = new Map(prev.map((p) => [p.id, p]));
+            return merged.map((row) => {
+              const existing = previous.get(row.id);
+              return {
+                ...row,
+                ...retainDraftBodies({
+                  existing: existing ? rowBodies(existing) : undefined,
+                  baseline: baselines.current.get(row.id),
+                  modified: modifiedRef.current.has(row.id),
+                }),
+              };
+            });
+          });
+          if (lazyBodies) {
+            // An unmodified post has no draft left, so its baseline is stale:
+            // the next open must re-read the committed text.
+            for (const id of [...baselines.current.keys()]) {
+              if (!modifiedRef.current.has(id)) baselines.current.delete(id);
+            }
+          }
         }
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : 'Failed');
@@ -180,7 +251,7 @@ export default function BlogSection() {
     setFormLocale(activeLocale);
     setMode('create');
   };
-  const openEdit = (post: EditablePost) => {
+  const openEditor = (post: EditablePost) => {
     setFormData({
       title_en: post.title_en ?? '',
       title_it: post.title_it ?? '',
@@ -199,6 +270,34 @@ export default function BlogSection() {
     setEditingId(post.id);
     setFormLocale(activeLocale);
     setMode('edit');
+  };
+  /**
+   * Phase 9B: an existing server post has no Markdown on its list row, so the
+   * editor only opens once the reader answered. A failed (or superseded) read
+   * surfaces its error and leaves the list alone — an empty editor over
+   * committed text is exactly the save that must never happen.
+   */
+  const openEdit = async (post: EditablePost) => {
+    if (!bodyLazyLoadEnabled() || post.id <= 0) {
+      openEditor(post);
+      return;
+    }
+    const fetched = await loadBodies(post.id);
+    if (!fetched) return;
+    const { baseline, current } = mergeFetchedBodies({
+      fetched,
+      baseline: baselines.current.get(post.id),
+      local: rowBodies(post),
+    });
+    baselines.current.set(post.id, baseline);
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === post.id
+          ? { ...p, body_en: current.en, body_it: current.it }
+          : p
+      )
+    );
+    openEditor({ ...post, body_en: current.en, body_it: current.it });
   };
   const closeForm = () => {
     setMode('list');
@@ -317,8 +416,9 @@ export default function BlogSection() {
             image: '',
             description_en: post.description_en,
             description_it: post.description_it,
-            body_en: post.body_en,
-            body_it: post.body_it,
+            // A staged create always carries its locally written bodies.
+            body_en: post.body_en ?? '',
+            body_it: post.body_it ?? '',
             blurhashURL: post.blurhashURL || '',
             post_tags: post.post_tags,
             created_at: post.created_at,
@@ -330,26 +430,34 @@ export default function BlogSection() {
     });
     // Negative ids are pending creates, not updates.
     const updateIds = Array.from(modifiedIds).filter((id) => id > 0);
+    const lazyBodies = bodyLazyLoadEnabled();
     const updates = updateIds.flatMap((id) => {
       const post = posts.find((p) => p.id === id);
       if (!post) return [];
+      const current = rowBodies(post);
+      const baseline = baselines.current.get(id);
+      // Phase 9B: an update carries only the Markdown locales that are loaded
+      // AND dirty, so a visibility- or metadata-only edit never rewrites a
+      // committed body (nor uploads an image only a clean body references).
+      const bodyFiles = lazyBodies
+        ? publishedBodies(current, baseline)
+        : [post.body_en, post.body_it];
+      const bodyFields = lazyBodies
+        ? bodyColumnFields(publishBodyFields(current, baseline))
+        : { body_en: post.body_en, body_it: post.body_it };
       return [
         {
           id,
           file: post.image_file || null,
           currentImageUrl: post.image,
           blurhashURL: post.blurhashURL,
-          bodyFiles: bodyImages.referencedPayload([
-            post.body_en,
-            post.body_it,
-          ]),
+          bodyFiles: bodyImages.referencedPayload(bodyFiles),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
             description_en: post.description_en,
             description_it: post.description_it,
-            body_en: post.body_en,
-            body_it: post.body_it,
+            ...bodyFields,
             post_tags: post.post_tags,
             created_at: post.created_at,
             author_id: post.author_id,
@@ -406,6 +514,12 @@ export default function BlogSection() {
         retainedUpdates = reconcile.retainedUpdates as number[];
         retainedDeletes = reconcile.retainedDeletes as number[];
         errors.push(...reconcile.failureMessages);
+
+        // A committed body is now the server baseline; an unresolved draft
+        // keeps its own so its next publish still sends only local edits.
+        for (const id of updateIds) {
+          if (!retainedUpdates.includes(id)) baselines.current.delete(id);
+        }
 
         // Refetch the server rows and re-apply only the unresolved drafts so
         // committed writes are never overwritten by stale local state.
@@ -481,7 +595,9 @@ export default function BlogSection() {
     setNewPosts([]);
     setDeletedIds(new Set());
     setError(null);
-    // Drafts are gone: every staged blob is residue.
+    // Drafts are gone: every staged blob is residue, and every loaded editor
+    // baseline is stale.
+    baselines.current.clear();
     bodyImages.revokeAll();
   };
 
@@ -707,7 +823,22 @@ export default function BlogSection() {
           />
         }
       />
-      <ErrorBanner message={error} onDismiss={() => setError(null)} />
+      <ErrorBanner
+        message={error ?? bodyFailure?.error ?? null}
+        onDismiss={() => {
+          setError(null);
+          clearBodyFailure();
+        }}
+      />
+      {bodyLoadingId !== null && (
+        <p
+          role="status"
+          className="flex items-center gap-2 text-sm text-text-muted"
+        >
+          <span className="h-4 w-4 animate-spin rounded-full border-b-2 border-accent-violet" />
+          {t('common.loading')}
+        </p>
+      )}
 
       <EditorToolbar
         title={t('blog.postsTitle')}
@@ -779,7 +910,7 @@ export default function BlogSection() {
                   <CardToolbar
                     onToggleHidden={() => toggleHidden(post.id)}
                     hidden={post.hidden ?? false}
-                    onEdit={() => openEdit(post)}
+                    onEdit={() => void openEdit(post)}
                     onDelete={() => handleDelete(post.id)}
                   />
                 </div>

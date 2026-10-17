@@ -46,6 +46,7 @@ import {
   type MutationResult,
   type RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import { PORTFOLIO_LIST_COLUMNS } from '@/libs/cms/postList';
 import type { BodyContentStorageApi } from '@/libs/cms/storage/bodyContent';
 import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import {
@@ -67,6 +68,7 @@ import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
   | { type: 'GET' }
+  | { type: 'GET_LIST' }
   | { type: 'GET_AUTHORS' }
   | { type: 'GET_BODIES'; id: number }
   | { type: 'CREATE'; data: CreatePortfolioData }
@@ -265,6 +267,9 @@ export async function portfolioActions(
     switch (operation.type) {
       case 'GET':
         return await getPortfolioData(supabase);
+
+      case 'GET_LIST':
+        return await getPortfolioList(supabase);
 
       case 'GET_AUTHORS':
         return await getAuthors(supabase);
@@ -979,6 +984,44 @@ async function batchPublishPortfolio(
     };
   }
 }
+/**
+ * Metadata-only portfolio list (Phase 9B).
+ *
+ * Same authorization model and sort order as `GET`, but with an explicit
+ * projection that cannot carry a Markdown body or a body pointer. The legacy
+ * link columns and `buttons` ARE included: list rendering and
+ * `deriveButtonsFromPost()` still need them. `GET` is left untouched.
+ */
+async function getPortfolioList(
+  _supabase: SupabaseClient
+): Promise<PortfolioResult> {
+  try {
+    // CMS lists include drafts: published-only RLS hides them from session
+    // reads, so this goes through the admin client after the requireAuth gate
+    // in portfolioActions (service-role-after-check).
+    const { data, error } = await getAdminClient()
+      .from('portfolio_posts')
+      .select(PORTFOLIO_LIST_COLUMNS)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Database error:', error);
+      return {
+        success: false,
+        error: `Database error: ${error.message}`,
+      };
+    }
+
+    return { success: true, data: data || [] };
+  } catch (error) {
+    console.error('Error fetching portfolio list:', error);
+    return {
+      success: false,
+      error: `Failed to fetch portfolio list: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    };
+  }
+}
+
 async function getPortfolioData(
   _supabase: SupabaseClient
 ): Promise<PortfolioResult> {
