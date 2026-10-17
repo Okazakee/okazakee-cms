@@ -215,7 +215,7 @@ async function payloadToBuffer(data: unknown): Promise<Buffer> {
 }
 
 /** Exact bytes of a stored object. Throws on Storage error or empty payload. */
-async function readBodyContentBytes(
+export async function readBodyContentBytes(
   storage: BodyContentStorageApi,
   path: string
 ): Promise<Buffer> {

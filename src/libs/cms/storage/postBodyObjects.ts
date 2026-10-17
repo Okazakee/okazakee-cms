@@ -6,9 +6,16 @@
  * buckets or credentials: the caller passes an already-scoped Storage API
  * (`admin.storage.from(bucket)`). It prepares and uploads only the languages a
  * save actually touches, so a metadata-only update makes no Storage call.
+ *
+ * Phase 9A adds the mirrored read path (`readPostBodies`): a Storage-first read
+ * for referenced languages, the legacy DB column for NULL pointers, and hard
+ * integrity errors (never a silent fallback) when a referenced object is
+ * missing, corrupt or disagrees with the committed body.
  */
 import {
   prepareBodyContent,
+  readBodyContentBytes,
+  sha256Hex,
   uploadBodyContent,
   type BodyContentKind,
   type BodyContentLocale,
@@ -159,4 +166,128 @@ export function modifiedLocales(
     if (body !== undefined) requests.push({ locale, body });
   }
   return requests;
+}
+
+/** Committed state for one language of a post, as read from the DB row. */
+export type ReadPostBodyRequest = {
+  /** Legacy DB body for this locale; NULL when the column is empty. */
+  legacy: string | null;
+  /** Committed content-addressed pointer; NULL when the language has none. */
+  path: string | null;
+};
+
+/** Where a returned body came from — drives diagnostics, never the contract. */
+export type PostBodySource = 'legacy' | 'storage';
+
+export type ReadPostBodiesResult = {
+  kind: PostBodyKind;
+  postId: number;
+  /** Exact Markdown per locale; NULL when that language has no body at all. */
+  bodies: Record<PostBodyLocale, string | null>;
+  /** Locales resolved by this call, and from where. */
+  sources: Partial<Record<PostBodyLocale, PostBodySource>>;
+};
+
+/** Canonical key prefix for one language of one post: `<kind>/<postId>/<locale>/`. */
+function pointerPrefix(
+  kind: PostBodyKind,
+  postId: number,
+  locale: PostBodyLocale
+): string {
+  return `${kind}/${postId}/${locale}/`;
+}
+
+/**
+ * The SHA-256 embedded in a committed pointer, or a throw when the pointer does
+ * not name exactly the requested entity, post id and locale with a canonical
+ * `<sha256>.md` file name. This is what stops a mis-typed or cross-post pointer
+ * from silently serving another post's content.
+ */
+function expectedHashFromPointer(
+  kind: PostBodyKind,
+  postId: number,
+  locale: PostBodyLocale,
+  path: string
+): string {
+  const prefix = pointerPrefix(kind, postId, locale);
+  if (!path.startsWith(prefix)) {
+    throw new Error(
+      `[body-read] pointer '${path}' does not belong to ${prefix}`
+    );
+  }
+  const file = path.slice(prefix.length);
+  if (!/^[0-9a-f]{64}\.md$/.test(file)) {
+    throw new Error(
+      `[body-read] pointer '${path}' is not a canonical ${prefix}<sha256>.md key`
+    );
+  }
+  return file.slice(0, -'.md'.length);
+}
+
+/**
+ * Resolves the EN/IT Markdown of a single post.
+ *
+ * Contract per language:
+ * - NULL pointer            -> the legacy DB body (no Storage call).
+ * - pointer + `storage`     -> download the object, verify its bytes hash to the
+ *                              SHA-256 embedded in the key, and — when the
+ *                              legacy column also holds content — verify the two
+ *                              agree.
+ * - pointer + `storage === null` -> error: a referenced object can never be
+ *                              silently rendered as an empty body.
+ *
+ * A missing, unreadable or hash-mismatched object throws; a disagreement between
+ * Storage and the legacy column throws. Nothing here normalizes Markdown: the
+ * exact UTF-8 bytes are the identity, so Unicode and newlines round-trip
+ * unchanged.
+ */
+export async function readPostBodies(
+  storage: BodyContentStorageApi | null,
+  kind: PostBodyKind,
+  postId: number,
+  requests: Partial<Record<PostBodyLocale, ReadPostBodyRequest>>
+): Promise<ReadPostBodiesResult> {
+  const bodies: Record<PostBodyLocale, string | null> = { en: null, it: null };
+  const sources: Partial<Record<PostBodyLocale, PostBodySource>> = {};
+
+  for (const locale of BODY_LOCALES) {
+    const request = requests[locale];
+    if (!request) continue;
+
+    const legacy = request.legacy ?? null;
+    const path = request.path ?? null;
+
+    if (!path) {
+      bodies[locale] = legacy;
+      sources[locale] = 'legacy';
+      continue;
+    }
+
+    if (!storage) {
+      throw new Error(
+        `[body-read] ${path} is referenced but Storage reads are disabled`
+      );
+    }
+
+    const expectedHash = expectedHashFromPointer(kind, postId, locale, path);
+    const bytes = await readBodyContentBytes(storage, path);
+    const actualHash = sha256Hex(bytes);
+    if (actualHash !== expectedHash) {
+      throw new Error(
+        `[body-read] integrity failure at ${path}: content hash ${actualHash} does not match the object key`
+      );
+    }
+
+    const markdown = bytes.toString('utf8');
+    if (legacy !== null && legacy !== markdown) {
+      throw new Error(
+        `[body-read] disagreement at ${path}: stored Markdown differs from the committed legacy body`
+      );
+    }
+
+    bodies[locale] = markdown;
+    sources[locale] = 'storage';
+  }
+
+  return { kind, postId, bodies, sources };
 }

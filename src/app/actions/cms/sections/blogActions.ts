@@ -36,9 +36,15 @@ import {
   normalizeTempId,
 } from '@/libs/cms/batchEvidence';
 import { currentBodyDualWrite } from '@/libs/cms/bodyDualWrite';
-import type {
-  MutationResult,
-  RevalidationStatus,
+import {
+  bodyPointerColumnsReadable,
+  currentBodyStorageRead,
+  type BodyStorageReadDecision,
+} from '@/libs/cms/bodyRead';
+import {
+  errorMessage,
+  type MutationResult,
+  type RevalidationStatus,
 } from '@/libs/cms/mutationResult';
 import type { BodyContentStorageApi } from '@/libs/cms/storage/bodyContent';
 import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
@@ -47,6 +53,7 @@ import {
   bodyPointerUpdates,
   clientBodyPointerRejection,
   modifiedLocales,
+  readPostBodies,
   storePostBodies,
 } from '@/libs/cms/storage/postBodyObjects';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
@@ -57,6 +64,7 @@ import { createClient } from '@/utils/supabase/server';
 type BlogOperation =
   | { type: 'GET' }
   | { type: 'GET_AUTHORS' }
+  | { type: 'GET_BODIES'; id: number }
   | { type: 'CREATE'; data: CreateBlogData }
   | { type: 'UPDATE'; id: number; data: UpdateBlogData }
   | { type: 'DELETE'; id: number }
@@ -223,6 +231,13 @@ export async function blogActions(
     return await batchPublishBlog(operation);
   }
 
+  // Per-post Markdown bodies authorize at the post-writer level and read
+  // through the canonical admin client, so — like BATCH_PUBLISH — they run
+  // their own gate instead of passing through the shared allowlist check twice.
+  if (operation.type === 'GET_BODIES') {
+    return await getBlogBodies(operation.id);
+  }
+
   // Auth check - reject unauthenticated requests
   try {
     await requireAuth();
@@ -287,6 +302,90 @@ function readStorageOrigin(): string | null {
     return getCmsStorageOrigin();
   } catch {
     return null;
+  }
+}
+
+/**
+ * Runtime projection for a per-post body read. Only the dev clone with Storage
+ * reads enabled may name the pointer columns; production has none, so it stays
+ * on the legacy columns (never `body_en_path` / `body_it_path` against `public`).
+ */
+const BLOG_LEGACY_BODY_COLUMNS = 'id, body_en, body_it';
+const BLOG_POINTER_BODY_COLUMNS = 'id, body_en, body_it, body_en_path, body_it_path';
+
+function blogBodyColumns(read: BodyStorageReadDecision): string {
+  return bodyPointerColumnsReadable(read)
+    ? BLOG_POINTER_BODY_COLUMNS
+    : BLOG_LEGACY_BODY_COLUMNS;
+}
+
+/**
+ * Authenticated EN/IT Markdown for ONE post (Phase 9A).
+ *
+ * Authorization is the canonical post-writer check, and the service-role admin
+ * client is used only after it — so hidden drafts resolve for authorized CMS
+ * users and never for anyone else. The result carries the Markdown only: no
+ * pointer paths, hashes, sizes, signed URLs or object metadata.
+ *
+ * A referenced object that is missing, unreadable, hash-mismatched or in
+ * disagreement with the committed legacy body fails the action; it is never
+ * reported as an empty body.
+ */
+async function getBlogBodies(id: number): Promise<BlogResult> {
+  try {
+    // Misconfiguration fails before any DB or Storage call: an explicitly
+    // enabled but incompatible environment must never half-read a body.
+    const read = currentBodyStorageRead();
+    if (read.mode === 'invalid') {
+      return { success: false, error: read.error };
+    }
+
+    await getCmsActionContext('post-writer');
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      return { success: false, error: 'Invalid post id' };
+    }
+
+    const admin = getAdminClient();
+    const { data, error } = await admin
+      .from('blog_posts')
+      .select(blogBodyColumns(read))
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return { success: false, error: 'Blog post not found' };
+    }
+
+    // The projection is a runtime string, so the client cannot infer the row
+    // shape; the superset row is asserted once here.
+    const row = data as unknown as PriorBlogBodyRow;
+    const bodies = await readPostBodies(
+      read.mode === 'enabled'
+        ? (admin.storage.from(read.bucket) as unknown as BodyContentStorageApi)
+        : null,
+      'blog',
+      id,
+      {
+        en: { legacy: row.body_en ?? null, path: row.body_en_path ?? null },
+        it: { legacy: row.body_it ?? null, path: row.body_it_path ?? null },
+      }
+    );
+
+    return {
+      success: true,
+      data: {
+        id,
+        body_en: bodies.bodies.en,
+        body_it: bodies.bodies.it,
+      },
+    };
+  } catch (error) {
+    console.error('Error fetching blog bodies:', error);
+    return {
+      success: false,
+      error: errorMessage(error, 'Failed to fetch blog bodies'),
+    };
   }
 }
 
