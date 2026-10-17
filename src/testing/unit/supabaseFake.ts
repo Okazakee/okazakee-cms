@@ -308,7 +308,15 @@ class FakeStorageBucket {
     }
     const full = `${this.bucket}/${path}`;
     if (this.state.objects[full] !== undefined && !options?.upsert) {
-      return { data: null, error: { message: 'The resource already exists' } };
+      // Mirror supabase-js's StorageApiError shape for an existing key.
+      return {
+        data: null,
+        error: {
+          message: 'The resource already exists',
+          statusCode: '409',
+          error: 'Duplicate',
+        },
+      };
     }
     this.state.objects[full] = _data;
     this.state.uploads.push(path);

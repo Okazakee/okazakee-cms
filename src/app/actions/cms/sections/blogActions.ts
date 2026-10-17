@@ -35,12 +35,19 @@ import {
   markUpdated,
   normalizeTempId,
 } from '@/libs/cms/batchEvidence';
+import { currentBodyDualWrite } from '@/libs/cms/bodyDualWrite';
 import type {
   MutationResult,
   RevalidationStatus,
 } from '@/libs/cms/mutationResult';
+import type { BodyContentStorageApi } from '@/libs/cms/storage/bodyContent';
 import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { BLOG_STAGING_PREFIX, blogPostPrefix } from '@/libs/cms/storage/paths';
+import {
+  bodyPointerUpdates,
+  modifiedLocales,
+  storePostBodies,
+} from '@/libs/cms/storage/postBodyObjects';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import type { BodyImageUpload } from '@/utils/cms/postBody';
 import { hasPendingRefs } from '@/utils/cms/postBody';
@@ -111,6 +118,20 @@ type CreateBlogData = {
 };
 
 type UpdateBlogData = Partial<CreateBlogData>;
+
+/**
+ * Superset shape for the trusted prior-state read. The projection is chosen at
+ * runtime because production must never reference the pointer columns; rows read
+ * in production simply have no pointer fields.
+ */
+type PriorBlogBodyRow = {
+  id: number;
+  image: string | null;
+  body_en: string | null;
+  body_it: string | null;
+  body_en_path?: string | null;
+  body_it_path?: string | null;
+};
 
 type BlogResult = MutationResult;
 
@@ -273,6 +294,13 @@ async function batchPublishBlog(
 ): Promise<BlogResult> {
   const evidence = emptyBatchEvidence();
   try {
+    // Dual-write is opt-in and dev-only. An explicitly enabled but incompatible
+    // environment is rejected before any DB or Storage mutation happens.
+    const dualWrite = currentBodyDualWrite();
+    if (dualWrite.mode === 'invalid') {
+      return { success: false, error: dualWrite.error };
+    }
+
     const context = await getCmsActionContext('post-writer');
     const admin = getAdminClient();
     const bucket = getCmsStorageBucket();
@@ -327,6 +355,9 @@ async function batchPublishBlog(
         author_id: item.data.author_id || context.user.id,
         image: upload.publicUrl,
         blurhashURL: prepared.image.blurhash,
+        // Dual-write inserts provisionally hidden so the row can never become
+        // publicly visible before its bodies and pointers commit together.
+        ...(dualWrite.mode === 'enabled' ? { hidden: true } : {}),
       };
 
       const { data, error } = await admin
@@ -366,7 +397,38 @@ async function batchPublishBlog(
           { body_en: item.data.body_en, body_it: item.data.body_it },
           bodyRewrites
         );
-        if (
+        if (dualWrite.mode === 'enabled') {
+          // One commit for the final legacy bodies, the immutable pointers and
+          // the intended visibility. Objects are uploaded first; any failure
+          // rolls the provisional row back in the catch below.
+          const bodyStorage = admin.storage.from(
+            dualWrite.bucket
+          ) as unknown as BodyContentStorageApi;
+          const storedBodies = await storePostBodies(
+            bodyStorage,
+            'blog',
+            data.id as number,
+            [
+              { locale: 'en', body: rewrittenBodies.body_en },
+              { locale: 'it', body: rewrittenBodies.body_it },
+            ]
+          );
+          const commit: Record<string, unknown> = {
+            ...bodyPointerUpdates(storedBodies),
+            hidden: item.data.hidden ?? false,
+          };
+          if (rewrittenBodies.body_en !== undefined) {
+            commit.body_en = rewrittenBodies.body_en;
+          }
+          if (rewrittenBodies.body_it !== undefined) {
+            commit.body_it = rewrittenBodies.body_it;
+          }
+          const { error: bodyError } = await admin
+            .from('blog_posts')
+            .update(commit)
+            .eq('id', data.id);
+          if (bodyError) throw bodyError;
+        } else if (
           rewrittenBodies.body_en !== item.data.body_en ||
           rewrittenBodies.body_it !== item.data.body_it
         ) {
@@ -380,19 +442,27 @@ async function batchPublishBlog(
           if (bodyError) throw bodyError;
         }
       } catch (error) {
-        await admin.from('blog_posts').delete().eq('id', data.id);
+        const { error: rollbackError } = await admin
+          .from('blog_posts')
+          .delete()
+          .eq('id', data.id);
         await removeStorageObjectBestEffort(admin, bucket, upload.path);
         await removeBodyUploads(admin, bucket, [
           ...bodyStaged,
           ...bodyUploadStaged(error),
         ]);
+        const baseError =
+          error instanceof Error ? error.message : 'Body publish failed';
+        const rowState =
+          dualWrite.mode === 'enabled'
+            ? 'row left hidden'
+            : 'row left as inserted';
         markFailed(evidence, {
           kind: 'create',
           tempId,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Body image publish failed',
+          error: rollbackError
+            ? `${baseError} (rollback failed for provisional row ${data.id as number}: ${rollbackError.message}; ${rowState})`
+            : baseError,
         });
         continue;
       }
@@ -457,11 +527,22 @@ async function batchPublishBlog(
       let oldBodies: Array<string | undefined> = [];
       let bodyStaged: string[] = [];
 
-      const { data: currentRow, error: fetchError } = await admin
+      // Pointer columns exist only in the dev clone; production must never
+      // reference them, so the projection depends on the resolved mode.
+      const pointerColumnsAvailable =
+        dualWrite.mode === 'enabled' ||
+        (dualWrite.mode === 'disabled' && dualWrite.devClone);
+      // Runtime-chosen projection: production must never reference the pointer
+      // columns, so the superset row shape is asserted once below.
+      const priorSelect: string = pointerColumnsAvailable
+        ? 'image, body_en, body_it, body_en_path, body_it_path'
+        : 'image, body_en, body_it';
+      const { data: currentRowRaw, error: fetchError } = await admin
         .from('blog_posts')
-        .select('image, body_en, body_it')
+        .select(priorSelect)
         .eq('id', item.id)
         .single();
+      const currentRow = currentRowRaw as PriorBlogBodyRow | null;
 
       if (fetchError || !currentRow) {
         markFailed(evidence, {
@@ -538,9 +619,59 @@ async function batchPublishBlog(
         updateData.blurhashURL = prepared.image.blurhash;
       }
 
+      // Markdown objects are uploaded before the DB write; a failure leaves the
+      // previously committed body + pointer authoritative. A metadata-only
+      // update issues no Storage call at all.
+      const dbUpdate: Record<string, unknown> = { ...updateData };
+      if (dualWrite.mode === 'enabled') {
+        const requests = modifiedLocales(updateData);
+        if (requests.length > 0) {
+          try {
+            const bodyStorage = admin.storage.from(
+              dualWrite.bucket
+            ) as unknown as BodyContentStorageApi;
+            const storedBodies = await storePostBodies(
+              bodyStorage,
+              'blog',
+              item.id,
+              requests,
+              {
+                en: {
+                  body: currentRow.body_en as string | null,
+                  path: (currentRow.body_en_path as string | null) ?? null,
+                },
+                it: {
+                  body: currentRow.body_it as string | null,
+                  path: (currentRow.body_it_path as string | null) ?? null,
+                },
+              }
+            );
+            Object.assign(dbUpdate, bodyPointerUpdates(storedBodies));
+          } catch (error) {
+            await removeBodyUploads(admin, bucket, bodyStaged);
+            markFailed(evidence, {
+              kind: 'update',
+              id: item.id,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Markdown body upload failed',
+            });
+            continue;
+          }
+        }
+      } else if (dualWrite.mode === 'disabled' && dualWrite.devClone) {
+        // Stale-pointer safeguard: with dual-write off in the dev clone, a
+        // legacy body edit must not leave a pointer to the previous Markdown.
+        // Production never reaches this branch.
+        for (const request of modifiedLocales(updateData)) {
+          dbUpdate[`body_${request.locale}_path`] = null;
+        }
+      }
+
       const { data, error } = await admin
         .from('blog_posts')
-        .update(updateData)
+        .update(dbUpdate)
         .eq('id', item.id)
         .select()
         .single();
@@ -773,10 +904,19 @@ async function createBlog(
         error: 'Body images must be published through batch publish',
       };
     }
+
+    const dualWrite = currentBodyDualWrite();
+    if (dualWrite.mode === 'invalid') {
+      return { success: false, error: dualWrite.error };
+    }
+
     const insertData = {
       ...data,
       blurhashURL: data.blurhashURL ?? '',
       author_id: data.author_id || userId,
+      // Dual-write inserts provisionally hidden; the final visibility commits
+      // together with the bodies and pointers below.
+      ...(dualWrite.mode === 'enabled' ? { hidden: true } : {}),
     };
 
     const admin = getAdminClient();
@@ -788,11 +928,56 @@ async function createBlog(
 
     if (error) throw error;
 
+    let committed = newBlog;
+    if (dualWrite.mode === 'enabled') {
+      const postId = newBlog.id as number;
+      try {
+        const bodyStorage = admin.storage.from(
+          dualWrite.bucket
+        ) as unknown as BodyContentStorageApi;
+        const storedBodies = await storePostBodies(
+          bodyStorage,
+          'blog',
+          postId,
+          [
+            { locale: 'en', body: data.body_en },
+            { locale: 'it', body: data.body_it },
+          ]
+        );
+        const commit: Record<string, unknown> = {
+          body_en: data.body_en,
+          ...bodyPointerUpdates(storedBodies),
+          hidden: data.hidden ?? false,
+        };
+        if (data.body_it !== undefined) commit.body_it = data.body_it;
+        const { data: updatedBlog, error: commitError } = await admin
+          .from('blog_posts')
+          .update(commit)
+          .eq('id', postId)
+          .select()
+          .single();
+        if (commitError) throw commitError;
+        committed = updatedBlog;
+      } catch (error) {
+        const { error: rollbackError } = await admin
+          .from('blog_posts')
+          .delete()
+          .eq('id', postId);
+        const baseError =
+          error instanceof Error ? error.message : 'Body dual-write failed';
+        throw new Error(
+          rollbackError
+            ? `${baseError} (rollback failed for provisional row ${postId}: ${rollbackError.message}; row left hidden)`
+            : baseError
+        );
+      }
+    }
+
     const revalidation = await invalidatePublicContent({
       entity: 'blog',
       operation: 'create',
     });
-    return { success: true, data: newBlog, revalidation };
+    return { success: true, data: committed, revalidation };
   } catch (error) {
     console.error('Error creating blog post:', error);
     return {
@@ -826,20 +1011,67 @@ async function updateBlog(
       };
     }
 
+    const dualWrite = currentBodyDualWrite();
+    if (dualWrite.mode === 'invalid') {
+      return { success: false, error: dualWrite.error };
+    }
+
     const admin = getAdminClient();
-    const { data: existingBlog, error: fetchError } = await admin
+    const pointerColumnsAvailable =
+      dualWrite.mode === 'enabled' ||
+      (dualWrite.mode === 'disabled' && dualWrite.devClone);
+    const priorSelect: string = pointerColumnsAvailable
+      ? 'id, body_en, body_it, body_en_path, body_it_path'
+      : 'id';
+    const { data: existingBlogRaw, error: fetchError } = await admin
       .from('blog_posts')
-      .select('id')
+      .select(priorSelect)
       .eq('id', id)
       .single();
+    const existingBlog = existingBlogRaw as PriorBlogBodyRow | null;
 
     if (fetchError || !existingBlog) {
       return { success: false, error: 'Blog post not found' };
     }
 
+    // Uploads happen before the DB write; a failure leaves the committed body
+    // and pointer authoritative. A metadata-only update issues no Storage call.
+    const dbUpdate: Record<string, unknown> = { ...data };
+    if (dualWrite.mode === 'enabled') {
+      const requests = modifiedLocales(data);
+      if (requests.length > 0) {
+        const bodyStorage = admin.storage.from(
+          dualWrite.bucket
+        ) as unknown as BodyContentStorageApi;
+        const storedBodies = await storePostBodies(
+          bodyStorage,
+          'blog',
+          id,
+          requests,
+          {
+            en: {
+              body: existingBlog.body_en as string | null,
+              path: (existingBlog.body_en_path as string | null) ?? null,
+            },
+            it: {
+              body: existingBlog.body_it as string | null,
+              path: (existingBlog.body_it_path as string | null) ?? null,
+            },
+          }
+        );
+        Object.assign(dbUpdate, bodyPointerUpdates(storedBodies));
+      }
+    } else if (dualWrite.mode === 'disabled' && dualWrite.devClone) {
+      // Stale-pointer safeguard in the dev clone only; production never
+      // references the pointer columns.
+      for (const request of modifiedLocales(data)) {
+        dbUpdate[`body_${request.locale}_path`] = null;
+      }
+    }
+
     const { data: updatedBlog, error } = await admin
       .from('blog_posts')
-      .update(data)
+      .update(dbUpdate)
       .eq('id', id)
       .select()
       .single();
