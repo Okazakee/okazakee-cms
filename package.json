@@ -13,7 +13,8 @@
     "test": "vitest run",
     "db:dev:check": "bun src/utils/cms/devMigrations.ts check",
     "storage:content:dev:setup": "bun src/utils/cms/storageSetup.ts",
-    "storage:content:dev:backfill:plan": "bun src/utils/cms/backfillPlan.ts"
+    "storage:content:dev:backfill:plan": "bun src/utils/cms/backfillPlan.ts",
+    "storage:content:dev:backfill:exec": "bun src/utils/cms/backfillExec.ts"
   },
   "dependencies": {
     "@img/sharp-libvips-linux-x64": "1.3.4",
