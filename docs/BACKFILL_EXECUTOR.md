@@ -35,11 +35,12 @@ CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging \
 bun run storage:content:dev:backfill:exec --apply --new-run \
   --confirm-digest=<manifest sha256> --expect-project-ref=<ref>
 
-# resume the unfinished run recorded in that journal
+# resume the unfinished run recorded in that journal. --confirm-digest must be
+# the RECORDED execution manifest digest (preflight prints journal.recordedManifestDigest)
 BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
 CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging \
 bun run storage:content:dev:backfill:exec --apply --resume \
-  --confirm-digest=<manifest sha256> --expect-project-ref=<ref>
+  --confirm-digest=<recorded manifest sha256> --expect-project-ref=<ref>
 
 # rollback: read-only plan by default
 BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
@@ -197,6 +198,56 @@ hold the migrated key, then sends one signed event per post. When the pointer
 moved on, the entry is recorded as `superseded` — whatever changed the row owns
 that cache — and a retry never uploads an object or writes a pointer.
 
+## Immutable execution manifest and resume
+
+A run records its **complete immutable manifest** in the journal *before the
+first mutation*: `runId`, the manifest digest, and one entry per unit of work
+(entity, id, locale, source SHA-256, size, destination, expected previous
+pointer). That record — never a digest recomputed from the current database — is
+the run's identity. After the first pointer switch the planner would classify
+that entry `ALREADY_CURRENT` and derive a different digest, so a resume against
+a recomputed digest would reject an otherwise valid partial run.
+
+`--resume` therefore:
+
+- selects the journal's unfinished run (a run is unfinished while its manifest
+  declares more entries than it has terminal outcomes, even when every intent it
+  wrote was answered);
+- loads that run's recorded manifest and refuses when it is absent or belongs to
+  a different project/identity;
+- requires `--confirm-digest` to equal the **recorded** manifest digest (the
+  preflight prints it as `journal.recordedManifestDigest`);
+- rebuilds the work list from the recorded entries, classifying each against the
+  current committed pointer (`ALREADY_CURRENT` when it already holds the
+  destination, otherwise attempted);
+- re-reads the committed legacy body, re-checks it against the recorded SHA-256,
+  re-verifies stored object bytes, and still runs the atomic CAS with the
+  recorded previous pointer — so a CMS edit or a moved pointer is refused, never
+  overwritten;
+- retries the run's pending invalidations independently of any pointer work.
+
+An entry that already has a terminal outcome for its identity is re-verified but
+never re-uploaded and never re-recorded, so the journal keeps exactly one
+terminal outcome per entry.
+
+## Fail-fast execution
+
+Execution stops at the first unexpected failure: upload error, storage
+verification failure, `CAS_STALE`/`CAS_MISSING`/`CAS_REFUSED`, pointer
+verification failure, journal write failure, a signed invalidation that is
+`failed` or `skipped`, an unexpected database state, or a missing
+credential/environment. On stop:
+
+1. no further entry is attempted — no upload, no CAS, no pointer write;
+2. the pointer switches already committed are preserved;
+3. the audit for everything observed is flushed (outcome and revalidation
+   records), and the journal is never cleared;
+4. the report names the `stopped` entry and the `remaining` work;
+5. the exit code is nonzero, and nothing is rolled back or deleted.
+
+A stopped, partially migrated run is an acceptable state — silent continuation
+is not.
+
 ## Rollback
 
 ```bash
@@ -205,21 +256,23 @@ BACKFILL_JOURNAL_PATH=… CMS_BACKFILL_ROLLBACK_ACK=yes-rollback-dev-staging \
   bun run storage:content:dev:backfill:rollback --apply --run-id=<id> --expect-project-ref=<ref>
 ```
 
-Candidates come from the **verified execution record** in the journal (entries
-whose switch this run observed), not from a freshly planned digest — after a
-successful backfill that digest describes the migrated state, not the original
-one. The plan classifies each candidate against the live row: `READY`,
-`ALREADY_ROLLED_BACK`, `MISSING`, `BODY_CHANGED` or `POINTER_DRIFTED`, and is
-strictly read-only (no CAS call, no journal write, no invalidation).
+Candidates come from the **immutable manifest** (so a switch whose terminal
+outcome was never written is still owned by the migration) plus any outcome
+record that witnessed a switch. The plan classifies each candidate against the
+live row: `READY`, `ALREADY_ROLLED_BACK`, `MISSING`, `BODY_CHANGED` or
+`POINTER_DRIFTED`, and is strictly read-only (no CAS call, no journal write, no
+invalidation).
 
 Execution walks the `READY` candidates in reverse migration order through the
-atomic rollback CAS, which refuses when the pointer or the legacy body changed
-since the migration; a refusal is reported as a conflict and never forced. It
-writes no `body_en`/`body_it`, uploads nothing and removes nothing, journals each
-outcome (including its revalidation status), revalidates the affected caches per
-post, and supports recovery from an interrupted rollback: entries that already
-recorded `ROLLED_BACK` — or whose pointer already holds the previous value — are
-skipped on the next run.
+atomic rollback CAS; the first unexpected conflict stops the run with the
+entries already restored left in place and invalidated. It writes no
+`body_en`/`body_it`, uploads nothing, removes nothing, journals each outcome, and
+invalidates **once per post after every restored locale of that post is
+verified**. A `failed` or `skipped` invalidation leaves the rollback
+`incomplete`, produces a nonzero exit code, and stays retryable: a later
+invocation re-reads the restored pointer and retries the event without touching
+a pointer or an object.
+
 
 
 ## Orphans

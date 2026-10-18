@@ -106,11 +106,39 @@ export type JournalRollback = JournalIdentityFields & {
   at: string;
 };
 
+/** One entry of the immutable execution manifest. */
+export type JournalManifestEntry = {
+  kind: string;
+  postId: number;
+  locale: string;
+  sourceSha256: string;
+  sizeBytes: number;
+  expectedPath: string;
+  previousPath: string | null;
+};
+
+/**
+ * The immutable execution identity of a run, written BEFORE the first mutation.
+ *
+ * A resumed run must not recompute its digest from the current database: once a
+ * pointer is switched the planner classifies that entry ALREADY_CURRENT, which
+ * changes the derived digest and would make a valid partial run look like a
+ * different manifest. This record is the authoritative identity instead.
+ */
+export type JournalManifest = {
+  type: 'manifest';
+  runId: string;
+  manifestDigest: string;
+  entries: JournalManifestEntry[];
+  at: string;
+};
+
 export type JournalRecord =
   | JournalIntent
   | JournalOutcome
   | JournalRevalidation
-  | JournalRollback;
+  | JournalRollback
+  | JournalManifest;
 
 /** Full identity key: runs and manifests are part of it. */
 export function journalEntryKey(record: JournalIdentityFields): string {
@@ -172,6 +200,46 @@ function revalidationStatus(value: unknown): JournalRevalidationStatus {
 export function parseJournalRecord(value: unknown): JournalRecord | null {
   if (typeof value !== 'object' || value === null) return null;
   const raw = value as Record<string, unknown>;
+
+  if (raw.type === 'manifest') {
+    if (typeof raw.runId !== 'string' || typeof raw.manifestDigest !== 'string') {
+      return null;
+    }
+    if (!Array.isArray(raw.entries)) return null;
+    const entries: JournalManifestEntry[] = [];
+    for (const candidate of raw.entries) {
+      if (typeof candidate !== 'object' || candidate === null) return null;
+      const entry = candidate as Record<string, unknown>;
+      const postId = Number(entry.postId);
+      if (
+        typeof entry.kind !== 'string' ||
+        !Number.isInteger(postId) ||
+        postId <= 0 ||
+        typeof entry.locale !== 'string' ||
+        typeof entry.sourceSha256 !== 'string' ||
+        typeof entry.expectedPath !== 'string'
+      ) {
+        return null;
+      }
+      entries.push({
+        kind: entry.kind,
+        postId,
+        locale: entry.locale,
+        sourceSha256: entry.sourceSha256,
+        sizeBytes: typeof entry.sizeBytes === 'number' ? entry.sizeBytes : 0,
+        expectedPath: entry.expectedPath,
+        previousPath: nullableString(entry.previousPath),
+      });
+    }
+    return {
+      type: 'manifest',
+      runId: raw.runId,
+      manifestDigest: raw.manifestDigest,
+      entries,
+      at: typeof raw.at === 'string' ? raw.at : '',
+    };
+  }
+
   if (
     raw.type !== 'intent' &&
     raw.type !== 'outcome' &&
@@ -298,6 +366,10 @@ export type JournalRunSummary = {
   outcomes: number;
   revalidations: number;
   rollbacks: number;
+  /** Immutable manifest records for this run (0 or 1 in a healthy journal). */
+  manifests: number;
+  /** Entries declared by the immutable manifest, when present. */
+  manifestEntries: number;
   /** Entries whose switch was verified by an outcome record. */
   switched: number;
   unresolved: JournalIntent[];
@@ -398,7 +470,14 @@ export function pendingRevalidations(records: JournalRecord[]): PendingRevalidat
 export function detectConflicts(records: JournalRecord[]): string[] {
   const outcomes = new Map<string, Set<string>>();
   const intents = new Map<string, Set<string>>();
+  const manifests = new Map<string, Set<string>>();
   for (const record of records) {
+    if (record.type === 'manifest') {
+      const seen = manifests.get(record.runId) ?? new Set<string>();
+      seen.add(JSON.stringify([record.manifestDigest, record.entries]));
+      manifests.set(record.runId, seen);
+      continue;
+    }
     const key = journalEntryKey(record);
     const fingerprint = JSON.stringify(record);
     if (record.type === 'outcome') {
@@ -419,10 +498,11 @@ export function detectConflicts(records: JournalRecord[]): string[] {
   for (const [key, seen] of intents) {
     if (seen.size > 1) conflicts.push(`conflicting intent records for ${key}`);
   }
+  for (const [runId, seen] of manifests) {
+    if (seen.size > 1) conflicts.push(`conflicting manifest records for run ${runId}`);
+  }
   return conflicts.sort();
 }
-
-/** Summarizes a journal: per-run work, conflicts and trustworthiness. */
 export function auditJournal(parsed: ParsedJournal): JournalAudit {
   const runs = new Map<string, JournalRunSummary>();
   const summaryFor = (runId: string, manifestDigest: string): JournalRunSummary => {
@@ -440,6 +520,8 @@ export function auditJournal(parsed: ParsedJournal): JournalAudit {
       outcomes: 0,
       revalidations: 0,
       rollbacks: 0,
+      manifests: 0,
+      manifestEntries: 0,
       switched: 0,
       unresolved: [],
       pendingRevalidations: [],
@@ -450,6 +532,10 @@ export function auditJournal(parsed: ParsedJournal): JournalAudit {
 
   for (const record of parsed.records) {
     const run = summaryFor(record.runId, record.manifestDigest);
+    if (record.type === 'manifest') {
+      run.manifests += 1;
+      run.manifestEntries = record.entries.length;
+    }
     if (record.type === 'intent') run.intents += 1;
     if (record.type === 'outcome') {
       run.outcomes += 1;
@@ -486,6 +572,105 @@ export function auditJournal(parsed: ParsedJournal): JournalAudit {
   };
 }
 
+/** A rollback whose cache invalidation was never acknowledged. */
+export type PendingRollbackRevalidation = {
+  runId: string;
+  manifestDigest: string;
+  kind: string;
+  postId: number;
+  locale: string;
+  /** The pointer this run installed (the rollback identity). */
+  installedPath: string;
+  /** The pointer the rollback restored (usually NULL). */
+  restoredPath: string | null;
+  attempts: number;
+};
+
+/**
+ * Rollbacks whose signed invalidation is still outstanding. Resolution is
+ * order-aware: a `sent`/`superseded` revalidation record only settles the
+ * rollback when it was written AFTER the rollback record — a `sent` from the
+ * original migration cannot silence a rollback that was never invalidated.
+ */
+export function pendingRollbackRevalidations(
+  records: JournalRecord[]
+): PendingRollbackRevalidation[] {
+  const latestRevalidation = new Map<
+    string,
+    { index: number; status: JournalRevalidationStatus }
+  >();
+  const latestRollback = new Map<string, { index: number; record: JournalRollback }>();
+
+  records.forEach((record, index) => {
+    if (record.type === 'revalidation') {
+      latestRevalidation.set(journalEntryKey(record), { index, status: record.status });
+    }
+    if (record.type === 'rollback' && record.outcome === 'ROLLED_BACK') {
+      latestRollback.set(journalEntryKey(record), { index, record });
+    }
+  });
+
+  const pending: PendingRollbackRevalidation[] = [];
+  for (const [key, { index, record }] of latestRollback) {
+    const attempt = latestRevalidation.get(key);
+    const resolved =
+      attempt !== undefined &&
+      attempt.index > index &&
+      (attempt.status === 'sent' || attempt.status === 'superseded');
+    if (resolved) continue;
+    pending.push({
+      runId: record.runId,
+      manifestDigest: record.manifestDigest,
+      kind: record.kind,
+      postId: record.postId,
+      locale: record.locale,
+      installedPath: record.installedPath,
+      restoredPath: record.restoredPath ?? null,
+      attempts: attempt && attempt.index > index ? 1 : 0,
+    });
+  }
+  const slot = (entry: PendingRollbackRevalidation) =>
+    `${entry.kind}|${entry.postId}|${entry.locale}|${entry.installedPath}`;
+  return pending.sort((a, b) => slot(a).localeCompare(slot(b)));
+}
+
+export type ManifestLookup =
+  | { ok: true; manifest: JournalManifest }
+  | { ok: false; error: string };
+
+/**
+ * The immutable execution manifest recorded for a run. This — not a digest
+ * recomputed from the current database — is what a resume and a rollback must
+ * work from, because switching a pointer changes how the planner classifies its
+ * entry.
+ */
+export function recordedManifest(
+  records: JournalRecord[],
+  runId?: string
+): ManifestLookup {
+  const manifests = records.filter(
+    (record): record is JournalManifest =>
+      record.type === 'manifest' && (!runId || record.runId === runId)
+  );
+  if (manifests.length === 0) {
+    return {
+      ok: false,
+      error: runId
+        ? `no immutable manifest recorded for run ${runId}`
+        : 'no immutable manifest recorded in the journal',
+    };
+  }
+  if (manifests.length > 1) {
+    return {
+      ok: false,
+      error: `several immutable manifests recorded (${manifests
+        .map((manifest) => manifest.runId)
+        .join(', ')}); name one run explicitly`,
+    };
+  }
+  return { ok: true, manifest: manifests[0] };
+}
+
 export type ResumeSelection =
   | { ok: true; run: JournalRunSummary; mode: 'resume' }
   | { ok: false; error: string };
@@ -497,7 +682,7 @@ export type ResumeSelection =
  */
 export function selectResumeRun(
   audit: JournalAudit,
-  requested: { manifestDigest: string }
+  requested: { manifestDigest?: string }
 ): ResumeSelection {
   if (!audit.trustworthy) {
     return { ok: false, error: `journal is damaged: ${audit.problems.join('; ')}` };
@@ -506,7 +691,11 @@ export function selectResumeRun(
     (run) =>
       run.unresolved.length > 0 ||
       run.pendingRevalidations.length > 0 ||
-      run.outcomes < run.intents
+      run.outcomes < run.intents ||
+      // A run whose immutable manifest declares more entries than it has
+      // terminal outcomes is unfinished even when every intent it wrote was
+      // answered — the interruption happened between entries.
+      (run.manifests > 0 && run.manifestEntries > run.outcomes)
   );
   if (candidates.length === 0) {
     return { ok: false, error: 'journal has no unfinished run to resume' };
@@ -520,10 +709,12 @@ export function selectResumeRun(
     };
   }
   const run = candidates[0];
-  if (run.manifestDigest !== requested.manifestDigest) {
+  // The digest is optional: a resume takes its identity from the run's own
+  // immutable manifest, so the current planner digest is not authoritative.
+  if (requested.manifestDigest && run.manifestDigest !== requested.manifestDigest) {
     return {
       ok: false,
-      error: `unfinished run ${run.runId} belongs to a different manifest (journal ${run.manifestDigest}, current plan ${requested.manifestDigest})`,
+      error: `unfinished run ${run.runId} belongs to a different manifest (journal ${run.manifestDigest}, requested ${requested.manifestDigest})`,
     };
   }
   return { ok: true, run, mode: 'resume' };

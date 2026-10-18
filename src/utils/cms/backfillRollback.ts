@@ -54,6 +54,7 @@ import {
   executeRollback,
   parseRollbackArgs,
   planRollback,
+  retryRollbackRevalidations,
   validateRevalidationEndpoint,
   type RollbackDeps,
 } from '@/libs/cms/storage/backfillApply';
@@ -61,6 +62,7 @@ import {
   assertJournalDestination,
   auditJournal,
   createFileJournal,
+  pendingRollbackRevalidations,
   type JournalFsApi,
 } from '@/libs/cms/storage/backfillJournal';
 import type { BodyContentKind } from '@/libs/cms/storage/bodyContent';
@@ -175,7 +177,8 @@ async function main(): Promise<void> {
     }
 
     const journal = createFileJournal(journalPathEnv, fsApi);
-    const audit = auditJournal(await journal.read());
+    const parsed = await journal.read();
+    const audit = auditJournal(parsed);
     if (!audit.trustworthy) {
       refuse(`journal at ${journalPathEnv} cannot be trusted: ${audit.problems.join('; ')}`);
     }
@@ -220,20 +223,36 @@ async function main(): Promise<void> {
       process.exit(candidates.length === 0 || ready.length > 0 ? 0 : 1);
     }
 
+    // Settle invalidations an earlier rollback left pending before doing more
+    // work: no upload, no pointer write, only the signed events.
+    const pendingRollbacks = pendingRollbackRevalidations(parsed.records);
+    const retries = pendingRollbacks.length
+      ? await retryRollbackRevalidations(deps, pendingRollbacks)
+      : [];
+
     const report = await executeRollback(deps, candidates);
+    const retriesFailed = retries.filter((retry) => retry.outcome === 'FAILED').length;
     console.log(
       JSON.stringify(
         {
           command: 'storage:content:dev:backfill:rollback',
           mode: 'apply',
           journalPath: journalPathEnv,
+          retriedInvalidations: retries,
           ...report,
         },
         null,
         2
       )
     );
-    process.exit(report.summary.failed === 0 && report.summary.conflicts === 0 ? 0 : 1);
+    process.exit(
+      report.summary.failed === 0 &&
+        report.summary.conflicts === 0 &&
+        !report.incomplete &&
+        retriesFailed === 0
+        ? 0
+        : 1
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(4);

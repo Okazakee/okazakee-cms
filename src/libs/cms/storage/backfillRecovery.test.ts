@@ -497,11 +497,14 @@ describe('rollback planning and execution', () => {
     expect(h.uploads).toEqual([]);
     expect(h.removes).toEqual([]);
 
-    const rollbackRecords = (await h.journal.read()).records.filter(
-      (record) => record.type === 'rollback'
-    );
+    const records = (await h.journal.read()).records;
+    const rollbackRecords = records.filter((record) => record.type === 'rollback');
     expect(rollbackRecords).toHaveLength(2);
-    expect(rollbackRecords[0]).toMatchObject({ outcome: 'ROLLED_BACK', revalidation: 'sent' });
+    expect(rollbackRecords[0]).toMatchObject({ outcome: 'ROLLED_BACK', revalidation: null });
+    // The invalidation is recorded separately, one event per post.
+    const revalidations = records.filter((record) => record.type === 'revalidation');
+    expect(revalidations).toHaveLength(2);
+    expect(revalidations.every((record) => record.status === 'sent')).toBe(true);
   });
 
   it('reports a rollback conflict instead of forcing it', async () => {
@@ -520,13 +523,17 @@ describe('rollback planning and execution', () => {
     const candidates = await planRollback(h.deps, { runId: 'run-a' });
     const report = await executeRollback(h.deps, candidates);
 
-    expect(report.summary.failed).toBe(2);
-    expect(report.entries.every((entryReport) => entryReport.outcome === 'STALE')).toBe(true);
+    // Fail-fast: the first refused rollback stops the run, so the remaining
+    // candidate is never attempted.
+    expect(report.summary.failed).toBe(1);
+    expect(report.stopped).toMatchObject({ postId: 2, state: 'READY' });
+    expect(report.entries.map((entryReport) => entryReport.outcome)).toEqual(['STALE']);
     expect(h.invalidations).toEqual([]);
+    expect(h.rollbackCalls).toHaveLength(1);
     const rollbackRecords = (await h.journal.read()).records.filter(
       (record) => record.type === 'rollback'
     );
-    expect(rollbackRecords).toHaveLength(2);
+    expect(rollbackRecords).toHaveLength(1);
     expect(rollbackRecords[0]).toMatchObject({ outcome: 'STALE', reason: 'body_changed' });
   });
 

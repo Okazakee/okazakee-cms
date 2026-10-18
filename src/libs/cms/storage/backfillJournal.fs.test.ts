@@ -124,8 +124,11 @@ describe('journal on a real filesystem', () => {
     await journal.append(unicode);
     const parsed = await journal.read();
     expect(parsed.records).toHaveLength(1);
-    const record = parsed.records[0];
-    expect(record.intendedPath).toBe(`blog/7/it/${HASH}.md`);
+    expect(parsed.records[0]).toMatchObject({
+      type: 'intent',
+      postId: 7,
+      intendedPath: `blog/7/it/${HASH}.md`,
+    });
   });
 
   it('discards a torn final line, keeps the rest, and still allows a resume', async () => {

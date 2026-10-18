@@ -62,20 +62,25 @@ import {
   APPLY_ACK_ENV,
   APPLY_ACK_VALUE,
   executeBackfill,
+  executionManifest,
   manifestDigest,
   parseExecArgs,
+  planFromManifest,
   retryPendingRevalidations,
   validateRevalidationEndpoint,
   type BackfillExecutorDeps,
+  type ExecutionManifest,
 } from '@/libs/cms/storage/backfillApply';
 import type {
   BodyContentKind,
+  BodyContentLocale,
   BodyContentStorageApi,
 } from '@/libs/cms/storage/bodyContent';
 import {
   assertJournalDestination,
   auditJournal,
   createFileJournal,
+  recordedManifest,
   selectResumeRun,
   type JournalFsApi,
 } from '@/libs/cms/storage/backfillJournal';
@@ -187,6 +192,41 @@ async function main(): Promise<void> {
     const readiness = await probeCasReadiness(client as unknown as CasRpcClient);
 
     if (args.mode === 'preflight') {
+      // Read-only journal inspection (never required for a preflight).
+      let journalState: Record<string, unknown> = {
+        pathConfigured: journalPathEnv !== '',
+        path: journalPathEnv || null,
+      };
+      if (journalPathEnv) {
+        try {
+          const parsedPreview = await createFileJournal(journalPathEnv, fs as unknown as JournalFsApi).read();
+          const auditPreview = auditJournal(parsedPreview);
+          const unfinished = auditPreview.runs.filter(
+            (run) => run.unresolved.length > 0 || run.pendingRevalidations.length > 0
+          );
+          const lookup = recordedManifest(parsedPreview.records);
+          journalState = {
+            ...journalState,
+            trustworthy: auditPreview.trustworthy,
+            problems: auditPreview.problems,
+            warnings: auditPreview.warnings,
+            unfinishedRuns: unfinished.map((run) => ({
+              runId: run.runId,
+              manifestDigest: run.manifestDigest,
+              unresolved: run.unresolved.length,
+              pendingRevalidations: run.pendingRevalidations.length,
+            })),
+            recordedManifestDigest: lookup.ok ? lookup.manifest.manifestDigest : null,
+          };
+        } catch (error) {
+          journalState = {
+            ...journalState,
+            readable: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+
       console.log(
         JSON.stringify(
           {
@@ -197,14 +237,11 @@ async function main(): Promise<void> {
             projectRef,
             bucket: BACKFILL_PLAN_BUCKET,
             columns: BACKFILL_PLAN_COLUMNS,
-            manifestDigest: digest,
+            planDigest: digest,
             ok: summary.blockers === 0,
             plan: summary,
             cas: readiness,
-            journal: {
-              pathConfigured: journalPathEnv !== '',
-              path: journalPathEnv || null,
-            },
+            journal: journalState,
             revalidation: {
               approvedLocalDestination: revalidationProblem === null,
               problem: revalidationProblem,
@@ -262,19 +299,54 @@ async function main(): Promise<void> {
     }
 
     const journal = createFileJournal(journalPathEnv, fsApi);
-    const audit = auditJournal(await journal.read());
+    const parsed = await journal.read();
+    const audit = auditJournal(parsed);
     if (!audit.trustworthy) {
       refuse(`journal at ${journalPathEnv} cannot be trusted: ${audit.problems.join('; ')}`);
     }
 
     let runId: string;
     let resumed = false;
+    let manifest: ExecutionManifest;
+    let workPlan = plan;
+
     if (args.runSelection === 'resume') {
-      const selection = selectResumeRun(audit, { manifestDigest: digest });
+      const selection = selectResumeRun(audit, {});
       if (!selection.ok) {
         refuse(selection.error);
       }
       runId = selection.run.runId;
+
+      // The run's own immutable manifest is authoritative. A digest recomputed
+      // now would classify the entries the earlier run already switched as
+      // ALREADY_CURRENT and no longer describe the same run.
+      const lookup = recordedManifest(parsed.records, runId);
+      if (!lookup.ok) {
+        refuse(
+          `${lookup.error}; a resume needs the immutable manifest recorded by a Phase 12+ run`
+        );
+      }
+      manifest = {
+        runId,
+        manifestDigest: lookup.manifest.manifestDigest,
+        entries: lookup.manifest.entries,
+      };
+      if (args.confirmDigest !== manifest.manifestDigest) {
+        refuse(
+          `--confirm-digest does not match the recorded execution manifest ${manifest.manifestDigest}`
+        );
+      }
+
+      const observed = await Promise.all(
+        lookup.manifest.entries.map((entry) =>
+          readers.readPointer(
+            entry.kind as BodyContentKind,
+            entry.postId,
+            entry.locale as BodyContentLocale
+          )
+        )
+      );
+      workPlan = planFromManifest(lookup.manifest, observed);
       resumed = true;
     } else {
       const unfinished = audit.runs.filter(
@@ -288,6 +360,15 @@ async function main(): Promise<void> {
         );
       }
       runId = randomUUID();
+      manifest = executionManifest(runId, plan);
+      // Record the immutable identity BEFORE the first mutation.
+      await journal.append({
+        type: 'manifest',
+        runId: manifest.runId,
+        manifestDigest: manifest.manifestDigest,
+        entries: manifest.entries,
+        at: new Date().toISOString(),
+      });
     }
 
     const deps: BackfillExecutorDeps = {
@@ -314,7 +395,12 @@ async function main(): Promise<void> {
         )
       : [];
 
-    const report = await executeBackfill(deps, plan, { runId, revalidate: true });
+    const report = await executeBackfill(deps, workPlan, {
+      runId,
+      revalidate: true,
+      failFast: true,
+      manifest,
+    });
     console.log(
       JSON.stringify(
         {

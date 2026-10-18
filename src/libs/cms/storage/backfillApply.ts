@@ -43,14 +43,19 @@ import type { BackfillPlanEntry } from '@/libs/cms/storage/backfillPlan';
 import {
   journalEntryKey,
   journalEntrySlot,
+  recordedManifest,
   unresolvedIntents,
   type BackfillJournal,
   type BackfillRunOutcome,
-  type JournalRecord,
+  type JournalManifest,
+  type JournalManifestEntry,
   type JournalOutcome,
+  type JournalRecord,
   type JournalRevalidationStatus,
+  type JournalRollback,
   type JournalUploadStatus,
   type PendingRevalidation,
+  type PendingRollbackRevalidation,
 } from '@/libs/cms/storage/backfillJournal';
 
 export type RevalidationStatus = 'sent' | 'skipped' | 'failed';
@@ -84,6 +89,21 @@ export type BackfillRunReport = {
   orphanCandidates: string[];
   /** Posts whose pointer moved but whose signed revalidation is not acknowledged. */
   revalidationPending: string[];
+  /** Set when fail-fast stopped the run: the entry that failed. */
+  stopped: {
+    kind: BodyContentKind;
+    postId: number;
+    locale: BodyContentLocale;
+    outcome: BackfillRunOutcome;
+    detail: string | null;
+  } | null;
+  /** Entries not attempted because the run stopped (in plan order). */
+  remaining: Array<{
+    kind: BodyContentKind;
+    postId: number;
+    locale: BodyContentLocale;
+    expectedPath: string;
+  }>;
   summary: {
     entries: number;
     byOutcome: Record<BackfillRunOutcome, number>;
@@ -178,13 +198,83 @@ function errorDetail(error: unknown): string {
 }
 
 /**
+ * The immutable execution identity of a run. It is recorded in the journal
+ * BEFORE the first mutation and is what a resume and a rollback work from: a
+ * digest recomputed after the first switch would classify that entry
+ * ALREADY_CURRENT and no longer match the run.
+ */
+export type ExecutionManifest = {
+  runId: string;
+  manifestDigest: string;
+  entries: JournalManifestEntry[];
+};
+
+/** Builds the immutable manifest for a plan about to be executed. */
+export function executionManifest(
+  runId: string,
+  plan: BackfillPlanEntry[]
+): ExecutionManifest {
+  return {
+    runId,
+    manifestDigest: manifestDigest(plan),
+    // Skipped locales are not work: the manifest lists exactly the entries a
+    // completed run must produce an outcome for.
+    entries: plan
+      .filter((entry) => entry.action !== 'SKIP_EMPTY' && entry.expectedPath !== null)
+      .map((entry) => ({
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        sourceSha256: entry.sourceSha256 ?? '',
+        sizeBytes: entry.sizeBytes,
+        expectedPath: entry.expectedPath as string,
+        previousPath: entry.currentPath,
+      })),
+  };
+}
+
+/**
+ * Rebuilds work from the recorded manifest, classified against the CURRENT
+ * committed pointer for each entry: an entry whose pointer already holds the
+ * recorded destination is verify-only, everything else is attempted (the CAS
+ * still guards against a stale source or a moved pointer).
+ */
+export function planFromManifest(
+  manifest: JournalManifest,
+  observedPointers: Array<string | null>
+): BackfillPlanEntry[] {
+  return manifest.entries.map((entry, index) => ({
+    kind: entry.kind as BodyContentKind,
+    postId: entry.postId,
+    locale: entry.locale as BodyContentLocale,
+    sourceSha256: entry.sourceSha256,
+    sizeBytes: entry.sizeBytes,
+    expectedPath: entry.expectedPath,
+    currentPath: entry.previousPath,
+    action: observedPointers[index] === entry.expectedPath ? 'ALREADY_CURRENT' : 'UPLOAD_AND_POINT',
+    blockers: [],
+  }));
+}
+
+/**
  * Executes a plan. Throws before doing anything when the plan itself carries a
  * blocker: a blocked plan is never partially applied.
+ *
+ * `failFast` (the default) stops at the first unexpected failure: later entries
+ * are not attempted, the already-committed pointer changes are preserved, the
+ * audit for everything observed is flushed, and the report names the stopped
+ * entry and the remaining work. Nothing is rolled back and nothing is deleted.
  */
 export async function executeBackfill(
   deps: BackfillExecutorDeps,
   plan: BackfillPlanEntry[],
-  options: { runId?: string; revalidate?: boolean } = {}
+  options: {
+    runId?: string;
+    revalidate?: boolean;
+    failFast?: boolean;
+    /** Immutable identity to execute under (required for a resume). */
+    manifest?: ExecutionManifest;
+  } = {}
 ): Promise<BackfillRunReport> {
   const blocked = plan.filter((entry) => entry.action === 'BLOCKED');
   if (blocked.length > 0) {
@@ -195,10 +285,21 @@ export async function executeBackfill(
 
   const runId = options.runId ?? deps.newRunId();
   const revalidate = options.revalidate ?? true;
-  const digest = manifestDigest(plan);
+  const failFast = options.failFast ?? true;
+  const digest = options.manifest?.manifestDigest ?? manifestDigest(plan);
   const reports: BackfillEntryReport[] = [];
   const orphanCandidates = new Set<string>();
   const revalidationPending = new Set<string>();
+  let stopped: BackfillRunReport['stopped'] = null;
+  let remainingFrom = plan.length;
+
+  const toStop = (report: BackfillEntryReport): NonNullable<BackfillRunReport['stopped']> => ({
+    kind: report.kind,
+    postId: report.postId,
+    locale: report.locale,
+    outcome: report.outcome,
+    detail: report.detail,
+  });
 
   // Entries an earlier interrupted run left unresolved: the journal is not
   // trusted for the decision, but it tells us that this post may already have
@@ -207,6 +308,15 @@ export async function executeBackfill(
     unresolvedIntents((await deps.journal.read()).records).map((intent) =>
       journalEntrySlot(intent)
     )
+  );
+
+  // An entry that already has a terminal outcome for this exact identity is
+  // done: a resume re-verifies it but must not append a second outcome, which
+  // would read as conflicting evidence about the same work.
+  const priorOutcomes = new Set(
+    (await deps.journal.read()).records
+      .filter((record): record is JournalOutcome => record.type === 'outcome')
+      .map((record) => journalEntryKey(record))
   );
 
   /** Runs the signed revalidation for one post and applies the result to its entries. */
@@ -261,6 +371,15 @@ export async function executeBackfill(
   let group: BackfillEntryReport[] = [];
 
   const recordOutcome = async (report: BackfillEntryReport): Promise<void> => {
+    const identityKey = journalEntryKey({
+      runId,
+      manifestDigest: digest,
+      kind: report.kind,
+      postId: report.postId,
+      locale: report.locale,
+      intendedPath: report.intendedPath,
+    });
+    if (priorOutcomes.has(identityKey)) return;
     const record: JournalRecord = {
       type: 'outcome',
       runId,
@@ -285,7 +404,8 @@ export async function executeBackfill(
     await deps.journal.append(record);
   };
 
-  for (const entry of plan) {
+  for (let index = 0; index < plan.length; index += 1) {
+    const entry = plan[index];
     if (entry.action === 'SKIP_EMPTY') {
       continue;
     }
@@ -296,7 +416,17 @@ export async function executeBackfill(
     if (key !== currentPost && group.length > 0) {
       await flushPost(group);
       for (const report of group) await recordOutcome(report);
+      const flushedFailure = failFast
+        ? group.find((report) => isFailure(report.outcome))
+        : undefined;
       group = [];
+      if (flushedFailure) {
+        // The post just finished could not be invalidated: stop before any
+        // further mutation rather than continuing on a stale public cache.
+        stopped = toStop(flushedFailure);
+        remainingFrom = index;
+        break;
+      }
     }
     currentPost = key;
 
@@ -472,11 +602,24 @@ export async function executeBackfill(
 
     reports.push(report);
     group.push(report);
+
+    if (failFast && isFailure(report.outcome)) {
+      stopped = toStop(report);
+      remainingFrom = index + 1;
+      break;
+    }
   }
 
   if (group.length > 0) {
     await flushPost(group);
     for (const report of group) await recordOutcome(report);
+    if (!stopped && failFast) {
+      const flushedFailure = group.find((report) => isFailure(report.outcome));
+      if (flushedFailure) {
+        stopped = toStop(flushedFailure);
+        remainingFrom = plan.length;
+      }
+    }
   }
 
   const byOutcome = Object.fromEntries(
@@ -490,6 +633,16 @@ export async function executeBackfill(
     entries: reports,
     orphanCandidates: [...orphanCandidates].sort(),
     revalidationPending: [...revalidationPending].sort(),
+    stopped,
+    remaining: plan
+      .slice(remainingFrom)
+      .filter((entry) => entry.action !== 'SKIP_EMPTY')
+      .map((entry) => ({
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        expectedPath: entry.expectedPath ?? '',
+      })),
     summary: {
       entries: reports.length,
       byOutcome,
@@ -674,37 +827,82 @@ export async function planRollback(
 ): Promise<RollbackCandidate[]> {
   const { records } = await deps.journal.read();
 
+  // Candidate identities come from the immutable manifest when one is recorded
+  // (it survives an interruption that never wrote an outcome) plus any outcome
+  // record that actually witnessed a switch.
+  const manifestLookup = recordedManifest(records, selection.runId);
+  const manifestDigestOf = manifestLookup.ok ? manifestLookup.manifest.manifestDigest : null;
+  const manifestRunId = manifestLookup.ok ? manifestLookup.manifest.runId : null;
+  const ordered: JournalManifestEntry[] = [];
+  const seen = new Set<string>();
+  if (manifestLookup.ok) {
+    for (const entry of manifestLookup.manifest.entries) {
+      const key = `${entry.kind}|${entry.postId}|${entry.locale}|${entry.expectedPath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      ordered.push(entry);
+    }
+  }
   const switched = records.filter(
     (record): record is JournalOutcome => record.type === 'outcome' && record.pointerSwitched
   );
+  for (const record of switched) {
+    const key = `${record.kind}|${record.postId}|${record.locale}|${record.intendedPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ordered.push({
+      kind: record.kind,
+      postId: record.postId,
+      locale: record.locale,
+      sourceSha256: record.sourceSha256,
+      sizeBytes: 0,
+      expectedPath: record.intendedPath,
+      previousPath: record.previousPath ?? null,
+    });
+  }
+
+  const selected = ordered.filter(
+    (entry) =>
+      (!selection.manifestDigest ||
+        selection.manifestDigest === manifestDigestOf) &&
+      (!selection.runId ||
+        selection.runId === manifestRunId ||
+        switched.some(
+          (record) =>
+            record.runId === selection.runId &&
+            record.kind === entry.kind &&
+            record.postId === entry.postId &&
+            record.locale === entry.locale &&
+            record.intendedPath === entry.expectedPath
+        ))
+  );
+
   const rolledBack = new Set(
     records
-      .filter((record) => record.type === 'rollback' && record.outcome === 'ROLLED_BACK')
-      .map((record) => journalEntryKey(record))
+      .filter(
+        (record): record is JournalRollback =>
+          record.type === 'rollback' && record.outcome === 'ROLLED_BACK'
+      )
+      .map(
+        (record) => `${record.kind}|${record.postId}|${record.locale}|${record.installedPath}`
+      )
   );
 
-  const selected = switched.filter(
-    (record) =>
-      (!selection.runId || record.runId === selection.runId) &&
-      (!selection.manifestDigest || record.manifestDigest === selection.manifestDigest)
-  );
-
-  // Reverse migration order: the journal preserves the order entries were
-  // processed, so the last switch is rolled back first.
-  const ordered = [...selected].reverse();
+  // Reverse migration order: the last switch is rolled back first.
+  const reversed = [...selected].reverse();
   const candidates: RollbackCandidate[] = [];
 
-  for (const record of ordered) {
+  for (const record of reversed) {
     const kind = record.kind as BodyContentKind;
     const locale = record.locale as BodyContentLocale;
-    const key = journalEntryKey(record);
+    const key = `${record.kind}|${record.postId}|${record.locale}|${record.expectedPath}`;
     const base = {
-      runId: record.runId,
-      manifestDigest: record.manifestDigest,
+      runId: manifestLookup.ok ? manifestLookup.manifest.runId : (selection.runId ?? ''),
+      manifestDigest: manifestLookup.ok ? manifestLookup.manifest.manifestDigest : '',
       kind,
       postId: record.postId,
       locale,
-      installedPath: record.intendedPath,
+      installedPath: record.expectedPath,
       previousPath: record.previousPath ?? null,
       sourceSha256: record.sourceSha256,
     };
@@ -742,7 +940,7 @@ export async function planRollback(
       });
       continue;
     }
-    if (pointer !== record.intendedPath) {
+    if (pointer !== record.expectedPath) {
       // Either we already restored it, or someone else moved it. Distinguish:
       // holding the previous value again means there is nothing left to do,
       // and the write is never retried.
@@ -788,10 +986,21 @@ export type RollbackReport = {
     revalidation: JournalRevalidationStatus | null;
   }>;
   revalidationPending: string[];
+  /** Set when the rollback stopped at the first unexpected conflict. */
+  stopped: {
+    kind: string;
+    postId: number;
+    locale: string;
+    state: RollbackCandidateState;
+    detail: string | null;
+  } | null;
+  /** True while any restored post has an unacknowledged invalidation. */
+  incomplete: boolean;
   summary: {
     planned: number;
     ready: number;
     rolledBack: number;
+    skipped: number;
     conflicts: number;
     failed: number;
   };
@@ -801,19 +1010,29 @@ export type RollbackReport = {
  * Executes a rollback over the READY candidates only, in the order given
  * (reverse migration order). Each entry goes through the atomic rollback CAS,
  * which refuses when the pointer or the legacy body changed; the outcome is
- * journalled, and a successful rollback triggers the same signed invalidation
- * contract as the migration.
+ * journalled, and a successful rollback is invalidated per post after every
+ * applicable locale has been restored.
+ *
+ * With `failFast` (the default) the first unexpected conflict stops the run:
+ * nothing further is rolled back, and the entries already restored keep their
+ * committed pointer change and are still invalidated.
  *
  * Nothing is uploaded, no object is removed, and `body_en` / `body_it` are
  * never written.
  */
 export async function executeRollback(
   deps: RollbackDeps,
-  candidates: RollbackCandidate[]
+  candidates: RollbackCandidate[],
+  options: { failFast?: boolean } = {}
 ): Promise<RollbackReport> {
+  const failFast = options.failFast ?? true;
   const entries: RollbackReport['entries'] = [];
   const revalidationPending = new Set<string>();
-  const revalidationByPost = new Map<string, JournalRevalidationStatus>();
+  const restored = new Map<
+    string,
+    Array<{ candidate: RollbackCandidate; entryIndex: number }>
+  >();
+  let stopped: RollbackReport['stopped'] = null;
   let rolledBack = 0;
   let failed = 0;
 
@@ -828,6 +1047,16 @@ export async function executeRollback(
         reason: candidate.detail,
         revalidation: null,
       });
+      if (failFast && candidate.state !== 'ALREADY_ROLLED_BACK') {
+        stopped = {
+          kind: candidate.kind,
+          postId: candidate.postId,
+          locale: candidate.locale,
+          state: candidate.state,
+          detail: candidate.detail,
+        };
+        break;
+      }
       continue;
     }
 
@@ -840,28 +1069,6 @@ export async function executeRollback(
       previousPath: candidate.previousPath,
     });
 
-    let revalidation: JournalRevalidationStatus | null = null;
-    if (result.outcome === 'ROLLED_BACK') {
-      rolledBack += 1;
-      const post = postKey(candidate.kind, candidate.postId);
-      if (!revalidationByPost.has(post)) {
-        revalidationByPost.set(
-          post,
-          await deps.invalidate({
-            entity: candidate.kind,
-            operation: 'publish',
-            ids: [candidate.postId],
-          })
-        );
-      }
-      revalidation = revalidationByPost.get(post) ?? null;
-      if (revalidation && isIncompleteRevalidation(revalidation)) {
-        revalidationPending.add(post);
-      }
-    } else if (result.outcome !== 'ALREADY_CURRENT') {
-      failed += 1;
-    }
-
     entries.push({
       kind: candidate.kind,
       postId: candidate.postId,
@@ -869,8 +1076,17 @@ export async function executeRollback(
       installedPath: candidate.installedPath,
       outcome: result.outcome,
       reason: result.reason,
-      revalidation,
+      revalidation: null,
     });
+    const entryIndex = entries.length - 1;
+
+    if (result.outcome === 'ROLLED_BACK') {
+      rolledBack += 1;
+      const post = postKey(candidate.kind, candidate.postId);
+      restored.set(post, [...(restored.get(post) ?? []), { candidate, entryIndex }]);
+    } else if (result.outcome !== 'ALREADY_CURRENT') {
+      failed += 1;
+    }
 
     await deps.journal.append({
       type: 'rollback',
@@ -884,10 +1100,50 @@ export async function executeRollback(
       restoredPath: result.outcome === 'ROLLED_BACK' ? candidate.previousPath : null,
       outcome: result.outcome,
       reason: result.reason,
-      revalidation,
+      revalidation: null,
       detail: candidate.detail,
       at: deps.now().toISOString(),
     });
+
+    if (failFast && result.outcome !== 'ROLLED_BACK' && result.outcome !== 'ALREADY_CURRENT') {
+      stopped = {
+        kind: candidate.kind,
+        postId: candidate.postId,
+        locale: candidate.locale,
+        state: 'READY',
+        detail: `rollback CAS refused: ${result.outcome}${result.reason ? ` (${result.reason})` : ''}`,
+      };
+      break;
+    }
+  }
+
+  // Invalidate once per post, after every restored locale of that post has been
+  // verified by its CAS. A failed or skipped event leaves the rollback
+  // incomplete and retryable.
+  for (const [post, group] of restored) {
+    const first = group[0].candidate;
+    const status = await deps.invalidate({
+      entity: first.kind,
+      operation: 'publish',
+      ids: [first.postId],
+    });
+    for (const { candidate, entryIndex } of group) {
+      entries[entryIndex].revalidation = status;
+      await deps.journal.append({
+        type: 'revalidation',
+        runId: candidate.runId,
+        manifestDigest: candidate.manifestDigest,
+        kind: candidate.kind,
+        postId: candidate.postId,
+        locale: candidate.locale,
+        intendedPath: candidate.installedPath,
+        status,
+        observedPointer: candidate.previousPath,
+        detail: 'rollback invalidation',
+        at: deps.now().toISOString(),
+      });
+      if (isIncompleteRevalidation(status)) revalidationPending.add(post);
+    }
   }
 
   return {
@@ -896,16 +1152,99 @@ export async function executeRollback(
     candidates,
     entries,
     revalidationPending: [...revalidationPending].sort(),
+    stopped,
+    incomplete: revalidationPending.size > 0,
     summary: {
       planned: candidates.length,
       ready: candidates.filter((candidate) => candidate.state === 'READY').length,
       rolledBack,
+      skipped: candidates.filter((candidate) => candidate.state === 'ALREADY_ROLLED_BACK').length,
       conflicts: candidates.filter(
         (candidate) => candidate.state !== 'READY' && candidate.state !== 'ALREADY_ROLLED_BACK'
       ).length,
       failed,
     },
   };
+}
+
+export type RollbackRevalidationRetry = {
+  kind: string;
+  postId: number;
+  locale: string;
+  installedPath: string;
+  outcome: 'REVALIDATED' | 'SUPERSEDED' | 'FAILED';
+  status: JournalRevalidationStatus;
+};
+
+/**
+ * Retries rollback invalidations the journal still holds as pending. The
+ * restored pointer is re-read (it must still be the value the rollback put
+ * back) before a single signed event per post is sent; nothing is uploaded and
+ * no pointer is written.
+ */
+export async function retryRollbackRevalidations(
+  deps: Pick<
+    RollbackDeps,
+    'readCommittedPointer' | 'invalidate' | 'journal' | 'now'
+  >,
+  pending: PendingRollbackRevalidation[]
+): Promise<RollbackRevalidationRetry[]> {
+  const groups = new Map<string, PendingRollbackRevalidation[]>();
+  for (const entry of pending) {
+    const key = `${entry.kind}|${entry.postId}`;
+    groups.set(key, [...(groups.get(key) ?? []), entry]);
+  }
+
+  const reports: RollbackRevalidationRetry[] = [];
+  for (const group of groups.values()) {
+    const observed = await Promise.all(
+      group.map(async (entry) => ({
+        entry,
+        pointer: await deps.readCommittedPointer(
+          entry.kind as BodyContentKind,
+          entry.postId,
+          entry.locale as BodyContentLocale
+        ),
+      }))
+    );
+    const allRestored = observed.every(
+      ({ entry, pointer }) => pointer === (entry.restoredPath ?? null)
+    );
+
+    const status: JournalRevalidationStatus = allRestored
+      ? await deps.invalidate({
+          entity: group[0].kind as BodyContentKind,
+          operation: 'publish',
+          ids: [group[0].postId],
+        })
+      : 'superseded';
+
+    for (const { entry, pointer } of observed) {
+      await deps.journal.append({
+        type: 'revalidation',
+        runId: entry.runId,
+        manifestDigest: entry.manifestDigest,
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        intendedPath: entry.installedPath,
+        status,
+        observedPointer: pointer,
+        detail: allRestored ? 'rollback invalidation retry' : 'pointer no longer restored',
+        at: deps.now().toISOString(),
+      });
+      reports.push({
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        installedPath: entry.installedPath,
+        outcome:
+          status === 'sent' ? 'REVALIDATED' : status === 'superseded' ? 'SUPERSEDED' : 'FAILED',
+        status,
+      });
+    }
+  }
+  return reports;
 }
 
 /* -------------------------------------------------------------------------- */
