@@ -110,6 +110,9 @@ const bodyResponse = (id: number) => ({
 });
 
 /** Fake server: `GET` carries bodies, `GET_LIST` never does. */
+/** Simulates a batch whose update did not commit. */
+let failUpdates = false;
+
 function respond(operation: Operation): unknown {
   switch (operation.type) {
     case 'GET':
@@ -140,10 +143,18 @@ function respond(operation: Operation): unknown {
         data: {
           created: (operation.creates ?? []).map((item) => item.tempId),
           createdIds: {},
-          updated: (operation.updates ?? []).map((item) => item.id),
+          updated: failUpdates
+            ? []
+            : (operation.updates ?? []).map((item) => item.id),
           deleted: operation.deletes ?? [],
           reordered: [],
-          failed: [],
+          failed: failUpdates
+            ? (operation.updates ?? []).map((item) => ({
+                kind: 'update',
+                id: item.id,
+                error: 'write failed',
+              }))
+            : [],
         },
       };
     default:
@@ -276,6 +287,7 @@ beforeEach(() => {
   h.action.mockReset();
   h.publish = null;
   h.action.mockImplementation(async (operation) => respond(operation));
+  failUpdates = false;
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -578,4 +590,30 @@ it('sends no body field for a buttons-only change and keeps buttons intact', asy
     'title_en',
     'title_it',
   ]);
+});
+
+it('keeps an unresolvable draft body edit for the next publish', async () => {
+  setGate(true);
+  await mount();
+
+  await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
+  await setBodyMarkdown('Alpha EDITED EN');
+  await clickByText(cmsEn.editor.applyDraft);
+
+  // The update does not commit, so the metadata-only refetch that follows must
+  // preserve the draft's dirty locale AND its loaded baseline.
+  failUpdates = true;
+  await publish();
+
+  expect(container.textContent).toContain('write failed');
+  expect(rowFor('Alpha')).toBeTruthy();
+  // The retained draft keeps its baseline: no second body read.
+  expect(actionTypes().filter((type) => type === 'GET_BODIES')).toHaveLength(1);
+
+  failUpdates = false;
+  await publish();
+
+  const update = lastUpdate();
+  expect(update?.data.body_en).toBe('Alpha EDITED EN');
+  expect(update?.data).not.toHaveProperty('body_it');
 });

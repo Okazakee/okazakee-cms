@@ -4,10 +4,13 @@ import {
   dirtyBodyLocales,
   isBodyLoaded,
   mergeFetchedBodies,
+  type OptionalBodies,
   publishBodyFields,
   publishedBodies,
+  reconcileListBodies,
   retainDraftBodies,
   rowBodies,
+  withoutBodies,
 } from '@/hooks/cms/postBodyState';
 
 /**
@@ -228,5 +231,162 @@ describe('rowBodies / bodyColumnFields', () => {
 
   it('carries an intentionally emptied body', () => {
     expect(bodyColumnFields({ en: '' })).toEqual({ body_en: '' });
+  });
+});
+
+describe('withoutBodies', () => {
+  it('removes the body fields without touching the rest of the row', () => {
+    const row = { id: 4, title_en: 'T', body_en: '# en', body_it: '# it' };
+    const stripped = withoutBodies(row);
+    expect(Object.keys(stripped).sort()).toEqual(['id', 'title_en']);
+    expect(stripped.id).toBe(4);
+    expect(stripped.title_en).toBe('T');
+    // The source row is untouched.
+    expect(row.body_en).toBe('# en');
+  });
+
+  it('is a no-op for a row that already has no bodies', () => {
+    expect(withoutBodies({ id: 4, title_en: 'T' })).toEqual({
+      id: 4,
+      title_en: 'T',
+    });
+  });
+});
+
+describe('reconcileListBodies', () => {
+  type Row = {
+    id: number;
+    title_en: string;
+    body_en?: string;
+    body_it?: string;
+  };
+  const baseline = { en: '# committed en', it: '# committed it' };
+
+  const run = (args: {
+    rows: Row[];
+    previousRows: Row[];
+    baselines?: ReadonlyMap<number, OptionalBodies>;
+    modified?: number[];
+  }) =>
+    reconcileListBodies({
+      rows: args.rows,
+      previousRows: args.previousRows,
+      baselineFor: (id) => args.baselines?.get(id),
+      isModified: (id) => (args.modified ?? []).includes(id),
+    });
+
+  it('leaves a metadata-only row without any body', () => {
+    const rows = run({
+      rows: [{ id: 4, title_en: 'Fresh' }],
+      previousRows: [],
+    });
+    expect(Object.keys(rows[0] ?? {}).sort()).toEqual(['id', 'title_en']);
+  });
+
+  it('strips bodies a merged but unmodified draft still carried', () => {
+    // `mergeServerWithDrafts` overlays the local draft snapshot, which can hold
+    // bodies loaded when the editor was open. They are not owned by this row.
+    const rows = run({
+      rows: [{ id: 4, title_en: 'Draft title', body_en: '# en', body_it: '# it' }],
+      previousRows: [{ id: 4, title_en: 'Draft title', body_en: '# en', body_it: '# it' }],
+      baselines: new Map([[4, baseline]]),
+      modified: [],
+    });
+    expect(rows[0]).toEqual({ id: 4, title_en: 'Draft title' });
+    expect(Object.keys(rows[0] ?? {})).not.toContain('body_en');
+    expect(Object.keys(rows[0] ?? {})).not.toContain('body_it');
+  });
+
+  it('keeps only the dirty locale of an unresolved body edit', () => {
+    const rows = run({
+      rows: [
+        {
+          id: 4,
+          title_en: 'T',
+          body_en: '# edited en',
+          body_it: '# committed it',
+        },
+      ],
+      previousRows: [
+        {
+          id: 4,
+          title_en: 'T',
+          body_en: '# edited en',
+          body_it: '# committed it',
+        },
+      ],
+      baselines: new Map([[4, baseline]]),
+      modified: [4],
+    });
+    // EN is dirty and retained; the clean IT must not linger in list state.
+    expect(rows[0]).toEqual({
+      id: 4,
+      title_en: 'T',
+      body_en: '# edited en',
+    });
+    expect(Object.hasOwn(rows[0] ?? {}, 'body_it')).toBe(false);
+  });
+
+  it('keeps both locales when both differ from the baseline', () => {
+    const rows = run({
+      rows: [{ id: 4, title_en: 'T', body_en: '# e', body_it: '# i' }],
+      previousRows: [{ id: 4, title_en: 'T', body_en: '# e', body_it: '# i' }],
+      baselines: new Map([[4, baseline]]),
+      modified: [4],
+    });
+    expect(rows[0]).toEqual({
+      id: 4,
+      title_en: 'T',
+      body_en: '# e',
+      body_it: '# i',
+    });
+  });
+
+  it('drops every body for a modified row whose bodies match the baseline', () => {
+    const rows = run({
+      rows: [
+        {
+          id: 4,
+          title_en: 'Renamed',
+          body_en: baseline.en,
+          body_it: baseline.it,
+        },
+      ],
+      previousRows: [
+        {
+          id: 4,
+          title_en: 'Renamed',
+          body_en: baseline.en,
+          body_it: baseline.it,
+        },
+      ],
+      baselines: new Map([[4, baseline]]),
+      modified: [4],
+    });
+    expect(rows[0]).toEqual({ id: 4, title_en: 'Renamed' });
+  });
+
+  it('preserves both authored languages of a pending create', () => {
+    const rows = run({
+      rows: [{ id: -1700000000000, title_en: 'New', body_en: '# new en', body_it: '# new it' }],
+      previousRows: [],
+      modified: [],
+    });
+    expect(rows[0]).toEqual({
+      id: -1700000000000,
+      title_en: 'New',
+      body_en: '# new en',
+      body_it: '# new it',
+    });
+  });
+
+  it('tolerates a row with no previous state', () => {
+    const rows = run({
+      rows: [{ id: 9, title_en: 'Fresh', body_en: '# stray' }],
+      previousRows: [],
+      baselines: new Map([[9, baseline]]),
+      modified: [9],
+    });
+    expect(rows[0]).toEqual({ id: 9, title_en: 'Fresh' });
   });
 });

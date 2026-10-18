@@ -42,7 +42,7 @@ import {
   mergeFetchedBodies,
   publishBodyFields,
   publishedBodies,
-  retainDraftBodies,
+  reconcileListBodies,
   rowBodies,
 } from '@/hooks/cms/postBodyState';
 import { useBodyImages } from '@/hooks/cms/useBodyImages';
@@ -204,8 +204,9 @@ export default function PortfolioSection() {
         // Phase 9B: the metadata-only projection when the lazy gate is on, the
         // legacy full read otherwise. Either way no body is fetched here — a
         // list row without Markdown means "not loaded".
+        const lazyBodies = bodyLazyLoadEnabled();
         const r = await portfolioActions({
-          type: bodyLazyLoadEnabled() ? 'GET_LIST' : 'GET',
+          type: lazyBodies ? 'GET_LIST' : 'GET',
         });
         if (!current()) return;
         if (r.success) {
@@ -221,33 +222,38 @@ export default function PortfolioSection() {
           const merged = drafts
             ? mergeServerWithDrafts(server, drafts)
             : server;
-          // Bodies may only survive for a post that still holds an unresolved
-          // draft; every other row returns to "not loaded" and loses its
-          // baseline.
-          const stillModified: ReadonlySet<number> = drafts
-            ? new Set(drafts.modified.keys())
-            : modifiedRef.current;
-          const baselines = baselinesRef.current;
-          const nextBaselines = new Map<number, LoadedBodies>();
-          setPosts(
-            merged.map((row) => {
-              const baseline = baselines.get(row.id);
-              const modified = stillModified.has(row.id);
-              const previous = postsRef.current.find((p) => p.id === row.id);
-              if (modified && baseline) nextBaselines.set(row.id, baseline);
-              return {
-                ...row,
-                ...bodyColumnFields(
-                  retainDraftBodies({
-                    existing: previous ? rowBodies(previous) : undefined,
-                    baseline,
-                    modified,
-                  })
-                ),
-              };
-            })
-          );
-          baselinesRef.current = nextBaselines;
+          if (!lazyBodies) {
+            // Eager path: `GET` rows already carry the Markdown the editor and
+            // the publish payload need, so they are kept exactly as fetched and
+            // no body is ever stripped.
+            setPosts(merged);
+            baselinesRef.current = new Map();
+          } else {
+            // Bodies may only survive for a post that still holds an unresolved
+            // draft; every other row returns to "not loaded" and loses its
+            // baseline.
+            const stillModified: ReadonlySet<number> = drafts
+              ? new Set(drafts.modified.keys())
+              : modifiedRef.current;
+            const baselines = baselinesRef.current;
+            // A baseline survives only while its draft is unresolved.
+            const nextBaselines = new Map<number, LoadedBodies>();
+            for (const [id, baseline] of baselines) {
+              if (stillModified.has(id)) nextBaselines.set(id, baseline);
+            }
+            // List rows carry no bodies: an inherited body is removed and only
+            // an unresolved local edit may put its locales back. A pending
+            // create keeps both authored languages.
+            setPosts(
+              reconcileListBodies({
+                rows: merged,
+                previousRows: postsRef.current,
+                baselineFor: (id) => baselines.get(id),
+                isModified: (id) => stillModified.has(id),
+              })
+            );
+            baselinesRef.current = nextBaselines;
+          }
         }
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : 'Failed');

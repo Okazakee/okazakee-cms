@@ -45,7 +45,7 @@ import {
   mergeFetchedBodies,
   publishBodyFields,
   publishedBodies,
-  retainDraftBodies,
+  reconcileListBodies,
   rowBodies,
 } from '@/hooks/cms/postBodyState';
 import { usePostBodies } from '@/hooks/cms/usePostBodies';
@@ -204,19 +204,14 @@ export default function BlogSection() {
               ? mergeServerWithDrafts(server, drafts)
               : server;
             if (!lazyBodies) return merged;
-            // List rows carry no bodies: only an unresolved local body edit
-            // survives a refetch, everything else degrades to "not loaded".
-            const previous = new Map(prev.map((p) => [p.id, p]));
-            return merged.map((row) => {
-              const existing = previous.get(row.id);
-              return {
-                ...row,
-                ...retainDraftBodies({
-                  existing: existing ? rowBodies(existing) : undefined,
-                  baseline: baselines.current.get(row.id),
-                  modified: modifiedRef.current.has(row.id),
-                }),
-              };
+            // List rows carry no bodies: an inherited body is removed and only
+            // an unresolved local edit may put its locales back. A pending
+            // create keeps both authored languages.
+            return reconcileListBodies({
+              rows: merged,
+              previousRows: prev,
+              baselineFor: (id) => baselines.current.get(id),
+              isModified: (id) => modifiedRef.current.has(id),
             });
           });
           if (lazyBodies) {

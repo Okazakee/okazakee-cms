@@ -147,3 +147,53 @@ export function bodyColumnFields(fields: OptionalBodies): BodyColumns {
   if (fields.it !== undefined) columns.body_it = fields.it;
   return columns;
 }
+
+/**
+ * A copy of a row with any Markdown REMOVED (not merely overwritten).
+ *
+ * Merging a local draft over a metadata-only row can leave a body the row no
+ * longer owns, so the field has to be deleted rather than spread over.
+ */
+export function withoutBodies<TRow extends object>(row: TRow): TRow {
+  const next = { ...row } as TRow & BodyColumns;
+  delete next.body_en;
+  delete next.body_it;
+  return next;
+}
+
+/**
+ * Rebuilds list rows after a metadata-only fetch.
+ *
+ * The fetched rows carry no Markdown, but a merged local draft snapshot may
+ * still hold bodies loaded earlier. Each row is therefore rebuilt WITHOUT any
+ * inherited body, and only the locales an unresolved edit still owns are added
+ * back — so clean or unmodified Markdown never lingers in list state.
+ *
+ * A pending create (negative id) is local-only: it was never fetched, so both
+ * authored languages are preserved verbatim.
+ */
+export function reconcileListBodies<
+  TRow extends BodyColumns & { id: number },
+>(args: {
+  rows: TRow[];
+  /** The rows currently in state, for the unresolved draft's local bodies. */
+  previousRows: ReadonlyArray<TRow>;
+  baselineFor: (id: number) => OptionalBodies | undefined;
+  isModified: (id: number) => boolean;
+}): TRow[] {
+  const previous = new Map(args.previousRows.map((row) => [row.id, row]));
+  return args.rows.map((row) => {
+    if (row.id < 0) return row;
+    const existing = previous.get(row.id);
+    return {
+      ...withoutBodies(row),
+      ...bodyColumnFields(
+        retainDraftBodies({
+          existing: existing ? rowBodies(existing) : undefined,
+          baseline: args.baselineFor(row.id),
+          modified: args.isModified(row.id),
+        })
+      ),
+    };
+  });
+}
