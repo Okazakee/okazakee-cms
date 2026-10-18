@@ -61,6 +61,12 @@ type JournalIdentityFields = {
 /** Written before any object is uploaded for an entry. */
 export type JournalIntent = JournalIdentityFields & {
   type: 'intent';
+  /**
+   * Monotonic attempt ordinal for this entry: a retry after a recorded failure
+   * is a NEW attempt, so it can be recorded without contradicting the earlier
+   * one. Absent in old journals, where it reads as 1.
+   */
+  attempt: number;
   previousPath: string | null;
   sourceSha256: string;
   at: string;
@@ -69,6 +75,8 @@ export type JournalIntent = JournalIdentityFields & {
 /** Written only after the committed state has been observed and verified. */
 export type JournalOutcome = JournalIdentityFields & {
   type: 'outcome';
+  /** Attempt ordinal of this observation (see JournalIntent.attempt). */
+  attempt: number;
   previousPath: string | null;
   sourceSha256: string;
   outcome: BackfillRunOutcome;
@@ -161,6 +169,28 @@ export function journalEntrySlot(
   record: Pick<JournalIdentityFields, 'kind' | 'postId' | 'locale' | 'intendedPath'>
 ): string {
   return [record.kind, record.postId, record.locale, record.intendedPath].join('|');
+}
+
+/** One attempt of one entry: identity plus its attempt ordinal. */
+export function journalAttemptKey(
+  record: JournalIdentityFields & { attempt: number }
+): string {
+  return `${journalEntryKey(record)}|${record.attempt}`;
+}
+
+/**
+ * Outcomes that mean the migration work for an entry is DONE (a switch whose
+ * invalidation is still outstanding is tracked separately as a pending
+ * invalidation). Everything else is a failure that must be retried.
+ */
+export const SUCCESSFUL_BACKFILL_OUTCOMES: BackfillRunOutcome[] = [
+  'UPLOADED_AND_POINTED',
+  'ALREADY_CURRENT',
+  'REVALIDATION_FAILED',
+];
+
+export function isSuccessfulOutcome(outcome: BackfillRunOutcome): boolean {
+  return SUCCESSFUL_BACKFILL_OUTCOMES.includes(outcome);
 }
 
 /** Serializes one record as a single JSON line (throws on embedded newlines). */
@@ -266,11 +296,17 @@ export function parseJournalRecord(value: unknown): JournalRecord | null {
     intendedPath: raw.intendedPath,
     at: typeof raw.at === 'string' ? raw.at : '',
   };
+  // Absent in pre-attempt journals, where every recorded observation is 1.
+  const attempt =
+    typeof raw.attempt === 'number' && Number.isInteger(raw.attempt) && raw.attempt > 0
+      ? raw.attempt
+      : 1;
 
   if (raw.type === 'intent') {
     return {
       type: 'intent',
       ...identity,
+      attempt,
       previousPath: nullableString(raw.previousPath),
       sourceSha256: typeof raw.sourceSha256 === 'string' ? raw.sourceSha256 : '',
     };
@@ -302,6 +338,7 @@ export function parseJournalRecord(value: unknown): JournalRecord | null {
   return {
     type: 'outcome',
     ...identity,
+    attempt,
     previousPath: nullableString(raw.previousPath),
     sourceSha256: typeof raw.sourceSha256 === 'string' ? raw.sourceSha256 : '',
     outcome: raw.outcome as BackfillRunOutcome,
@@ -372,6 +409,14 @@ export type JournalRunSummary = {
   manifestEntries: number;
   /** Entries whose switch was verified by an outcome record. */
   switched: number;
+  /** Entries the manifest (or the outcomes, when absent) declares. */
+  entriesTotal: number;
+  /** Entries whose LATEST attempt recorded a successful outcome. */
+  entriesSucceeded: number;
+  /** Entries whose latest attempt recorded a failure — retry candidates. */
+  entriesFailed: number;
+  /** Manifest entries with no outcome at all — never attempted. */
+  entriesMissing: number;
   unresolved: JournalIntent[];
   pendingRevalidations: PendingRevalidation[];
 };
@@ -392,15 +437,15 @@ export type JournalAudit = {
   warnings: string[];
 };
 
-/** Intents with no outcome of the same identity (run + manifest + entry). */
+/** Intents with no outcome for the same attempt (run + manifest + entry + attempt). */
 export function unresolvedIntents(records: JournalRecord[]): JournalIntent[] {
   const completed = new Set<string>();
   for (const record of records) {
-    if (record.type === 'outcome') completed.add(journalEntryKey(record));
+    if (record.type === 'outcome') completed.add(journalAttemptKey(record));
   }
   return records.filter(
     (record): record is JournalIntent =>
-      record.type === 'intent' && !completed.has(journalEntryKey(record))
+      record.type === 'intent' && !completed.has(journalAttemptKey(record))
   );
 }
 
@@ -478,14 +523,16 @@ export function detectConflicts(records: JournalRecord[]): string[] {
       manifests.set(record.runId, seen);
       continue;
     }
-    const key = journalEntryKey(record);
+    // Contradictions are judged per attempt: a retry is a new attempt, not a
+    // disagreement with the failed one.
     const fingerprint = JSON.stringify(record);
     if (record.type === 'outcome') {
+      const key = journalAttemptKey(record);
       const seen = outcomes.get(key) ?? new Set<string>();
       seen.add(fingerprint);
       outcomes.set(key, seen);
-    }
-    if (record.type === 'intent') {
+    } else if (record.type === 'intent') {
+      const key = journalAttemptKey(record);
       const seen = intents.get(key) ?? new Set<string>();
       seen.add(`${record.previousPath}|${record.sourceSha256}`);
       intents.set(key, seen);
@@ -523,6 +570,10 @@ export function auditJournal(parsed: ParsedJournal): JournalAudit {
       manifests: 0,
       manifestEntries: 0,
       switched: 0,
+      entriesTotal: 0,
+      entriesSucceeded: 0,
+      entriesFailed: 0,
+      entriesMissing: 0,
       unresolved: [],
       pendingRevalidations: [],
     };
@@ -550,6 +601,50 @@ export function auditJournal(parsed: ParsedJournal): JournalAudit {
   }
   for (const pending of pendingRevalidations(parsed.records)) {
     summaryFor(pending.runId, pending.manifestDigest).pendingRevalidations.push(pending);
+  }
+
+  // Entry-level status from the LATEST attempt of each entry: a run is only
+  // finished when every declared entry's latest attempt succeeded.
+  const latestByEntry = new Map<
+    string,
+    { attempt: number; success: boolean }
+  >();
+  for (const record of parsed.records) {
+    if (record.type !== 'outcome') continue;
+    const key = journalEntryKey(record);
+    const previous = latestByEntry.get(key);
+    if (!previous || record.attempt >= previous.attempt) {
+      latestByEntry.set(key, {
+        attempt: record.attempt,
+        success: isSuccessfulOutcome(record.outcome),
+      });
+    }
+  }
+
+  for (const run of runs.values()) {
+    const manifest = parsed.records.find(
+      (record): record is JournalManifest =>
+        record.type === 'manifest' && record.runId === run.runId
+    );
+    const keys = manifest
+      ? manifest.entries.map((entry) =>
+          journalEntryKey({
+            runId: run.runId,
+            manifestDigest: manifest.manifestDigest,
+            kind: entry.kind,
+            postId: entry.postId,
+            locale: entry.locale,
+            intendedPath: entry.expectedPath,
+          })
+        )
+      : [...latestByEntry.keys()].filter((key) => key.startsWith(`${run.runId}|`));
+    run.entriesTotal = keys.length;
+    for (const key of keys) {
+      const latest = latestByEntry.get(key);
+      if (!latest) run.entriesMissing += 1;
+      else if (latest.success) run.entriesSucceeded += 1;
+      else run.entriesFailed += 1;
+    }
   }
 
   const conflicts = detectConflicts(parsed.records);
@@ -689,13 +784,13 @@ export function selectResumeRun(
   }
   const candidates = audit.runs.filter(
     (run) =>
+      // A run is unfinished while any declared entry's LATEST attempt is a
+      // failure, any entry was never attempted, an intent is unanswered, or an
+      // invalidation is unacknowledged.
+      run.entriesFailed > 0 ||
+      run.entriesMissing > 0 ||
       run.unresolved.length > 0 ||
-      run.pendingRevalidations.length > 0 ||
-      run.outcomes < run.intents ||
-      // A run whose immutable manifest declares more entries than it has
-      // terminal outcomes is unfinished even when every intent it wrote was
-      // answered — the interruption happened between entries.
-      (run.manifests > 0 && run.manifestEntries > run.outcomes)
+      run.pendingRevalidations.length > 0
   );
   if (candidates.length === 0) {
     return { ok: false, error: 'journal has no unfinished run to resume' };

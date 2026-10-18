@@ -563,6 +563,7 @@ describe('GATE A3: rollback integrity', () => {
       previousPath: null,
       intendedPath: work[0].expectedPath as string,
       sourceSha256: work[0].sourceSha256 as string,
+      attempt: 1,
       at: '2026-10-18T10:00:00.000Z',
     });
 
@@ -625,6 +626,7 @@ describe('GATE A3: rollback integrity', () => {
       previousPath: null,
       intendedPath: work[0].expectedPath as string,
       sourceSha256: work[0].sourceSha256 as string,
+      attempt: 1,
       at: '2026-10-18T10:00:00.000Z',
     });
 

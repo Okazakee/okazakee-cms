@@ -41,6 +41,7 @@ import {
 import type { BackfillCasApi, CasOutcome } from '@/libs/cms/storage/backfillCas';
 import type { BackfillPlanEntry } from '@/libs/cms/storage/backfillPlan';
 import {
+  isSuccessfulOutcome,
   journalEntryKey,
   journalEntrySlot,
   recordedManifest,
@@ -74,6 +75,8 @@ export type BackfillEntryReport = {
   cas: CasOutcome | null;
   casReason: string | null;
   pointerVerified: boolean;
+  /** 1-based attempt ordinal this report describes (0 when not attempted). */
+  attempt: number;
   /** True only when THIS run's CAS moved the pointer (drives revalidation). */
   pointerSwitched: boolean;
   /** True only when THIS run performed the upload (never inferred from existence). */
@@ -310,14 +313,20 @@ export async function executeBackfill(
     )
   );
 
-  // An entry that already has a terminal outcome for this exact identity is
-  // done: a resume re-verifies it but must not append a second outcome, which
-  // would read as conflicting evidence about the same work.
-  const priorOutcomes = new Set(
-    (await deps.journal.read()).records
-      .filter((record): record is JournalOutcome => record.type === 'outcome')
-      .map((record) => journalEntryKey(record))
-  );
+  // Latest recorded outcome per entry identity: the attempt ordinal to use for
+  // a retry, and whether the entry is already done.
+  const priorOutcomeState = new Map<string, { attempt: number; success: boolean }>();
+  for (const record of (await deps.journal.read()).records) {
+    if (record.type !== 'outcome') continue;
+    const key = journalEntryKey(record);
+    const previous = priorOutcomeState.get(key);
+    if (!previous || record.attempt >= previous.attempt) {
+      priorOutcomeState.set(key, {
+        attempt: record.attempt,
+        success: isSuccessfulOutcome(record.outcome),
+      });
+    }
+  }
 
   /** Runs the signed revalidation for one post and applies the result to its entries. */
   const flushPost = async (group: BackfillEntryReport[]): Promise<void> => {
@@ -379,9 +388,13 @@ export async function executeBackfill(
       locale: report.locale,
       intendedPath: report.intendedPath,
     });
-    if (priorOutcomes.has(identityKey)) return;
+    // Already-done entries are re-verified but never re-recorded; a failed
+    // attempt is followed by a NEW attempt ordinal, so the retry is auditable
+    // without contradicting the failure it superseded.
+    if (priorOutcomeState.get(identityKey)?.success) return;
     const record: JournalRecord = {
       type: 'outcome',
+      attempt: report.attempt,
       runId,
       manifestDigest: digest,
       kind: report.kind,
@@ -402,6 +415,10 @@ export async function executeBackfill(
       at: deps.now().toISOString(),
     };
     await deps.journal.append(record);
+    priorOutcomeState.set(identityKey, {
+      attempt: report.attempt,
+      success: isSuccessfulOutcome(report.outcome),
+    });
   };
 
   for (let index = 0; index < plan.length; index += 1) {
@@ -443,6 +460,7 @@ export async function executeBackfill(
       cas: null,
       casReason: null,
       pointerVerified: false,
+      attempt: 0,
       pointerSwitched: false,
       objectCreatedByRun: false,
       revalidation: null,
@@ -452,18 +470,30 @@ export async function executeBackfill(
       continue;
     }
 
-    await deps.journal.append({
-      type: 'intent',
+    const identity = {
       runId,
       manifestDigest: digest,
       kind: entry.kind,
       postId: entry.postId,
       locale: entry.locale,
-      previousPath: entry.currentPath,
       intendedPath: entry.expectedPath,
-      sourceSha256: entry.sourceSha256,
-      at: deps.now().toISOString(),
-    });
+    };
+    const prior = priorOutcomeState.get(journalEntryKey(identity));
+    const attempt = prior ? prior.attempt + 1 : 1;
+    report.attempt = attempt;
+
+    if (!prior?.success) {
+      // A retry after a recorded failure is a new attempt; an entry that
+      // already succeeded is only re-verified, never rewritten.
+      await deps.journal.append({
+        type: 'intent',
+        ...identity,
+        attempt,
+        previousPath: entry.currentPath,
+        sourceSha256: entry.sourceSha256,
+        at: deps.now().toISOString(),
+      });
+    }
 
     try {
       if (entry.action === 'ALREADY_CURRENT') {

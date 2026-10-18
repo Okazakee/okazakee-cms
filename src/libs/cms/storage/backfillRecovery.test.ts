@@ -49,6 +49,7 @@ function makeIntent(overrides: Partial<JournalIntent> = {}): JournalIntent {
     previousPath: null,
     intendedPath: `blog/1/en/${HASH}.md`,
     sourceSha256: HASH,
+    attempt: 1,
     at: '2026-10-18T10:00:00.000Z',
     ...overrides,
   };

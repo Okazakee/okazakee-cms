@@ -516,6 +516,7 @@ describe('executor: interruption and resume', () => {
       previousPath: null,
       intendedPath: entry.expectedPath as string,
       sourceSha256: entry.sourceSha256 as string,
+      attempt: 1,
       outcome: 'UPLOADED_AND_POINTED',
       upload: 'uploaded',
       cas: 'APPLIED',

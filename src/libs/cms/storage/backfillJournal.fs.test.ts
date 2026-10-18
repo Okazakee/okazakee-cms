@@ -48,6 +48,7 @@ function intent(overrides: Partial<JournalIntent> = {}): JournalIntent {
     previousPath: null,
     intendedPath: `blog/${counter}/en/${HASH}.md`,
     sourceSha256: HASH,
+    attempt: 1,
     at: '2026-10-18T10:00:00.000Z',
     ...overrides,
   };
@@ -76,6 +77,7 @@ function outcome(
     objectCreatedByRun: true,
     revalidation: 'sent',
     detail: null,
+    attempt: from.attempt,
     at: '2026-10-18T10:00:01.000Z',
     ...overrides,
   };
