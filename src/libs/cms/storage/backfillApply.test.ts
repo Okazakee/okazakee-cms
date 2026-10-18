@@ -170,6 +170,7 @@ function harness(options: HarnessOptions = {}) {
       return options.revalidate ?? 'sent';
     },
     journal: {
+      path: ':memory:',
       async append(record) {
         if (options.journalFailureOn?.(record)) {
           throw new Error('journal write interrupted');
@@ -820,17 +821,23 @@ describe('executor CLI arguments', () => {
     }
   });
 
-  it('requires a digest and a project reference for --apply', () => {
+  it('requires a digest, a project reference and a run selection for --apply', () => {
     expect(parseExecArgs(['--apply']).mode).toBe('invalid');
     expect(parseExecArgs(['--apply', '--expect-project-ref=abc']).mode).toBe('invalid');
     expect(parseExecArgs(['--apply', '--confirm-digest=zz']).mode).toBe('invalid');
     expect(
       parseExecArgs([
         '--apply',
+        '--new-run',
         `--confirm-digest=${'a'.repeat(64)}`,
         '--expect-project-ref=dev',
       ])
-    ).toEqual({ mode: 'apply', confirmDigest: 'a'.repeat(64), expectProjectRef: 'dev' });
+    ).toEqual({
+      mode: 'apply',
+      runSelection: 'new',
+      confirmDigest: 'a'.repeat(64),
+      expectProjectRef: 'dev',
+    });
   });
 
   it('documents the operator acknowledgement required to arm an apply', () => {

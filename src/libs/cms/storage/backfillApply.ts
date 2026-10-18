@@ -1,9 +1,9 @@
 /**
- * Markdown body backfill executor (Phase 11B.1) — DEV only.
+ * Markdown body backfill executor (Phase 11B.1; recovery hardened in 11B.2) —
+ * DEV only.
  *
- * Drives the reviewed plan from `backfillPlan.ts` entry by entry, in the plan's
- * deterministic order, and keeps upload success strictly separate from pointer
- * success:
+ * Drives the reviewed plan entry by entry, in the plan's deterministic order,
+ * and keeps upload success strictly separate from pointer success:
  *
  *   1. read the COMMITTED legacy body and re-check it against the manifest
  *      SHA-256 (a CMS edit after planning stops the entry here, before upload);
@@ -15,14 +15,19 @@
  *   6. re-read the committed pointer to confirm the switch;
  *   7. group by post and send ONE signed revalidation event per post.
  *
+ * A verified pointer switch whose invalidation did not return `sent` is
+ * incomplete work: it is reported as REVALIDATION_FAILED, journalled, and left
+ * retryable across process invocations (`retryPendingRevalidations`).
+ *
+ * Interruptions are recoverable in every window: before upload, after upload
+ * before the CAS, after the CAS before the outcome is durable, and after the
+ * switch before the invalidation. Recovery always re-reads the database and
+ * re-verifies Storage; the journal never proves a completed migration.
+ *
  * Nothing here deletes: an object that exists without a pointer is reported as
  * an orphan candidate and left alone. Markdown is never rewritten — the bytes
  * come from the committed column, so Unicode, newlines and image URLs are
  * preserved exactly.
- *
- * Every dependency is injected, so the whole executor is testable without a
- * network or a database, and no code path in this module can reach a mutation
- * other than the CAS RPC and the object upload it is given.
  */
 import {
   prepareBodyContent,
@@ -36,11 +41,16 @@ import {
 import type { BackfillCasApi, CasOutcome } from '@/libs/cms/storage/backfillCas';
 import type { BackfillPlanEntry } from '@/libs/cms/storage/backfillPlan';
 import {
+  journalEntryKey,
+  journalEntrySlot,
   unresolvedIntents,
   type BackfillJournal,
   type BackfillRunOutcome,
   type JournalRecord,
+  type JournalOutcome,
+  type JournalRevalidationStatus,
   type JournalUploadStatus,
+  type PendingRevalidation,
 } from '@/libs/cms/storage/backfillJournal';
 
 export type RevalidationStatus = 'sent' | 'skipped' | 'failed';
@@ -63,7 +73,7 @@ export type BackfillEntryReport = {
   pointerSwitched: boolean;
   /** True only when THIS run performed the upload (never inferred from existence). */
   objectCreatedByRun: boolean;
-  revalidation: RevalidationStatus | null;
+  revalidation: JournalRevalidationStatus | null;
 };
 
 export type BackfillRunReport = {
@@ -72,7 +82,7 @@ export type BackfillRunReport = {
   entries: BackfillEntryReport[];
   /** Objects that exist but are not referenced by any committed pointer. Never deleted here. */
   orphanCandidates: string[];
-  /** Posts whose pointer moved but whose signed revalidation did not succeed. */
+  /** Posts whose pointer moved but whose signed revalidation is not acknowledged. */
   revalidationPending: string[];
   summary: {
     entries: number;
@@ -123,6 +133,11 @@ export const BACKFILL_OUTCOMES: BackfillRunOutcome[] = [
   'POINTER_VERIFY_FAILED',
   'REVALIDATION_FAILED',
 ];
+
+/** Whether an invalidation result leaves the entry incomplete. */
+export function isIncompleteRevalidation(status: JournalRevalidationStatus): boolean {
+  return status === 'failed' || status === 'skipped';
+}
 
 /**
  * Stable digest of a plan: entity, id, locale, source hash, size, destination
@@ -189,42 +204,54 @@ export async function executeBackfill(
   // trusted for the decision, but it tells us that this post may already have
   // been switched without its cache being invalidated.
   const priorUnresolved = new Set(
-    unresolvedIntents((await deps.journal.read()).records).map(
-      (intent) => `${intent.kind}:${intent.postId}:${intent.locale}:${intent.intendedPath}`
+    unresolvedIntents((await deps.journal.read()).records).map((intent) =>
+      journalEntrySlot(intent)
     )
   );
 
   /** Runs the signed revalidation for one post and applies the result to its entries. */
   const flushPost = async (group: BackfillEntryReport[]): Promise<void> => {
     if (group.length === 0) return;
-    // A pointer that moved in THIS run needs invalidation. An entry the
-    // journal left unresolved may have moved the pointer in an interrupted
-    // run without invalidating, so it needs the same treatment even though it
-    // now looks already-current.
     const needsRevalidation = group.some(
       (entry) =>
         entry.pointerSwitched ||
-        priorUnresolved.has(`${entry.kind}:${entry.postId}:${entry.locale}:${entry.intendedPath}`)
+        priorUnresolved.has(journalEntrySlot(entry))
     );
     if (!needsRevalidation) {
       for (const entry of group) entry.revalidation = null;
       return;
     }
     if (!revalidate) {
-      for (const entry of group) entry.revalidation = 'skipped';
+      // No attempt was made (dry run): nothing is claimed and nothing pending.
+      for (const entry of group) entry.revalidation = null;
       return;
     }
+
     const status = await deps.invalidate({
       entity: group[0].kind,
       operation: 'publish',
       ids: [group[0].postId],
     });
+
     for (const entry of group) {
-      if (!entry.pointerVerified) continue;
       entry.revalidation = status;
-      if (status === 'failed') {
+      await deps.journal.append({
+        type: 'revalidation',
+        runId,
+        manifestDigest: digest,
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        intendedPath: entry.intendedPath,
+        status,
+        observedPointer: entry.pointerVerified ? entry.intendedPath : null,
+        detail: null,
+        at: deps.now().toISOString(),
+      });
+      if (!entry.pointerVerified) continue;
+      if (isIncompleteRevalidation(status)) {
         entry.outcome = 'REVALIDATION_FAILED';
-        entry.detail = 'pointer switched but signed revalidation failed';
+        entry.detail = `pointer switched but signed revalidation is ${status}`;
         revalidationPending.add(postKey(entry.kind, entry.postId));
       }
     }
@@ -310,18 +337,32 @@ export async function executeBackfill(
 
     try {
       if (entry.action === 'ALREADY_CURRENT') {
-        // Never trust the recorded state: re-verify the object bytes.
-        const bytes = await readBodyContentBytes(deps.storage, entry.expectedPath);
-        if (sha256Hex(bytes) !== entry.sourceSha256) {
+        // Never trust the recorded state: re-verify the object bytes AND the
+        // committed pointer. A pointer that no longer holds this key is an
+        // explicit failure, never a successful outcome.
+        try {
+          const bytes = await readBodyContentBytes(deps.storage, entry.expectedPath);
+          if (sha256Hex(bytes) !== entry.sourceSha256) {
+            report.outcome = 'VERIFY_FAILED';
+            report.detail = 'existing object bytes do not match the manifest hash';
+          } else {
+            const pointer = await deps.readCommittedPointer(
+              entry.kind,
+              entry.postId,
+              entry.locale
+            );
+            if (pointer === entry.expectedPath) {
+              report.outcome = 'ALREADY_CURRENT';
+              report.pointerVerified = true;
+            } else {
+              report.outcome = 'POINTER_VERIFY_FAILED';
+              report.detail =
+                'object matches but the committed pointer does not hold this key';
+            }
+          }
+        } catch (error) {
           report.outcome = 'VERIFY_FAILED';
-          report.detail = 'existing object bytes do not match the manifest hash';
-        } else {
-          report.outcome = 'ALREADY_CURRENT';
-          report.pointerVerified = (await deps.readCommittedPointer(
-            entry.kind,
-            entry.postId,
-            entry.locale
-          )) === entry.expectedPath;
+          report.detail = errorDetail(error);
         }
       } else {
         // 1. committed body, re-checked against the manifest
@@ -452,11 +493,417 @@ export async function executeBackfill(
     summary: {
       entries: reports.length,
       byOutcome,
-      pointerSwitches: reports.filter((r) => r.outcome === 'UPLOADED_AND_POINTED').length,
+      pointerSwitches: reports.filter((r) => r.pointerSwitched).length,
       uploadedObjects: reports.filter((r) => r.objectCreatedByRun).length,
       alreadyCurrent: byOutcome.ALREADY_CURRENT,
       failures: reports.filter((r) => isFailure(r.outcome)).length,
       revalidationFailed: byOutcome.REVALIDATION_FAILED,
+    },
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Pending invalidation retry                                                  */
+/* -------------------------------------------------------------------------- */
+
+export type RevalidationRetryOutcome = 'REVALIDATED' | 'SUPERSEDED' | 'FAILED' | 'MISSING';
+
+export type RevalidationRetryReport = {
+  kind: string;
+  postId: number;
+  locale: string;
+  intendedPath: string;
+  outcome: RevalidationRetryOutcome;
+  status: JournalRevalidationStatus | null;
+  observedPointer: string | null;
+  detail: string | null;
+};
+
+/**
+ * Retries invalidations the journal still holds as pending: a previous run
+ * switched the pointer but the public cache was never acknowledged (the WS was
+ * unreachable, the event failed, or it was skipped).
+ *
+ * It never uploads and never rewrites a pointer: the committed pointer is
+ * re-read and must still hold the key this run installed. When it does not, the
+ * row has moved on and whatever changed it owns that cache, so the entry is
+ * recorded as `superseded` instead of being retried. Entries are grouped by
+ * post so EN/IT send a single event.
+ */
+export async function retryPendingRevalidations(
+  deps: Pick<
+    BackfillExecutorDeps,
+    'readCommittedPointer' | 'invalidate' | 'journal' | 'now'
+  >,
+  pending: PendingRevalidation[]
+): Promise<RevalidationRetryReport[]> {
+  const reports: RevalidationRetryReport[] = [];
+  const groups = new Map<string, PendingRevalidation[]>();
+  for (const entry of pending) {
+    const key = `${entry.runId}|${entry.manifestDigest}|${entry.kind}|${entry.postId}`;
+    groups.set(key, [...(groups.get(key) ?? []), entry]);
+  }
+
+  for (const group of groups.values()) {
+    const first = group[0];
+    // Each locale has its own pointer: compare per entry, never one locale's
+    // value against another's key.
+    const observed = await Promise.all(
+      group.map(async (entry) => ({
+        entry,
+        pointer: await deps.readCommittedPointer(
+          entry.kind as BodyContentKind,
+          entry.postId,
+          entry.locale as BodyContentLocale
+        ),
+      }))
+    );
+    const allMatch = observed.every(({ entry, pointer }) => pointer === entry.intendedPath);
+
+    if (!allMatch) {
+      for (const { entry, pointer } of observed) {
+        const status: JournalRevalidationStatus = 'superseded';
+        await deps.journal.append({
+          type: 'revalidation',
+          runId: entry.runId,
+          manifestDigest: entry.manifestDigest,
+          kind: entry.kind,
+          postId: entry.postId,
+          locale: entry.locale,
+          intendedPath: entry.intendedPath,
+          status,
+          observedPointer: pointer,
+          detail: 'committed pointer no longer holds the migrated key',
+          at: deps.now().toISOString(),
+        });
+        reports.push({
+          kind: entry.kind,
+          postId: entry.postId,
+          locale: entry.locale,
+          intendedPath: entry.intendedPath,
+          outcome: 'SUPERSEDED',
+          status,
+          observedPointer: pointer,
+          detail: 'committed pointer no longer holds the migrated key',
+        });
+      }
+      continue;
+    }
+
+    const status = await deps.invalidate({
+      entity: first.kind as BodyContentKind,
+      operation: 'publish',
+      ids: [first.postId],
+    });
+    const outcome: RevalidationRetryOutcome = status === 'sent' ? 'REVALIDATED' : 'FAILED';
+
+    for (const { entry, pointer } of observed) {
+      await deps.journal.append({
+        type: 'revalidation',
+        runId: entry.runId,
+        manifestDigest: entry.manifestDigest,
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        intendedPath: entry.intendedPath,
+        status,
+        observedPointer: pointer,
+        detail: null,
+        at: deps.now().toISOString(),
+      });
+      reports.push({
+        kind: entry.kind,
+        postId: entry.postId,
+        locale: entry.locale,
+        intendedPath: entry.intendedPath,
+        outcome,
+        status,
+        observedPointer: pointer,
+        detail: null,
+      });
+    }
+  }
+
+  return reports;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Rollback                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type RollbackCandidateState =
+  | 'READY'
+  | 'ALREADY_ROLLED_BACK'
+  | 'MISSING'
+  | 'POINTER_DRIFTED'
+  | 'BODY_CHANGED';
+
+export type RollbackCandidate = {
+  runId: string;
+  manifestDigest: string;
+  kind: BodyContentKind;
+  postId: number;
+  locale: BodyContentLocale;
+  installedPath: string;
+  previousPath: string | null;
+  sourceSha256: string;
+  state: RollbackCandidateState;
+  observedPointer: string | null;
+  detail: string | null;
+};
+
+export type RollbackDeps = Pick<
+  BackfillExecutorDeps,
+  'cas' | 'readCommittedBody' | 'readCommittedPointer' | 'invalidate' | 'journal' | 'now'
+>;
+
+/**
+ * Builds rollback candidates from the verified execution record (never from a
+ * fresh plan digest, which after a successful backfill describes the migrated
+ * state rather than the original one) plus the CURRENT database state.
+ *
+ * Candidates come only from entries whose switch this journal verified
+ * (`pointerSwitched`), in reverse migration order, and each is classified
+ * against the live row: the committed pointer must still be the key the run
+ * installed and the committed body must still hash to the recorded source.
+ * Nothing is written.
+ */
+export async function planRollback(
+  deps: RollbackDeps,
+  selection: { runId?: string; manifestDigest?: string } = {}
+): Promise<RollbackCandidate[]> {
+  const { records } = await deps.journal.read();
+
+  const switched = records.filter(
+    (record): record is JournalOutcome => record.type === 'outcome' && record.pointerSwitched
+  );
+  const rolledBack = new Set(
+    records
+      .filter((record) => record.type === 'rollback' && record.outcome === 'ROLLED_BACK')
+      .map((record) => journalEntryKey(record))
+  );
+
+  const selected = switched.filter(
+    (record) =>
+      (!selection.runId || record.runId === selection.runId) &&
+      (!selection.manifestDigest || record.manifestDigest === selection.manifestDigest)
+  );
+
+  // Reverse migration order: the journal preserves the order entries were
+  // processed, so the last switch is rolled back first.
+  const ordered = [...selected].reverse();
+  const candidates: RollbackCandidate[] = [];
+
+  for (const record of ordered) {
+    const kind = record.kind as BodyContentKind;
+    const locale = record.locale as BodyContentLocale;
+    const key = journalEntryKey(record);
+    const base = {
+      runId: record.runId,
+      manifestDigest: record.manifestDigest,
+      kind,
+      postId: record.postId,
+      locale,
+      installedPath: record.intendedPath,
+      previousPath: record.previousPath ?? null,
+      sourceSha256: record.sourceSha256,
+    };
+
+    if (rolledBack.has(key)) {
+      candidates.push({
+        ...base,
+        state: 'ALREADY_ROLLED_BACK',
+        observedPointer: null,
+        detail: 'this run already recorded a rollback for the entry',
+      });
+      continue;
+    }
+
+    const [pointer, body] = await Promise.all([
+      deps.readCommittedPointer(kind, record.postId, locale),
+      deps.readCommittedBody(kind, record.postId, locale),
+    ]);
+
+    if (body === null) {
+      candidates.push({
+        ...base,
+        state: 'MISSING',
+        observedPointer: pointer,
+        detail: 'row or legacy body is gone',
+      });
+      continue;
+    }
+    if (sha256Hex(Buffer.from(body, 'utf8')) !== record.sourceSha256) {
+      candidates.push({
+        ...base,
+        state: 'BODY_CHANGED',
+        observedPointer: pointer,
+        detail: 'legacy body changed after the migration; refusing to force a rollback',
+      });
+      continue;
+    }
+    if (pointer !== record.intendedPath) {
+      // Either we already restored it, or someone else moved it. Distinguish:
+      // holding the previous value again means there is nothing left to do,
+      // and the write is never retried.
+      if (pointer === (record.previousPath ?? null)) {
+        candidates.push({
+          ...base,
+          state: 'ALREADY_ROLLED_BACK',
+          observedPointer: pointer,
+          detail: 'committed pointer already holds the previous value',
+        });
+        continue;
+      }
+      candidates.push({
+        ...base,
+        state: 'POINTER_DRIFTED',
+        observedPointer: pointer,
+        detail: 'committed pointer is no longer the migrated key',
+      });
+      continue;
+    }
+    candidates.push({
+      ...base,
+      state: 'READY',
+      observedPointer: pointer,
+      detail: null,
+    });
+  }
+
+  return candidates;
+}
+
+export type RollbackReport = {
+  runId: string | null;
+  manifestDigest: string | null;
+  candidates: RollbackCandidate[];
+  entries: Array<{
+    kind: string;
+    postId: number;
+    locale: string;
+    installedPath: string;
+    outcome: string;
+    reason: string | null;
+    revalidation: JournalRevalidationStatus | null;
+  }>;
+  revalidationPending: string[];
+  summary: {
+    planned: number;
+    ready: number;
+    rolledBack: number;
+    conflicts: number;
+    failed: number;
+  };
+};
+
+/**
+ * Executes a rollback over the READY candidates only, in the order given
+ * (reverse migration order). Each entry goes through the atomic rollback CAS,
+ * which refuses when the pointer or the legacy body changed; the outcome is
+ * journalled, and a successful rollback triggers the same signed invalidation
+ * contract as the migration.
+ *
+ * Nothing is uploaded, no object is removed, and `body_en` / `body_it` are
+ * never written.
+ */
+export async function executeRollback(
+  deps: RollbackDeps,
+  candidates: RollbackCandidate[]
+): Promise<RollbackReport> {
+  const entries: RollbackReport['entries'] = [];
+  const revalidationPending = new Set<string>();
+  const revalidationByPost = new Map<string, JournalRevalidationStatus>();
+  let rolledBack = 0;
+  let failed = 0;
+
+  for (const candidate of candidates) {
+    if (candidate.state !== 'READY') {
+      entries.push({
+        kind: candidate.kind,
+        postId: candidate.postId,
+        locale: candidate.locale,
+        installedPath: candidate.installedPath,
+        outcome: candidate.state,
+        reason: candidate.detail,
+        revalidation: null,
+      });
+      continue;
+    }
+
+    const result = await deps.cas.pointerRollback({
+      kind: candidate.kind,
+      postId: candidate.postId,
+      locale: candidate.locale,
+      installedPath: candidate.installedPath,
+      expectedSha256: candidate.sourceSha256,
+      previousPath: candidate.previousPath,
+    });
+
+    let revalidation: JournalRevalidationStatus | null = null;
+    if (result.outcome === 'ROLLED_BACK') {
+      rolledBack += 1;
+      const post = postKey(candidate.kind, candidate.postId);
+      if (!revalidationByPost.has(post)) {
+        revalidationByPost.set(
+          post,
+          await deps.invalidate({
+            entity: candidate.kind,
+            operation: 'publish',
+            ids: [candidate.postId],
+          })
+        );
+      }
+      revalidation = revalidationByPost.get(post) ?? null;
+      if (revalidation && isIncompleteRevalidation(revalidation)) {
+        revalidationPending.add(post);
+      }
+    } else if (result.outcome !== 'ALREADY_CURRENT') {
+      failed += 1;
+    }
+
+    entries.push({
+      kind: candidate.kind,
+      postId: candidate.postId,
+      locale: candidate.locale,
+      installedPath: candidate.installedPath,
+      outcome: result.outcome,
+      reason: result.reason,
+      revalidation,
+    });
+
+    await deps.journal.append({
+      type: 'rollback',
+      runId: candidate.runId,
+      manifestDigest: candidate.manifestDigest,
+      kind: candidate.kind,
+      postId: candidate.postId,
+      locale: candidate.locale,
+      intendedPath: candidate.installedPath,
+      installedPath: candidate.installedPath,
+      restoredPath: result.outcome === 'ROLLED_BACK' ? candidate.previousPath : null,
+      outcome: result.outcome,
+      reason: result.reason,
+      revalidation,
+      detail: candidate.detail,
+      at: deps.now().toISOString(),
+    });
+  }
+
+  return {
+    runId: candidates[0]?.runId ?? null,
+    manifestDigest: candidates[0]?.manifestDigest ?? null,
+    candidates,
+    entries,
+    revalidationPending: [...revalidationPending].sort(),
+    summary: {
+      planned: candidates.length,
+      ready: candidates.filter((candidate) => candidate.state === 'READY').length,
+      rolledBack,
+      conflicts: candidates.filter(
+        (candidate) => candidate.state !== 'READY' && candidate.state !== 'ALREADY_ROLLED_BACK'
+      ).length,
+      failed,
     },
   };
 }
@@ -469,20 +916,62 @@ export async function executeBackfill(
 export const APPLY_ACK_ENV = 'CMS_BACKFILL_APPLY_ACK';
 export const APPLY_ACK_VALUE = 'yes-apply-to-dev-staging';
 
+/** Acknowledgement required to arm rollback execution. */
+export const ROLLBACK_ACK_ENV = 'CMS_BACKFILL_ROLLBACK_ACK';
+export const ROLLBACK_ACK_VALUE = 'yes-rollback-dev-staging';
+
+/** The only local DEV revalidation destination apply/rollback may target. */
+export const APPROVED_REVALIDATION_PATH = '/api/internal/content-revalidate';
+
+/**
+ * Validates the configured revalidation endpoint as an explicitly approved
+ * local DEV destination. Anything else — a production host, a remote host, a
+ * different path, a non-http scheme — is refused before any mutation.
+ */
+export function validateRevalidationEndpoint(rawUrl: string): string | null {
+  if (!rawUrl) return 'WEBSITE_REVALIDATION_URL is not configured';
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return `WEBSITE_REVALIDATION_URL '${rawUrl}' is not a valid URL`;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return `WEBSITE_REVALIDATION_URL must be http(s), got '${url.protocol}'`;
+  }
+  const host = url.hostname.toLowerCase();
+  const isLocal =
+    host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  if (!isLocal) {
+    return `WEBSITE_REVALIDATION_URL must target a local DEV host, got '${host}'`;
+  }
+  if (url.pathname !== APPROVED_REVALIDATION_PATH) {
+    return `WEBSITE_REVALIDATION_URL path must be '${APPROVED_REVALIDATION_PATH}', got '${url.pathname}'`;
+  }
+  return null;
+}
+
 export type ExecArgs =
   | { mode: 'preflight' }
-  | { mode: 'apply'; confirmDigest: string; expectProjectRef: string }
+  | {
+      mode: 'apply';
+      confirmDigest: string;
+      expectProjectRef: string;
+      runSelection: 'new' | 'resume';
+    }
   | { mode: 'invalid'; error: string };
 
 /**
  * Strict flag parsing for the execution CLI: every unknown or malformed flag is
- * refused, `--apply` needs an explicit digest and project reference, and there
- * is no default mode (silence is never an apply).
+ * refused, `--apply` needs an explicit digest, project reference and run
+ * selection (new or resume), and there is no default mode (silence is never an
+ * apply).
  */
 export function parseExecArgs(argv: string[]): ExecArgs {
   let mode: 'preflight' | 'apply' | null = null;
   let confirmDigest = '';
   let expectProjectRef = '';
+  let runSelection: 'new' | 'resume' | null = null;
 
   for (const arg of argv) {
     if (arg === '--preflight' || arg === '--dry-run') {
@@ -493,6 +982,16 @@ export function parseExecArgs(argv: string[]): ExecArgs {
     if (arg === '--apply') {
       if (mode) return { mode: 'invalid', error: `conflicting mode flag '${arg}'` };
       mode = 'apply';
+      continue;
+    }
+    if (arg === '--resume') {
+      if (runSelection) return { mode: 'invalid', error: `conflicting run flag '${arg}'` };
+      runSelection = 'resume';
+      continue;
+    }
+    if (arg === '--new-run') {
+      if (runSelection) return { mode: 'invalid', error: `conflicting run flag '${arg}'` };
+      runSelection = 'new';
       continue;
     }
     if (arg.startsWith('--confirm-digest=')) {
@@ -514,17 +1013,68 @@ export function parseExecArgs(argv: string[]): ExecArgs {
     if (!expectProjectRef) {
       return { mode: 'invalid', error: '--apply requires --expect-project-ref=<ref>' };
     }
-    return { mode: 'apply', confirmDigest, expectProjectRef };
+    if (!runSelection) {
+      return {
+        mode: 'invalid',
+        error: '--apply requires an explicit run selection: --new-run or --resume',
+      };
+    }
+    return { mode: 'apply', confirmDigest, expectProjectRef, runSelection };
+  }
+  if (runSelection) {
+    return { mode: 'invalid', error: `--${runSelection === 'new' ? 'new-run' : 'resume'} requires --apply` };
   }
   return { mode: 'preflight' };
 }
 
+export type RollbackArgs =
+  | { mode: 'plan'; runId?: string }
+  | { mode: 'apply'; runId?: string; expectProjectRef: string }
+  | { mode: 'invalid'; error: string };
+
 /**
- * Runs the rollback CAS for a previously applied entry. It restores the
- * recorded previous pointer only while the row still holds exactly the pointer
- * this run installed and its committed body still matches the recorded hash;
- * otherwise the conflict is returned and nothing is written.
+ * Strict flag parsing for the rollback CLI. The default (no flags) is the
+ * read-only plan; execution additionally needs an explicit project reference
+ * and the operator acknowledgement from the environment.
  */
+export function parseRollbackArgs(argv: string[]): RollbackArgs {
+  let mode: 'plan' | 'apply' = 'plan';
+  let runId: string | undefined;
+  let expectProjectRef = '';
+
+  for (const arg of argv) {
+    if (arg === '--plan' || arg === '--dry-run') {
+      if (mode === 'apply') return { mode: 'invalid', error: `conflicting mode flag '${arg}'` };
+      mode = 'plan';
+      continue;
+    }
+    if (arg === '--apply') {
+      if (mode === 'apply') return { mode: 'invalid', error: "conflicting mode flag '--apply'" };
+      mode = 'apply';
+      continue;
+    }
+    if (arg.startsWith('--run-id=')) {
+      runId = arg.slice('--run-id='.length);
+      if (!runId) return { mode: 'invalid', error: '--run-id requires a value' };
+      continue;
+    }
+    if (arg.startsWith('--expect-project-ref=')) {
+      expectProjectRef = arg.slice('--expect-project-ref='.length);
+      continue;
+    }
+    return { mode: 'invalid', error: `unknown argument '${arg}'` };
+  }
+
+  if (mode === 'apply') {
+    if (!expectProjectRef) {
+      return { mode: 'invalid', error: '--apply requires --expect-project-ref=<ref>' };
+    }
+    return { mode: 'apply', runId, expectProjectRef };
+  }
+  return { mode: 'plan', runId };
+}
+
+/** Runs the rollback CAS for a single entry (used by CLI and tests). */
 export async function rollbackEntry(
   deps: Pick<BackfillExecutorDeps, 'cas'>,
   args: {

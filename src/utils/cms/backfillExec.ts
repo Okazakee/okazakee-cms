@@ -1,30 +1,35 @@
 #!/usr/bin/env node
 /**
- * Markdown body backfill executor CLI (Phase 11B.1) — DEV only.
+ * Markdown body backfill executor CLI (Phase 11B.1; hardened in 11B.2) — DEV only.
  *
  *   bun run storage:content:dev:backfill:exec --preflight
- *   bun run storage:content:dev:backfill:exec --apply \
+ *   BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
+ *   CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging \
+ *   bun run storage:content:dev:backfill:exec --apply --new-run \
  *     --confirm-digest=<manifest sha256> --expect-project-ref=<ref>
  *
- * `--preflight` is the only mode that may be run in Phase 11B.1: it validates
- * the gates, builds the reviewed plan, probes whether the staged CAS functions
- * are installed (a call the SQL refuses before it can write), and reports the
- * manifest digest. It uploads nothing and switches nothing.
+ * `--preflight` is read-only: gates, plan, manifest digest, CAS readiness (a
+ * call the SQL refuses before it can write), and whether a revalidation
+ * destination is configured and approved.
  *
- * `--apply` exists but is triple-gated and inert until an operator authorizes
- * it:
- *   1. explicit `--apply` on the command line;
+ * `--apply` is gated and inert without an operator:
+ *   1. explicit `--apply` plus an explicit run selection (`--new-run` or
+ *      `--resume`);
  *   2. `--confirm-digest` equal to the freshly computed plan digest and
  *      `--expect-project-ref` equal to the configured project reference;
- *   3. `CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging` in the server
- *      environment — the explicit operator acknowledgement.
- * The existence of `--apply` is never treated as authorization, and nothing
- * runs automatically on import, startup, CI or package installation.
+ *   3. `CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging`;
+ *   4. `APP_ENV=development` exactly, `dev_staging`, `website-content-dev`, a
+ *      server secret, an approved local DEV revalidation destination with a
+ *      signing secret, and a durable `BACKFILL_JOURNAL_PATH` outside the repo.
+ *
+ * A `--resume` continues the unfinished run recorded in that journal, retries
+ * its pending invalidations, and re-reads the database and Storage for every
+ * entry. `--new-run` refuses while an unfinished run exists in the journal.
  *
  * Exit codes:
- *   0 preflight ok (no blockers)          1 plan has blockers
- *   2 invalid usage                       3 environment/project gate failure
- *   4 read/plan failure                   5 execution refused by a gate
+ *   0 preflight ok / apply without failures     1 blockers or failures
+ *   2 invalid usage                             3 environment/project gate failure
+ *   4 read or execution failure                  5 refused by an apply gate
  */
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
@@ -59,39 +64,41 @@ import {
   executeBackfill,
   manifestDigest,
   parseExecArgs,
+  retryPendingRevalidations,
+  validateRevalidationEndpoint,
   type BackfillExecutorDeps,
 } from '@/libs/cms/storage/backfillApply';
 import type {
   BodyContentKind,
   BodyContentStorageApi,
 } from '@/libs/cms/storage/bodyContent';
-import { createFileJournal, type JournalFsApi } from '@/libs/cms/storage/backfillJournal';
+import {
+  assertJournalDestination,
+  auditJournal,
+  createFileJournal,
+  selectResumeRun,
+  type JournalFsApi,
+} from '@/libs/cms/storage/backfillJournal';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 
 const USAGE = [
   'usage:',
   '  bun run storage:content:dev:backfill:exec --preflight',
-  '  bun run storage:content:dev:backfill:exec --apply --confirm-digest=<sha256> --expect-project-ref=<ref>',
+  '  BACKFILL_JOURNAL_PATH=<file outside the repo> bun run storage:content:dev:backfill:exec \\',
+  '    --apply (--new-run | --resume) --confirm-digest=<sha256> --expect-project-ref=<ref>',
   '',
-  'Phase 11B.1: only --preflight may be executed. --apply additionally requires',
-  `the operator acknowledgement ${APPLY_ACK_ENV}=${APPLY_ACK_VALUE}.`,
+  `apply additionally requires ${APPLY_ACK_ENV}=${APPLY_ACK_VALUE}.`,
 ].join('\n');
-
-/** Journal location: outside the repo, one file per run. */
-function journalPath(): string {
-  return process.env.BACKFILL_JOURNAL_PATH ?? `/tmp/cms-backfill-${Date.now()}.jsonl`;
-}
 
 /**
  * Narrow server-side readers for the executor. Both are plain selects on an
  * explicit projection; no write surface is created here.
  */
-function createPostgresReaders(client: ReturnType<typeof getCmsAdminClient>): {
+export function createPostgresReaders(client: ReturnType<typeof getCmsAdminClient>): {
   readBody(kind: BodyContentKind, postId: number, locale: string): Promise<string | null>;
   readPointer(kind: BodyContentKind, postId: number, locale: string): Promise<string | null>;
 } {
-  const table = (kind: BodyContentKind) =>
-    kind === 'blog' ? 'blog_posts' : 'portfolio_posts';
+  const table = (kind: BodyContentKind) => (kind === 'blog' ? 'blog_posts' : 'portfolio_posts');
 
   return {
     async readBody(kind, postId, locale) {
@@ -134,6 +141,11 @@ async function readPlanRows(
   return { blog, portfolio };
 }
 
+function refuse(message: string): never {
+  console.error(`[backfill-exec] refusing --apply: ${message}`);
+  process.exit(5);
+}
+
 async function main(): Promise<void> {
   const args = parseExecArgs(process.argv.slice(2));
   if (args.mode === 'invalid') {
@@ -162,6 +174,10 @@ async function main(): Promise<void> {
   const projectRef = projectRefFromUrl(supabaseUrl) ?? '';
   const client = getCmsAdminClient();
   const readers = createPostgresReaders(client);
+  const journalPathEnv = process.env.BACKFILL_JOURNAL_PATH ?? '';
+  const revalidationProblem = validateRevalidationEndpoint(
+    process.env.WEBSITE_REVALIDATION_URL ?? ''
+  );
 
   try {
     const rows = await readPlanRows(client as unknown as ReadOnlyPostBodyClient);
@@ -185,8 +201,13 @@ async function main(): Promise<void> {
             ok: summary.blockers === 0,
             plan: summary,
             cas: readiness,
+            journal: {
+              pathConfigured: journalPathEnv !== '',
+              path: journalPathEnv || null,
+            },
             revalidation: {
-              urlConfigured: Boolean(process.env.WEBSITE_REVALIDATION_URL),
+              approvedLocalDestination: revalidationProblem === null,
+              problem: revalidationProblem,
               secretConfigured: Boolean(process.env.WEBSITE_REVALIDATION_SECRET),
             },
             applyArmed: false,
@@ -200,36 +221,75 @@ async function main(): Promise<void> {
     }
 
     // ── --apply: every gate must pass before the first mutating call ────────
+    if (appEnv !== 'development') {
+      refuse(`APP_ENV must be exactly 'development', got '${appEnv}'`);
+    }
     if (process.env[APPLY_ACK_ENV] !== APPLY_ACK_VALUE) {
-      console.error(
-        `[backfill-exec] refusing --apply: set ${APPLY_ACK_ENV}=${APPLY_ACK_VALUE} to acknowledge a DEV backfill run`
-      );
-      process.exit(5);
+      refuse(`set ${APPLY_ACK_ENV}=${APPLY_ACK_VALUE} to acknowledge a DEV backfill run`);
     }
     if (args.expectProjectRef !== projectRef) {
-      console.error(
-        `[backfill-exec] refusing --apply: --expect-project-ref=${args.expectProjectRef} does not match the configured project '${projectRef}'`
+      refuse(
+        `--expect-project-ref=${args.expectProjectRef} does not match the configured project '${projectRef}'`
       );
-      process.exit(5);
     }
     if (args.confirmDigest !== digest) {
-      console.error(
-        `[backfill-exec] refusing --apply: --confirm-digest does not match the current plan digest ${digest}`
-      );
-      process.exit(5);
+      refuse(`--confirm-digest does not match the current plan digest ${digest}`);
     }
     if (summary.blockers > 0) {
       console.error(`[backfill-exec] refusing --apply: plan has ${summary.blockers} blockers`);
       process.exit(1);
     }
     if (readiness.state !== 'ready') {
-      console.error(
-        `[backfill-exec] refusing --apply: staged CAS functions are not installed in ${BACKFILL_PLAN_SCHEMA} (${readiness.state})`
+      refuse(
+        `staged CAS functions are not installed in ${BACKFILL_PLAN_SCHEMA} (${readiness.state})`
       );
-      process.exit(5);
+    }
+    if (revalidationProblem) {
+      refuse(`${revalidationProblem} (refusing to switch pointers that cannot be invalidated)`);
+    }
+    if (!process.env.WEBSITE_REVALIDATION_SECRET) {
+      refuse('WEBSITE_REVALIDATION_SECRET is not configured');
+    }
+    if (!journalPathEnv) {
+      refuse('BACKFILL_JOURNAL_PATH must be set so the run is recoverable across invocations');
     }
 
-    const path = journalPath();
+    const fsApi = fs as unknown as JournalFsApi;
+    try {
+      await assertJournalDestination(journalPathEnv, fsApi, { repositoryRoot: process.cwd() });
+    } catch (error) {
+      refuse(error instanceof Error ? error.message : String(error));
+    }
+
+    const journal = createFileJournal(journalPathEnv, fsApi);
+    const audit = auditJournal(await journal.read());
+    if (!audit.trustworthy) {
+      refuse(`journal at ${journalPathEnv} cannot be trusted: ${audit.problems.join('; ')}`);
+    }
+
+    let runId: string;
+    let resumed = false;
+    if (args.runSelection === 'resume') {
+      const selection = selectResumeRun(audit, { manifestDigest: digest });
+      if (!selection.ok) {
+        refuse(selection.error);
+      }
+      runId = selection.run.runId;
+      resumed = true;
+    } else {
+      const unfinished = audit.runs.filter(
+        (run) => run.unresolved.length > 0 || run.pendingRevalidations.length > 0
+      );
+      if (unfinished.length > 0) {
+        refuse(
+          `journal already holds an unfinished run (${unfinished
+            .map((run) => run.runId)
+            .join(', ')}); use --resume instead of --new-run`
+        );
+      }
+      runId = randomUUID();
+    }
+
     const deps: BackfillExecutorDeps = {
       storage: client.storage.from(
         BACKFILL_PLAN_BUCKET
@@ -238,18 +298,31 @@ async function main(): Promise<void> {
       readCommittedBody: readers.readBody,
       readCommittedPointer: readers.readPointer,
       invalidate: (invalidation) => invalidatePublicContent(invalidation),
-      journal: createFileJournal(path, fs as unknown as JournalFsApi),
+      journal,
       now: () => new Date(),
-      newRunId: () => randomUUID(),
+      newRunId: () => runId,
     };
 
-    const report = await executeBackfill(deps, plan, { revalidate: true });
+    // On a resume, first settle the invalidations an interrupted run left
+    // pending: no upload, no pointer write, only the signed event.
+    const retries = resumed
+      ? await retryPendingRevalidations(
+          deps,
+          audit.runs
+            .filter((run) => run.runId === runId)
+            .flatMap((run) => run.pendingRevalidations)
+        )
+      : [];
+
+    const report = await executeBackfill(deps, plan, { runId, revalidate: true });
     console.log(
       JSON.stringify(
         {
           command: 'storage:content:dev:backfill:exec',
           mode: 'apply',
-          journalPath: path,
+          resumed,
+          journalPath: journalPathEnv,
+          retriedInvalidations: retries,
           ...report,
         },
         null,

@@ -26,41 +26,65 @@ Companion documents:
 ## CLI
 
 ```bash
-# the only mode that may be run now
+# read-only preflight (the only mode to run before the CAS functions exist)
 bun run storage:content:dev:backfill:exec --preflight
 
-# future, fully gated (see below)
-bun run storage:content:dev:backfill:exec --apply \
+# future apply: recoverable across invocations
+BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
+CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging \
+bun run storage:content:dev:backfill:exec --apply --new-run \
   --confirm-digest=<manifest sha256> --expect-project-ref=<ref>
+
+# resume the unfinished run recorded in that journal
+BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
+CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging \
+bun run storage:content:dev:backfill:exec --apply --resume \
+  --confirm-digest=<manifest sha256> --expect-project-ref=<ref>
+
+# rollback: read-only plan by default
+BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
+bun run storage:content:dev:backfill:rollback [--run-id=<id>]
+
+# rollback execution (strictly gated)
+BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/run.jsonl \
+CMS_BACKFILL_ROLLBACK_ACK=yes-rollback-dev-staging \
+bun run storage:content:dev:backfill:rollback --apply --run-id=<id> \
+  --expect-project-ref=<ref>
 ```
 
-`--preflight` validates the environment/project gates, builds the reviewed plan,
-reports the manifest digest, probes whether the staged CAS functions exist (a
-call the SQL refuses before it can write), and reports whether the revalidation
-URL/secret are configured. It uploads nothing, switches nothing, invalidates
-nothing.
+`--preflight` validates the environment/project gates, builds the reviewed
+plan, reports the manifest digest, probes whether the staged CAS functions exist
+(a call the SQL refuses before it can write), and reports whether the
+revalidation destination is configured **and approved**. It uploads nothing,
+switches nothing, invalidates nothing.
 
 Unknown flags, a missing mode and conflicting modes fail with exit `2`.
 
-### The three gates on `--apply`
+### The apply gates
 
-1. explicit `--apply`;
+1. explicit `--apply` **plus** an explicit run selection (`--new-run` or
+   `--resume`);
 2. `--confirm-digest` equal to the freshly computed plan digest **and**
    `--expect-project-ref` equal to the configured project reference;
-3. `CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging` in the server environment —
-   the explicit operator acknowledgement.
+3. `CMS_BACKFILL_APPLY_ACK=yes-apply-to-dev-staging`;
+4. `APP_ENV=development` **exactly**, `dev_staging`, `website-content-dev`, a
+   server secret, an approved local DEV revalidation endpoint
+   (`http(s)://localhost|127.0.0.1|[::1]/api/internal/content-revalidate`) with
+   `WEBSITE_REVALIDATION_SECRET` present, and a durable
+   `BACKFILL_JOURNAL_PATH` outside the repository (absolute, owner-only).
 
 Nothing runs automatically on import, startup, CI or package installation, and
 the existence of the `--apply` flag is never treated as authorization.
 
 | Exit | Meaning |
 |---:|---|
-| 0 | preflight ok / apply completed without failures |
-| 1 | plan has blockers, or apply reported failures |
+| 0 | preflight ok / apply or rollback finished without failures |
+| 1 | plan has blockers, or the run reported failures/conflicts |
 | 2 | invalid usage |
 | 3 | environment/project gate failure |
 | 4 | read or execution failure |
-| 5 | `--apply` refused by a gate (ack, digest, project ref, CAS readiness) |
+| 5 | refused by an apply/rollback gate (ack, digest, project ref, CAS readiness, journal, endpoint) |
+
 
 ## CAS SQL security model
 
@@ -137,21 +161,66 @@ REVALIDATION_FAILED    pointer switched, signed invalidation did not succeed
 run performed the upload) are tracked separately from `pointerVerified`, so a
 resumed run neither re-uploads nor claims objects it did not create.
 
-## Journal and resume
+## Journal, identity and resume
 
-Append-only JSONL, outside the repository, one file per run. Each entry gets an
-`intent` record **before** any upload and a terminal `outcome` record **after**
-the committed state was observed — so an interruption can only ever leave an
-intent without an outcome, never an apparent success. Every record is written in
-one `write` followed by `fsync`; a crash can only truncate the final line, which
-the parser reports as `tornTail` and discards rather than treating as complete.
-Records hold ids, keys, hashes, outcome codes and timestamps only — never
-Markdown, credentials or session material.
+Append-only JSONL, outside the repository. Each entry gets an `intent` record
+**before** any upload and a terminal `outcome` record **after** the committed
+state was observed — so an interruption can only ever leave an intent without an
+outcome, never an apparent success. Reads are explicitly UTF-8 (a missing file
+is a new journal; `EACCES`/`EIO` propagate), and each record is appended with a
+single write whose byte count is verified, then `fsync`ed, so a crash can only
+truncate the FINAL line. That torn tail is reported and discarded, never treated
+as a completed record; malformed complete lines and conflicting records make the
+journal untrustworthy, which refuses both resume and rollback. Records hold ids,
+keys, hashes, status codes and timestamps only — never Markdown, credentials or
+session material.
 
-Resume never trusts the journal: the committed pointer and the stored object
-bytes are re-read. Entries the journal left unresolved additionally force a
-revalidation for their post, since an interrupted run may have switched a
-pointer without invalidating it.
+Identity is `runId + manifestDigest + kind + postId + locale + intendedPath`, so
+an outcome can never complete another run's or another manifest's intent.
+
+Apply requires an explicit `BACKFILL_JOURNAL_PATH` (absolute, outside the repo,
+owner-only). `--new-run` refuses while the journal holds an unfinished run, and
+`--resume` refuses when the journal's unfinished run belongs to a different
+manifest — a resume is never silently reinterpreted. Resume re-reads the
+committed pointer and re-verifies the stored object bytes for every entry; the
+journal is an audit trail, never proof of a completed migration.
+
+## Pending invalidations
+
+A verified pointer switch whose signed invalidation did not return `sent` is
+incomplete work: the entry is reported as `REVALIDATION_FAILED` (so the run is
+not counted as successful) and its attempt is journalled. `failed` **and**
+`skipped` both keep it pending, and a switch recorded with no attempt at all is
+pending too (the run stopped after the CAS). `--resume` first retries every
+pending invalidation: it re-reads the committed pointer, requires it to still
+hold the migrated key, then sends one signed event per post. When the pointer
+moved on, the entry is recorded as `superseded` — whatever changed the row owns
+that cache — and a retry never uploads an object or writes a pointer.
+
+## Rollback
+
+```bash
+BACKFILL_JOURNAL_PATH=… bun run storage:content:dev:backfill:rollback [--run-id=<id>]   # plan (read-only)
+BACKFILL_JOURNAL_PATH=… CMS_BACKFILL_ROLLBACK_ACK=yes-rollback-dev-staging \
+  bun run storage:content:dev:backfill:rollback --apply --run-id=<id> --expect-project-ref=<ref>
+```
+
+Candidates come from the **verified execution record** in the journal (entries
+whose switch this run observed), not from a freshly planned digest — after a
+successful backfill that digest describes the migrated state, not the original
+one. The plan classifies each candidate against the live row: `READY`,
+`ALREADY_ROLLED_BACK`, `MISSING`, `BODY_CHANGED` or `POINTER_DRIFTED`, and is
+strictly read-only (no CAS call, no journal write, no invalidation).
+
+Execution walks the `READY` candidates in reverse migration order through the
+atomic rollback CAS, which refuses when the pointer or the legacy body changed
+since the migration; a refusal is reported as a conflict and never forced. It
+writes no `body_en`/`body_it`, uploads nothing and removes nothing, journals each
+outcome (including its revalidation status), revalidates the affected caches per
+post, and supports recovery from an interrupted rollback: entries that already
+recorded `ROLLED_BACK` — or whose pointer already holds the previous value — are
+skipped on the next run.
+
 
 ## Orphans
 
