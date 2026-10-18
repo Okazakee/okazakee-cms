@@ -61,6 +61,18 @@ export const STORAGE_POLICIES_QUERY = `select c.relname as table_name, p.polname
 /** Relation bindings of storage.objects policies (pg_depend OIDs). */
 export const STORAGE_POLICY_RELATION_BINDINGS_QUERY = `select p.polname as policy_name, rn.nspname as ref_schema, rc.relname as ref_relation from pg_depend d join pg_policy p on d.objid = p.oid and d.classid = 'pg_policy'::regclass join pg_class c on c.oid = p.polrelid join pg_namespace n on n.oid = c.relnamespace join pg_class rc on rc.oid = d.refobjid and d.refclassid = 'pg_class'::regclass join pg_namespace rn on rn.oid = rc.relnamespace where n.nspname = 'storage' and c.relname = 'objects' and rc.oid <> c.oid order by p.polname, rn.nspname, rc.relname`;
 
+/**
+ * Production content plane, read from the `public` schema. All three are
+ * read-only catalog reads: the four nullable pointer columns, the four
+ * canonical CHECK constraints on them, and the two atomic CAS functions with
+ * their privilege + `search_path` facts.
+ */
+export const PROD_POINTER_COLUMNS_QUERY = `select c.relname as table_name, a.attname as name, pg_catalog.format_type(a.atttypid, a.atttypmod) as formatted_type, not a.attnotnull as nullable from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_attribute a on a.attrelid = c.oid where n.nspname = 'public' and c.relname in ('blog_posts', 'portfolio_posts') and a.attname in ('body_en_path', 'body_it_path') and a.attnum > 0 and not a.attisdropped order by c.relname, a.attname`;
+
+export const PROD_CONSTRAINTS_QUERY = `select c.relname as table_name, con.conname as constraint_name, con.contype::text as contype, pg_get_constraintdef(con.oid, true) as definition from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname in ('blog_posts', 'portfolio_posts') order by c.relname, con.conname`;
+
+export const PROD_CAS_FUNCTIONS_QUERY = `select p.proname as name, pg_catalog.pg_get_function_identity_arguments(p.oid) as args, p.prosecdef as security_definer, coalesce(array_to_string(p.proconfig, ','), '') as proconfig, coalesce(p.proacl::text, '') as acl_raw from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in ('prod_backfill_body_pointer_cas', 'prod_backfill_body_pointer_rollback') order by p.proname`;
+
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
 export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq', 'cms_allowed_users_id_seq') order by c.relname`;
@@ -236,14 +248,13 @@ export const EXPECTED_INDEXES_ABSENT = [
  * dedicated active-idx finding. The `X-extras` INFO excludes these so it stays
  * a list of genuine unknowns rather than restating certified state.
  */
-export const CERTIFIED_INDEX_NAMES: Record<string, true> =
-  Object.fromEntries(
-    [
-      'project_requests_active_idx',
-      ...EXPECTED_INDEXES_PRESENT.map((i) => i.name),
-      ...EXPECTED_INDEXES_ABSENT,
-    ].map((name) => [name, true as const])
-  );
+export const CERTIFIED_INDEX_NAMES: Record<string, true> = Object.fromEntries(
+  [
+    'project_requests_active_idx',
+    ...EXPECTED_INDEXES_PRESENT.map((i) => i.name),
+    ...EXPECTED_INDEXES_ABSENT,
+  ].map((name) => [name, true as const])
+);
 
 /**
  * RLS normalization contract for dev_staging (migration
@@ -602,7 +613,7 @@ export async function runDevCheck(opts?: {
     findings,
     'scope.shared-auth',
     'INFO',
-    'shared-auth/global objects (auth.users FK targets, auth.jwt()/is_admin_user() policies, global supabase_migrations history) are NOT certified by this check'
+    'shared-auth/global objects (auth.users FK targets, auth.jwt()/is_admin_user() policies, global supabase_migrations history) are NOT certified by this check; the production content plane (public pointer columns + CHECKs + CAS functions and the website-content Storage policy) IS certified by the S-prod-* findings'
   );
   // Live catalog effects at the same precision as the 93-check audit.
   try {
@@ -614,7 +625,7 @@ export async function runDevCheck(opts?: {
     await checkAuthorPolicyIsolation(queryJson, findings);
     await checkPostVisibility(queryJson, findings);
     await checkBodyPathChecks(queryJson, findings);
-    await checkDevContentStorage(queryJson, findings);
+    await checkContentStorageIsolation(queryJson, findings);
     await checkSchemaAndSequences(queryJson, findings);
     await checkDataInvariants(queryJson, findings);
   } catch (e) {
@@ -847,7 +858,10 @@ function policyRolesOf(raw: string | null): string {
 
 /** Collapse deparser whitespace and drop schema qualification for comparison. */
 function normalizePolicyExpr(expr: string | null): string {
-  return (expr ?? '').replace(/\bpublic\./g, '').replace(/\s+/g, ' ').trim();
+  return (expr ?? '')
+    .replace(/\bpublic\./g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -891,9 +905,7 @@ async function checkRlsNormalization(
     with_check_expr: string | null;
   }>;
   const key = (table: string, name: string): string => `${table}.${name}`;
-  const byKey = new Map(
-    pols.map((p) => [key(p.table_name, p.policy_name), p])
-  );
+  const byKey = new Map(pols.map((p) => [key(p.table_name, p.policy_name), p]));
 
   for (const want of EXPECTED_POLICIES_PRESENT) {
     const got = byKey.get(key(want.table, want.name));
@@ -1071,9 +1083,7 @@ async function checkPostVisibility(
     using_expr: string | null;
   }>;
   const key = (table: string, name: string): string => `${table}.${name}`;
-  const byKey = new Map(
-    pols.map((p) => [key(p.table_name, p.policy_name), p])
-  );
+  const byKey = new Map(pols.map((p) => [key(p.table_name, p.policy_name), p]));
 
   for (const table of POST_VISIBILITY_TABLES) {
     const got = byKey.get(key(table, POST_VISIBILITY_POLICY));
@@ -1130,13 +1140,15 @@ async function checkPostVisibility(
  * The definition comparison normalizes deparser formatting only (drops the
  * `::text` casts and collapses whitespace); it never rewrites the regex itself.
  */
-export const EXPECTED_BODY_PATH_CHECKS: Array<{
+export type BodyPathCheckExpectation = {
   table: string;
   name: string;
   column: string;
   prefix: string;
   lang: string;
-}> = [
+};
+
+export const EXPECTED_BODY_PATH_CHECKS: BodyPathCheckExpectation[] = [
   {
     table: 'blog_posts',
     name: 'blog_posts_body_en_path_check',
@@ -1167,6 +1179,44 @@ export const EXPECTED_BODY_PATH_CHECKS: Array<{
   },
 ];
 
+/**
+ * Every way a deparsed pointer CHECK fails to pin `want.column` to this row's
+ * own id, its content-type prefix, its language, a 64-lowercase-hex hash and a
+ * `.md` extension. Normalization rewrites deparser formatting only (drops the
+ * `::text` casts, collapses whitespace); it never rewrites the regex itself.
+ *
+ * Shared by the dev_staging contract and the production one: the two schemas
+ * must carry the SAME canonical shape, so a divergence is reported by the same
+ * vocabulary in both places.
+ */
+function bodyPathCheckViolations(
+  definition: string,
+  contype: string,
+  want: BodyPathCheckExpectation
+): string[] {
+  const def = definition.replace(/::text/g, '').replace(/\s+/g, ' ');
+  const sibling =
+    want.column === 'body_en_path' ? 'body_it_path' : 'body_en_path';
+  const bad: string[] = [];
+  if (contype !== 'c') bad.push(`contype got=${contype} exp=c`);
+  if (!def.includes(want.column)) bad.push(`missing ${want.column}`);
+  if (def.includes(sibling)) bad.push(`unexpectedly references ${sibling}`);
+  if (!def.includes(`'^${want.prefix}/'`)) {
+    bad.push(`missing content-type anchor '^${want.prefix}/'`);
+  }
+  if (!/\bid\b/.test(def)) {
+    bad.push('missing row-id participation (id)');
+  }
+  if (!def.includes('[0-9a-f]{64}')) {
+    bad.push('missing 64-lowercase-hex hash class');
+  }
+  if (!def.includes(`'/${want.lang}/[0-9a-f]{64}\\.md$'`)) {
+    bad.push(`missing language/extension segment '/${want.lang}/....md$'`);
+  }
+  if (def.includes('mdx')) bad.push('accepts a .mdx extension');
+  return bad;
+}
+
 async function checkBodyPathChecks(
   queryJson: (sql: string) => Promise<unknown[]>,
   findings: CheckFinding[]
@@ -1190,26 +1240,7 @@ async function checkBodyPathChecks(
       );
       continue;
     }
-    const def = got.definition.replace(/::text/g, '').replace(/\s+/g, ' ');
-    const sibling =
-      want.column === 'body_en_path' ? 'body_it_path' : 'body_en_path';
-    const bad: string[] = [];
-    if (got.contype !== 'c') bad.push(`contype got=${got.contype} exp=c`);
-    if (!def.includes(want.column)) bad.push(`missing ${want.column}`);
-    if (def.includes(sibling)) bad.push(`unexpectedly references ${sibling}`);
-    if (!def.includes(`'^${want.prefix}/'`)) {
-      bad.push(`missing content-type anchor '^${want.prefix}/'`);
-    }
-    if (!/\bid\b/.test(def)) {
-      bad.push('missing row-id participation (id)');
-    }
-    if (!def.includes('[0-9a-f]{64}')) {
-      bad.push('missing 64-lowercase-hex hash class');
-    }
-    if (!def.includes(`'/${want.lang}/[0-9a-f]{64}\\.md$'`)) {
-      bad.push(`missing language/extension segment '/${want.lang}/....md$'`);
-    }
-    if (def.includes('mdx')) bad.push('accepts a .mdx extension');
+    const bad = bodyPathCheckViolations(got.definition, got.contype, want);
     finding(
       findings,
       `K-${want.name}`,
@@ -1222,41 +1253,254 @@ async function checkBodyPathChecks(
 }
 
 /**
- * Dev Storage contract (Phase 5B): the private Markdown body bucket
- * `website-content-dev` and the single pointer-gated SELECT policy on
- * storage.objects that lets the public dev site download exactly the body
- * objects the caller may already see.
+ * Content Storage contract: DEV (`website-content-dev` + its dev_staging
+ * policy, Phase 5B) and production (`website-content` + its public policy,
+ * CP-1) are two SEPARATE planes of ONE Supabase project, and each plane may
+ * only ever authorize objects for its own schema's posts.
  *
- * The bucket is provisioned through the Storage API (`bun run
- * storage:content:dev:setup`), so this check reads live `storage.buckets`
- * rather than expecting any SQL to have created it.
+ * Both buckets are provisioned through the Storage API (`bun run
+ * storage:content:dev:setup` / `storage:content:prod:setup`), so this check
+ * reads live `storage.buckets`; the production policy and schema objects were
+ * installed by CP-1 outside migration history. Existence of the production
+ * plane is therefore NOT a dev-only-phase violation, and the contract is
+ * lifecycle-aware:
+ *
+ *   - pre-CP-1  — the production plane is absent in full: a valid expected
+ *     state (no bucket, no read policy, no pointer columns, no CAS functions);
+ *   - post-CP-1 — bucket, read policy, the four pointer columns, the four
+ *     canonical CHECK constraints and both CAS functions must ALL be present
+ *     and exactly correct;
+ *   - anything in between — an unannounced half-migration, reported as FAIL.
+ *
+ * No production pointer COUNT is asserted: 0 committed pointers is correct
+ * before the authorized CP-2 backfill and 34 is correct after it, so only
+ * shape is certified (see the `S-prod-pointers-lifecycle` INFO).
  */
 export const CONTENT_BUCKET = 'website-content-dev';
 export const CONTENT_BUCKET_PROD = 'website-content';
 export const CONTENT_BUCKET_FILE_SIZE_LIMIT = 1_048_576;
 export const CONTENT_BUCKET_ALLOWED_MIME_TYPES = ['text/markdown'];
 export const CONTENT_STORAGE_POLICY = 'website_content_dev_body_read';
+export const CONTENT_STORAGE_POLICY_PROD = 'website_content_body_read';
 export const CONTENT_STORAGE_RELATIONS = [
   'dev_staging.blog_posts',
   'dev_staging.portfolio_posts',
+];
+export const CONTENT_STORAGE_RELATIONS_PROD = [
+  'public.blog_posts',
+  'public.portfolio_posts',
 ];
 export const CONTENT_STORAGE_OPERATIONS = [
   'object.get_authenticated_info',
   'object.get_authenticated',
 ];
 
-async function checkDevContentStorage(
-  queryJson: (sql: string) => Promise<unknown[]>,
+/** The four production pointer columns, derived from the CHECK contract. */
+export const PROD_POINTER_COLUMNS = EXPECTED_BODY_PATH_CHECKS.map((c) => ({
+  table: c.table,
+  column: c.column,
+}));
+
+/** The production CAS pair, with its exact reviewed identity signature. */
+export const PROD_CAS_FUNCTIONS: Array<{ name: string; args: string }> = [
+  {
+    name: 'prod_backfill_body_pointer_cas',
+    args: 'p_kind text, p_post_id bigint, p_locale text, p_expected_sha256 text, p_expected_previous text, p_new_path text',
+  },
+  {
+    name: 'prod_backfill_body_pointer_rollback',
+    args: 'p_kind text, p_post_id bigint, p_locale text, p_installed_path text, p_expected_sha256 text, p_previous_path text',
+  },
+];
+
+/** The only safe `search_path` for the SECURITY DEFINER production functions. */
+export const PROD_CAS_SAFE_SEARCH_PATH = 'search_path=pg_catalog, pg_temp';
+
+export type StorageBucketFact = {
+  id: string;
+  name: string;
+  public: boolean;
+  file_size_limit: number | null;
+  allowed_mime_types: string | null;
+};
+
+export type StoragePolicyFact = {
+  policy_name: string;
+  cmd: string;
+  roles: string | null;
+  using_expr: string | null;
+  with_check_expr: string | null;
+};
+
+export type StoragePolicyBindingFact = {
+  policy_name: string;
+  ref_schema: string;
+  ref_relation: string;
+};
+
+export type ProdPointerColumnFact = {
+  table_name: string;
+  name: string;
+  formatted_type: string;
+  nullable: boolean;
+};
+
+export type ProdConstraintFact = {
+  table_name: string;
+  constraint_name: string;
+  contype: string;
+  definition: string;
+};
+
+export type ProdCasFunctionFact = {
+  name: string;
+  args: string;
+  security_definer: boolean;
+  proconfig: string;
+  acl_raw: string;
+};
+
+/** Every catalog fact the Storage contract certifies, in one shape. */
+export type ContentStorageFacts = {
+  buckets: StorageBucketFact[];
+  policies: StoragePolicyFact[];
+  bindings: StoragePolicyBindingFact[];
+  prodColumns: ProdPointerColumnFact[];
+  prodConstraints: ProdConstraintFact[];
+  prodFunctions: ProdCasFunctionFact[];
+};
+
+/**
+ * Divergences between a live content bucket and the required configuration:
+ * private, exact byte limit, exact MIME allow-list (extra types rejected).
+ * Shared verbatim by DEV and production — both planes carry the same settings,
+ * so a wrong privacy flag, size limit or MIME list fails with the same words
+ * whichever plane it is in. The STORAGE_BUCKETS_QUERY returns
+ * `allowed_mime_types` as a Postgres `text[]` literal (`{text/markdown}`).
+ */
+function bucketConfigViolations(
+  bucket: StorageBucketFact,
+  expectedName: string
+): string[] {
+  const bad: string[] = [];
+  if (bucket.name !== expectedName) bad.push(`name got=${bucket.name}`);
+  if (bucket.public !== false) {
+    bad.push(`public got=${bucket.public} exp=false`);
+  }
+  if (Number(bucket.file_size_limit) !== CONTENT_BUCKET_FILE_SIZE_LIMIT) {
+    bad.push(
+      `file_size_limit got=${bucket.file_size_limit} exp=${CONTENT_BUCKET_FILE_SIZE_LIMIT}`
+    );
+  }
+  const mimes = (bucket.allowed_mime_types ?? '')
+    .replace(/^\{|\}$/g, '')
+    .split(',')
+    .map((m) => m.trim().toLowerCase())
+    .filter(Boolean)
+    .sort();
+  const expectedMimes = [...CONTENT_BUCKET_ALLOWED_MIME_TYPES].sort();
+  if (mimes.join(',') !== expectedMimes.join(',')) {
+    bad.push(
+      `allowed_mime_types got=${bucket.allowed_mime_types} exp={text/markdown} (extras rejected)`
+    );
+  }
+  return bad;
+}
+
+/**
+ * Scope violations of a content read policy: SELECT only, `anon` +
+ * `authenticated`, exactly ONE bucket (never the other environment's), the
+ * operation-aware Storage helper with both download operations, visibility
+ * plus equality-only pointer predicates over this environment's two post
+ * tables, and no reference to the other environment's schema.
+ *
+ * `visibility: 'inherit'` is the DEV shape (the table policies supply
+ * `hidden = false`, so duplicating it is drift); `'duplicate'` is the
+ * production shape, where the predicate is deliberately self-contained.
+ */
+function contentPolicyScopeViolations(
+  policy: StoragePolicyFact,
+  opts: {
+    bucket: string;
+    otherBucket: string;
+    schema: string;
+    otherSchema: string;
+    visibility: 'inherit' | 'duplicate';
+  }
+): string[] {
+  const qual = normalizePolicyExpr(policy.using_expr);
+  const bad: string[] = [];
+  if (policy.cmd !== 'r') bad.push(`cmd got=${policy.cmd} exp=r (SELECT)`);
+  if (policyRolesOf(policy.roles) !== 'anon,authenticated') {
+    bad.push(`roles got=${policy.roles} exp=anon,authenticated`);
+  }
+  if (!/\bbucket_id\b/.test(qual)) bad.push('qual missing bucket_id predicate');
+  if (!qual.includes(`'${opts.bucket}'`)) {
+    bad.push(`qual missing bucket '${opts.bucket}'`);
+  }
+  if (qual.includes(`'${opts.otherBucket}'`)) {
+    bad.push(
+      `qual references the other environment's bucket '${opts.otherBucket}'`
+    );
+  }
+  if (!qual.includes('allow_any_operation')) {
+    bad.push('qual missing operation-aware helper storage.allow_any_operation');
+  }
+  for (const op of CONTENT_STORAGE_OPERATIONS) {
+    if (!qual.includes(op)) bad.push(`qual missing operation '${op}'`);
+  }
+  for (const column of ['body_en_path', 'body_it_path']) {
+    if (!qual.includes(column))
+      bad.push(`qual missing pointer column ${column}`);
+  }
+  for (const table of ['blog_posts', 'portfolio_posts']) {
+    if (
+      !new RegExp(`from\\s+(?:${opts.schema}\\.)?${table}\\b`, 'i').test(qual)
+    ) {
+      bad.push(
+        `qual missing a visibility subquery over ${opts.schema}.${table}`
+      );
+    }
+  }
+  // The cross-environment reference checks read the RAW expression: the
+  // normalized text drops `public.` qualification, which would hide exactly the
+  // contamination they exist to catch.
+  const rawExpr = `${policy.using_expr ?? ''} ${policy.with_check_expr ?? ''}`;
+  if (new RegExp(`\\b${opts.otherSchema}\\.`, 'i').test(rawExpr)) {
+    bad.push(
+      `qual references the other environment's schema ${opts.otherSchema}`
+    );
+  }
+  if (/\b(ilike|like|starts_with|similar\s+to)\b/i.test(qual)) {
+    bad.push('qual compares pointers by pattern instead of by equality');
+  }
+  if (/created_at/i.test(qual)) {
+    bad.push('qual duplicates publish-date semantics');
+  }
+  if (opts.visibility === 'inherit') {
+    if (/hidden/i.test(qual)) {
+      bad.push(
+        'qual duplicates hidden semantics instead of inheriting post RLS'
+      );
+    }
+  } else if (!/hidden\s*=\s*false/i.test(qual)) {
+    bad.push(
+      'qual missing the duplicated visibility predicate (hidden = false)'
+    );
+  }
+  return bad;
+}
+
+/**
+ * The DEV plane: the private `website-content-dev` bucket and its single
+ * pointer-gated SELECT policy. Unchanged from Phase 5B — a missing/diverging
+ * dev artifact still fails exactly as it did.
+ */
+function evaluateDevStoragePlane(
+  facts: ContentStorageFacts,
   findings: CheckFinding[]
-): Promise<void> {
-  const buckets = (await queryJson(STORAGE_BUCKETS_QUERY)) as Array<{
-    id: string;
-    name: string;
-    public: boolean;
-    file_size_limit: number | null;
-    allowed_mime_types: string | null;
-  }>;
-  const bucket = buckets.find((b) => b.id === CONTENT_BUCKET);
+): void {
+  const bucket = facts.buckets.find((b) => b.id === CONTENT_BUCKET);
   if (!bucket) {
     finding(
       findings,
@@ -1265,28 +1509,7 @@ async function checkDevContentStorage(
       `storage bucket ${CONTENT_BUCKET} ABSENT — provision it with \`bun run storage:content:dev:setup\``
     );
   } else {
-    const mimes = (bucket.allowed_mime_types ?? '')
-      .replace(/^\{|\}$/g, '')
-      .split(',')
-      .map((m) => m.trim().toLowerCase())
-      .filter(Boolean)
-      .sort();
-    const expectedMimes = [...CONTENT_BUCKET_ALLOWED_MIME_TYPES].sort();
-    const bad: string[] = [];
-    if (bucket.name !== CONTENT_BUCKET) bad.push(`name got=${bucket.name}`);
-    if (bucket.public !== false) {
-      bad.push(`public got=${bucket.public} exp=false`);
-    }
-    if (Number(bucket.file_size_limit) !== CONTENT_BUCKET_FILE_SIZE_LIMIT) {
-      bad.push(
-        `file_size_limit got=${bucket.file_size_limit} exp=${CONTENT_BUCKET_FILE_SIZE_LIMIT}`
-      );
-    }
-    if (mimes.join(',') !== expectedMimes.join(',')) {
-      bad.push(
-        `allowed_mime_types got=${bucket.allowed_mime_types} exp={text/markdown} (extras rejected)`
-      );
-    }
+    const bad = bucketConfigViolations(bucket, CONTENT_BUCKET);
     finding(
       findings,
       'S-bucket',
@@ -1297,24 +1520,9 @@ async function checkDevContentStorage(
     );
   }
 
-  const prodPresent = buckets.some((b) => b.id === CONTENT_BUCKET_PROD);
-  finding(
-    findings,
-    'S-bucket-prod-absent',
-    prodPresent ? 'FAIL' : 'PASS',
-    prodPresent
-      ? `production content bucket ${CONTENT_BUCKET_PROD} exists during the dev-only phase`
-      : `production content bucket ${CONTENT_BUCKET_PROD} absent (deferred to production rollout)`
+  const policy = facts.policies.find(
+    (p) => p.policy_name === CONTENT_STORAGE_POLICY
   );
-
-  const pols = (await queryJson(STORAGE_POLICIES_QUERY)) as Array<{
-    policy_name: string;
-    cmd: string;
-    roles: string | null;
-    using_expr: string | null;
-    with_check_expr: string | null;
-  }>;
-  const policy = pols.find((p) => p.policy_name === CONTENT_STORAGE_POLICY);
   if (!policy) {
     finding(
       findings,
@@ -1323,31 +1531,13 @@ async function checkDevContentStorage(
       `policy storage.objects.${CONTENT_STORAGE_POLICY} ABSENT in live dev`
     );
   } else {
-    const qual = (policy.using_expr ?? '').replace(/\s+/g, ' ');
-    const bad: string[] = [];
-    if (policy.cmd !== 'r') bad.push(`cmd got=${policy.cmd} exp=r (SELECT)`);
-    if (policyRolesOf(policy.roles) !== 'anon,authenticated') {
-      bad.push(`roles got=${policy.roles} exp=anon,authenticated`);
-    }
-    if (!qual.includes('bucket_id')) bad.push('qual missing bucket_id predicate');
-    if (!qual.includes(`'${CONTENT_BUCKET}'`)) {
-      bad.push(`qual missing bucket '${CONTENT_BUCKET}'`);
-    }
-    if (!qual.includes('allow_any_operation')) {
-      bad.push('qual missing operation-aware helper storage.allow_any_operation');
-    }
-    for (const op of CONTENT_STORAGE_OPERATIONS) {
-      if (!qual.includes(op)) bad.push(`qual missing operation '${op}'`);
-    }
-    for (const column of ['body_en_path', 'body_it_path']) {
-      if (!qual.includes(column)) bad.push(`qual missing pointer column ${column}`);
-    }
-    if (/hidden/i.test(qual)) {
-      bad.push('qual duplicates hidden semantics instead of inheriting post RLS');
-    }
-    if (/created_at/i.test(qual)) {
-      bad.push('qual duplicates publish-date semantics');
-    }
+    const bad = contentPolicyScopeViolations(policy, {
+      bucket: CONTENT_BUCKET,
+      otherBucket: CONTENT_BUCKET_PROD,
+      schema: 'dev_staging',
+      otherSchema: 'public',
+      visibility: 'inherit',
+    });
     finding(
       findings,
       `S-${CONTENT_STORAGE_POLICY}`,
@@ -1358,14 +1548,7 @@ async function checkDevContentStorage(
     );
   }
 
-  const bindings = (await queryJson(
-    STORAGE_POLICY_RELATION_BINDINGS_QUERY
-  )) as Array<{
-    policy_name: string;
-    ref_schema: string;
-    ref_relation: string;
-  }>;
-  const bound = bindings
+  const bound = facts.bindings
     .filter((b) => b.policy_name === CONTENT_STORAGE_POLICY)
     .map((b) => `${b.ref_schema}.${b.ref_relation}`)
     .sort();
@@ -1384,10 +1567,12 @@ async function checkDevContentStorage(
       : `${CONTENT_STORAGE_POLICY} bindings=${JSON.stringify(bound)}; missing=${JSON.stringify(missing)}; unexpected=${JSON.stringify(unexpected)}`
   );
 
-  const writePolicies = pols.filter(
+  const writePolicies = facts.policies.filter(
     (p) =>
       p.cmd !== 'r' &&
-      `${p.using_expr ?? ''} ${p.with_check_expr ?? ''}`.includes(CONTENT_BUCKET)
+      `${p.using_expr ?? ''} ${p.with_check_expr ?? ''}`.includes(
+        CONTENT_BUCKET
+      )
   );
   finding(
     findings,
@@ -1400,7 +1585,7 @@ async function checkDevContentStorage(
       : `no anon/authenticated INSERT/UPDATE/DELETE policy targets ${CONTENT_BUCKET} (service_role bypasses Storage RLS)`
   );
 
-  const bucketPolicies = pols.filter((p) =>
+  const bucketPolicies = facts.policies.filter((p) =>
     `${p.using_expr ?? ''} ${p.with_check_expr ?? ''}`.includes(CONTENT_BUCKET)
   );
   const singleOk =
@@ -1415,6 +1600,477 @@ async function checkDevContentStorage(
       : `policies referencing ${CONTENT_BUCKET}: ${JSON.stringify(
           bucketPolicies.map((p) => `${p.policy_name}/${p.cmd}`)
         )}`
+  );
+}
+
+/**
+ * The production plane, validated INDEPENDENTLY of DEV: bucket configuration,
+ * read-policy scope, relation bindings, the four pointer columns, the four
+ * canonical CHECK constraints and the two CAS functions (signature, SECURITY
+ * DEFINER, safe `search_path`, EXECUTE to `service_role` only).
+ *
+ * Absence is a PASS only while the WHOLE plane is absent (the pre-CP-1 state);
+ * once any part exists, every missing part is a FAIL, so a half-migration can
+ * never be read as "not installed yet".
+ */
+function evaluateProdStoragePlane(
+  facts: ContentStorageFacts,
+  findings: CheckFinding[]
+): void {
+  const bucket = facts.buckets.find((b) => b.id === CONTENT_BUCKET_PROD);
+  const policy = facts.policies.find(
+    (p) => p.policy_name === CONTENT_STORAGE_POLICY_PROD
+  );
+  const planeStarted =
+    Boolean(bucket) ||
+    Boolean(policy) ||
+    facts.prodColumns.length > 0 ||
+    facts.prodConstraints.length > 0 ||
+    facts.prodFunctions.length > 0;
+
+  if (!bucket) {
+    finding(
+      findings,
+      'S-bucket-prod',
+      planeStarted ? 'FAIL' : 'PASS',
+      planeStarted
+        ? `production content bucket ${CONTENT_BUCKET_PROD} ABSENT while the production content plane is partially installed`
+        : `production content bucket ${CONTENT_BUCKET_PROD} absent — valid pre-CP-1 expected state (deferred to production rollout)`
+    );
+  } else {
+    const bad = bucketConfigViolations(bucket, CONTENT_BUCKET_PROD);
+    finding(
+      findings,
+      'S-bucket-prod',
+      bad.length ? 'FAIL' : 'PASS',
+      bad.length
+        ? `production content bucket ${CONTENT_BUCKET_PROD} drifts: ${bad.join('; ')}`
+        : `production content bucket ${CONTENT_BUCKET_PROD}: private, ${CONTENT_BUCKET_FILE_SIZE_LIMIT}B limit, text/markdown only`
+    );
+  }
+
+  if (!policy) {
+    finding(
+      findings,
+      `S-${CONTENT_STORAGE_POLICY_PROD}`,
+      planeStarted ? 'FAIL' : 'PASS',
+      planeStarted
+        ? `policy storage.objects.${CONTENT_STORAGE_POLICY_PROD} ABSENT while the production content plane is partially installed`
+        : `policy storage.objects.${CONTENT_STORAGE_POLICY_PROD} absent — valid pre-CP-1 expected state`
+    );
+  } else {
+    const bad = contentPolicyScopeViolations(policy, {
+      bucket: CONTENT_BUCKET_PROD,
+      otherBucket: CONTENT_BUCKET,
+      schema: 'public',
+      otherSchema: 'dev_staging',
+      visibility: 'duplicate',
+    });
+    finding(
+      findings,
+      `S-${CONTENT_STORAGE_POLICY_PROD}`,
+      bad.length ? 'FAIL' : 'PASS',
+      bad.length
+        ? `storage.objects.${CONTENT_STORAGE_POLICY_PROD} diverges: ${bad.join('; ')}; qual=${policy.using_expr}`
+        : `storage.objects.${CONTENT_STORAGE_POLICY_PROD}: SELECT to anon,authenticated, bucket + operation + duplicated visibility + exact body-pointer gated over both public post tables, no dev reference`
+    );
+  }
+
+  const boundProd = facts.bindings
+    .filter((b) => b.policy_name === CONTENT_STORAGE_POLICY_PROD)
+    .map((b) => `${b.ref_schema}.${b.ref_relation}`);
+  const missingBindings = CONTENT_STORAGE_RELATIONS_PROD.filter(
+    (r) => !boundProd.includes(r)
+  );
+  const unexpectedBindings = boundProd.filter(
+    (r) => !CONTENT_STORAGE_RELATIONS_PROD.includes(r)
+  );
+  const prodBindingsOk =
+    boundProd.length > 0 &&
+    missingBindings.length === 0 &&
+    unexpectedBindings.length === 0;
+  if (!policy) {
+    finding(
+      findings,
+      `S-${CONTENT_STORAGE_POLICY_PROD}-bindings`,
+      planeStarted ? 'FAIL' : 'PASS',
+      planeStarted
+        ? `policy ${CONTENT_STORAGE_POLICY_PROD} is absent, so it binds no relation while the production content plane is partially installed`
+        : `policy ${CONTENT_STORAGE_POLICY_PROD} absent — valid pre-CP-1 expected state (no binding to check)`
+    );
+  } else {
+    finding(
+      findings,
+      `S-${CONTENT_STORAGE_POLICY_PROD}-bindings`,
+      prodBindingsOk ? 'PASS' : 'FAIL',
+      prodBindingsOk
+        ? `${CONTENT_STORAGE_POLICY_PROD} binds only ${CONTENT_STORAGE_RELATIONS_PROD.join(' + ')} (pg_depend OIDs, no dev_staging relation)`
+        : `${CONTENT_STORAGE_POLICY_PROD} bindings=${JSON.stringify(boundProd)}; missing=${JSON.stringify(missingBindings)}; unexpected=${JSON.stringify(unexpectedBindings)}`
+    );
+  }
+
+  const columnViolations: string[] = [];
+  const missingColumns: string[] = [];
+  for (const want of PROD_POINTER_COLUMNS) {
+    const got = facts.prodColumns.find(
+      (c) => c.table_name === want.table && c.name === want.column
+    );
+    if (!got) {
+      missingColumns.push(`${want.table}.${want.column}`);
+      continue;
+    }
+    if (got.formatted_type !== 'text') {
+      columnViolations.push(
+        `${want.table}.${want.column} type got=${got.formatted_type} exp=text`
+      );
+    }
+    if (got.nullable !== true) {
+      columnViolations.push(
+        `${want.table}.${want.column} is NOT NULL (legacy text bodies must stay readable)`
+      );
+    }
+  }
+  if (!missingColumns.length && !columnViolations.length) {
+    finding(
+      findings,
+      'S-prod-columns',
+      'PASS',
+      `${PROD_POINTER_COLUMNS.map((c) => `public.${c.table}.${c.column}`).join(', ')}: 4 nullable text pointer columns`
+    );
+  } else if (!planeStarted) {
+    finding(
+      findings,
+      'S-prod-columns',
+      'PASS',
+      'production pointer columns absent — valid pre-CP-1 expected state (no production content plane installed)'
+    );
+  } else {
+    finding(
+      findings,
+      'S-prod-columns',
+      'FAIL',
+      `production pointer columns incomplete/divergent: missing=${JSON.stringify(missingColumns)}; violations=${JSON.stringify(columnViolations)}`
+    );
+  }
+
+  const checkViolations: string[] = [];
+  const missingChecks: string[] = [];
+  for (const want of EXPECTED_BODY_PATH_CHECKS) {
+    const got = facts.prodConstraints.find(
+      (c) => c.table_name === want.table && c.constraint_name === want.name
+    );
+    if (!got) {
+      missingChecks.push(want.name);
+      continue;
+    }
+    checkViolations.push(
+      ...bodyPathCheckViolations(got.definition, got.contype, want).map(
+        (v) => `${want.name}: ${v}`
+      )
+    );
+  }
+  if (!missingChecks.length && !checkViolations.length) {
+    finding(
+      findings,
+      'S-prod-checks',
+      'PASS',
+      `${EXPECTED_BODY_PATH_CHECKS.map((c) => c.name).join(', ')}: 4 canonical pointer CHECKs present on public post tables`
+    );
+  } else if (!planeStarted) {
+    finding(
+      findings,
+      'S-prod-checks',
+      'PASS',
+      'production pointer CHECK constraints absent — valid pre-CP-1 expected state (no production content plane installed)'
+    );
+  } else {
+    finding(
+      findings,
+      'S-prod-checks',
+      'FAIL',
+      `production pointer CHECKs incomplete/divergent: missing=${JSON.stringify(missingChecks)}; violations=${JSON.stringify(checkViolations)}`
+    );
+  }
+
+  const functionViolations: string[] = [];
+  const missingFunctions: string[] = [];
+  for (const want of PROD_CAS_FUNCTIONS) {
+    const got = facts.prodFunctions.find((f) => f.name === want.name);
+    if (!got) {
+      missingFunctions.push(want.name);
+      continue;
+    }
+    if (got.args !== want.args) {
+      functionViolations.push(
+        `${want.name}: identity signature got=(${got.args}) exp=(${want.args})`
+      );
+    }
+    if (got.security_definer !== true) {
+      functionViolations.push(`${want.name}: not SECURITY DEFINER`);
+    }
+    const searchPath = (got.proconfig ?? '').replace(/\s+/g, '');
+    if (searchPath !== PROD_CAS_SAFE_SEARCH_PATH.replace(/\s+/g, '')) {
+      functionViolations.push(
+        `${want.name}: unsafe search_path got=${got.proconfig || '(none)'} exp=${PROD_CAS_SAFE_SEARCH_PATH}`
+      );
+    }
+    const acl = parseAcl(got.acl_raw ?? '');
+    const executors = Object.keys(acl)
+      .filter((role) => acl[role].includes('X'))
+      .sort();
+    // The function owner always holds EXECUTE; what matters is that no public
+    // role does and that `service_role` (the CMS path) still can.
+    const exposed = executors.filter((role) =>
+      ['PUBLIC', 'anon', 'authenticated', 'authenticator'].includes(role)
+    );
+    if (!executors.includes('service_role') || exposed.length) {
+      functionViolations.push(
+        `${want.name}: EXECUTE grantees got=${JSON.stringify(executors)} exp=service_role only (no PUBLIC/anon/authenticated)`
+      );
+    }
+  }
+  if (!missingFunctions.length && !functionViolations.length) {
+    finding(
+      findings,
+      'S-prod-cas',
+      'PASS',
+      `${PROD_CAS_FUNCTIONS.map((f) => f.name).join(' + ')}: exact signature, SECURITY DEFINER, ${PROD_CAS_SAFE_SEARCH_PATH}, EXECUTE to service_role only`
+    );
+  } else if (!planeStarted) {
+    finding(
+      findings,
+      'S-prod-cas',
+      'PASS',
+      'production CAS functions absent — valid pre-CP-1 expected state (no production content plane installed)'
+    );
+  } else {
+    finding(
+      findings,
+      'S-prod-cas',
+      'FAIL',
+      `production CAS functions missing/divergent: missing=${JSON.stringify(missingFunctions)}; violations=${JSON.stringify(functionViolations)}`
+    );
+  }
+}
+
+/**
+ * Lifecycle coherence of the production plane: it is installed in FULL or not
+ * at all. "Bucket present but the CAS functions are missing", "pointer columns
+ * without their CHECKs" and every other half-state fail here by name.
+ */
+function evaluateProdPlaneConsistency(
+  facts: ContentStorageFacts,
+  findings: CheckFinding[]
+): void {
+  const parts: Array<[string, boolean]> = [
+    [
+      `bucket ${CONTENT_BUCKET_PROD}`,
+      facts.buckets.some((b) => b.id === CONTENT_BUCKET_PROD),
+    ],
+    [
+      `read policy ${CONTENT_STORAGE_POLICY_PROD}`,
+      facts.policies.some((p) => p.policy_name === CONTENT_STORAGE_POLICY_PROD),
+    ],
+    [
+      `${PROD_POINTER_COLUMNS.length} pointer columns`,
+      PROD_POINTER_COLUMNS.every((want) =>
+        facts.prodColumns.some(
+          (c) => c.table_name === want.table && c.name === want.column
+        )
+      ),
+    ],
+    [
+      `${EXPECTED_BODY_PATH_CHECKS.length} canonical CHECK constraints`,
+      EXPECTED_BODY_PATH_CHECKS.every((want) =>
+        facts.prodConstraints.some(
+          (c) => c.table_name === want.table && c.constraint_name === want.name
+        )
+      ),
+    ],
+    [
+      `${PROD_CAS_FUNCTIONS.length} CAS functions`,
+      PROD_CAS_FUNCTIONS.every((want) =>
+        facts.prodFunctions.some((f) => f.name === want.name)
+      ),
+    ],
+  ];
+  const present = parts.filter(([, ok]) => ok).map(([label]) => label);
+  const missing = parts.filter(([, ok]) => !ok).map(([label]) => label);
+  if (!present.length) {
+    finding(
+      findings,
+      'S-prod-consistency',
+      'PASS',
+      'production content plane absent in full — valid pre-CP-1 lifecycle state (no bucket, no read policy, no pointer columns, no CAS functions)'
+    );
+  } else if (!missing.length) {
+    finding(
+      findings,
+      'S-prod-consistency',
+      'PASS',
+      `production content plane complete: bucket + read policy + ${PROD_POINTER_COLUMNS.length} pointer columns + ${EXPECTED_BODY_PATH_CHECKS.length} canonical CHECKs + ${PROD_CAS_FUNCTIONS.length} CAS functions`
+    );
+  } else {
+    finding(
+      findings,
+      'S-prod-consistency',
+      'FAIL',
+      `partial production content plane: present=[${present.join(', ')}]; missing=[${missing.join(', ')}] — the plane must be installed in full (CP-1 artifact -> bucket -> read policy) or not at all`
+    );
+  }
+}
+
+/**
+ * The isolation contract proper: DEV and production are DISTINCT buckets whose
+ * policies bind only their own environment's relations. A dev policy binding
+ * `public` relations (or naming the production bucket) would hand dev
+ * semantics to production objects, and vice versa; a write policy on the
+ * production bucket would make bodies writable through the publishable path.
+ */
+function evaluateStorageIsolation(
+  facts: ContentStorageFacts,
+  findings: CheckFinding[]
+): void {
+  const bad: string[] = [];
+  // The two id constants are distinct string literal types (the compiler
+  // proves that), so the runtime check is on the LIVE rows: two different
+  // buckets that report the same name would make every bucket predicate
+  // ambiguous.
+  const devBucketRow = facts.buckets.find((b) => b.id === CONTENT_BUCKET);
+  const prodBucketRow = facts.buckets.find((b) => b.id === CONTENT_BUCKET_PROD);
+  if (
+    devBucketRow &&
+    prodBucketRow &&
+    devBucketRow.name === prodBucketRow.name
+  ) {
+    bad.push(
+      `dev and production content buckets share the name ${devBucketRow.name}`
+    );
+  }
+  const relationsByPolicy = new Map<string, string[]>();
+  for (const b of facts.bindings) {
+    const list = relationsByPolicy.get(b.policy_name) ?? [];
+    const name = `${b.ref_schema}.${b.ref_relation}`;
+    if (!list.includes(name)) list.push(name);
+    relationsByPolicy.set(b.policy_name, list);
+  }
+  const prodBucketPolicies: string[] = [];
+  for (const p of facts.policies) {
+    const expr = `${p.using_expr ?? ''} ${p.with_check_expr ?? ''}`;
+    const refsDev = expr.includes(`'${CONTENT_BUCKET}'`);
+    const refsProd = expr.includes(`'${CONTENT_BUCKET_PROD}'`);
+    const bound = relationsByPolicy.get(p.policy_name) ?? [];
+    const boundDev = bound.filter((r) => r.startsWith('dev_staging.'));
+    const boundPublic = bound.filter((r) => r.startsWith('public.'));
+    if (refsProd) prodBucketPolicies.push(p.policy_name);
+    if (refsDev && refsProd) {
+      bad.push(`policy ${p.policy_name} authorizes BOTH content buckets`);
+    }
+    if (refsDev && boundPublic.length) {
+      bad.push(
+        `dev-side policy ${p.policy_name} binds public relations ${JSON.stringify(boundPublic)}`
+      );
+    }
+    if (refsProd && boundDev.length) {
+      bad.push(
+        `production-side policy ${p.policy_name} binds dev_staging relations ${JSON.stringify(boundDev)}`
+      );
+    }
+    if (refsProd && p.cmd !== 'r') {
+      bad.push(
+        `policy ${p.policy_name} grants ${p.cmd} on the production bucket (read-only by design)`
+      );
+    }
+    if (
+      p.policy_name !== CONTENT_STORAGE_POLICY &&
+      boundDev.some((r) => /\.(blog_posts|portfolio_posts)$/.test(r))
+    ) {
+      bad.push(
+        `non-dev policy ${p.policy_name} binds dev_staging content relations`
+      );
+    }
+    if (
+      p.policy_name !== CONTENT_STORAGE_POLICY_PROD &&
+      boundPublic.some((r) => /\.(blog_posts|portfolio_posts)$/.test(r))
+    ) {
+      bad.push(
+        `non-production policy ${p.policy_name} binds public content relations`
+      );
+    }
+  }
+  const rogueProdRefs = prodBucketPolicies.filter(
+    (name) => name !== CONTENT_STORAGE_POLICY_PROD
+  );
+  if (rogueProdRefs.length) {
+    bad.push(
+      `storage.objects policies other than ${CONTENT_STORAGE_POLICY_PROD} reference ${CONTENT_BUCKET_PROD}: ${JSON.stringify(rogueProdRefs)}`
+    );
+  }
+  finding(
+    findings,
+    'S-bucket-isolation',
+    bad.length ? 'FAIL' : 'PASS',
+    bad.length
+      ? `content Storage isolation violated: ${bad.join('; ')}`
+      : `${CONTENT_BUCKET} (dev_staging) and ${CONTENT_BUCKET_PROD} (public) stay distinct: no dev policy binds or names production objects, no production policy binds or names dev objects, no write policy on the production bucket`
+  );
+}
+
+/**
+ * Evaluates the whole Storage contract (dev plane, production plane,
+ * production lifecycle coherence, cross-environment isolation) from
+ * already-read catalog rows. Pure: every fact is an argument, so the
+ * regression tests can drive any lifecycle state without a database.
+ */
+export function evaluateContentStorageIsolation(
+  facts: ContentStorageFacts,
+  findings: CheckFinding[]
+): void {
+  evaluateDevStoragePlane(facts, findings);
+  evaluateProdStoragePlane(facts, findings);
+  evaluateProdPlaneConsistency(facts, findings);
+  evaluateStorageIsolation(facts, findings);
+  finding(
+    findings,
+    'S-prod-pointers-lifecycle',
+    'INFO',
+    'production pointer POPULATION is deliberately not asserted: 0 committed pointers is correct before the authorized CP-2 backfill and 34 is correct after it, so only the canonical column/CHECK/CAS shape is certified here'
+  );
+}
+
+/** Reads the Storage + production catalog facts and evaluates the contract. */
+export async function checkContentStorageIsolation(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  const buckets = (await queryJson(
+    STORAGE_BUCKETS_QUERY
+  )) as StorageBucketFact[];
+  const policies = (await queryJson(
+    STORAGE_POLICIES_QUERY
+  )) as StoragePolicyFact[];
+  const bindings = (await queryJson(
+    STORAGE_POLICY_RELATION_BINDINGS_QUERY
+  )) as StoragePolicyBindingFact[];
+  const prodColumns = (await queryJson(
+    PROD_POINTER_COLUMNS_QUERY
+  )) as ProdPointerColumnFact[];
+  const prodConstraints = (await queryJson(
+    PROD_CONSTRAINTS_QUERY
+  )) as ProdConstraintFact[];
+  const prodFunctions = (await queryJson(
+    PROD_CAS_FUNCTIONS_QUERY
+  )) as ProdCasFunctionFact[];
+  evaluateContentStorageIsolation(
+    {
+      buckets,
+      policies,
+      bindings,
+      prodColumns,
+      prodConstraints,
+      prodFunctions,
+    },
+    findings
   );
 }
 
