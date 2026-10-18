@@ -45,16 +45,29 @@ describe('body dual-write feature gate', () => {
     ).toEqual({ mode: 'enabled', bucket: 'website-content-dev' });
   });
 
-  it('never enables in production', () => {
-    const decision = resolveBodyDualWrite({
-      enabled: true,
-      appEnv: 'production',
-      schema: 'public',
-    });
-    expect(decision.mode).toBe('invalid');
-    if (decision.mode === 'invalid') {
-      expect(decision.error).toContain('must not be enabled in production');
-    }
+  it('enables the production bucket for production+public', () => {
+    expect(
+      resolveBodyDualWrite({
+        enabled: true,
+        appEnv: 'production',
+        schema: 'public',
+      })
+    ).toEqual({ mode: 'enabled', bucket: 'website-content' });
+  });
+
+  it('never crosses buckets between environments', () => {
+    expect(
+      resolveBodyDualWrite({ enabled: true, appEnv: 'production', schema: 'public' })
+    ).toEqual({ mode: 'enabled', bucket: 'website-content' });
+    expect(
+      resolveBodyDualWrite({ enabled: true, appEnv: 'development', schema: 'dev_staging' })
+    ).toEqual({ mode: 'enabled', bucket: 'website-content-dev' });
+    expect(
+      resolveBodyDualWrite({ enabled: true, appEnv: 'production', schema: 'dev_staging' }).mode
+    ).toBe('invalid');
+    expect(
+      resolveBodyDualWrite({ enabled: true, appEnv: 'development', schema: 'public' }).mode
+    ).toBe('invalid');
   });
 
   it('rejects an enabled flag outside dev_staging', () => {
@@ -66,7 +79,7 @@ describe('body dual-write feature gate', () => {
       });
       expect(decision.mode).toBe('invalid');
       if (decision.mode === 'invalid') {
-        expect(decision.error).toContain("requires NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging");
+        expect(decision.error).toContain('refusing to resolve a content bucket');
       }
     }
   });

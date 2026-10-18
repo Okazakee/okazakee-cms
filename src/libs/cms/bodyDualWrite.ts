@@ -3,18 +3,17 @@
  *
  * Dual-write is OPT-IN and only valid in the dev clone:
  *   CMS_BODY_DUAL_WRITE_ENABLED=true
- *   APP_ENV != production
- *   NEXT_PUBLIC_SUPABASE_DB_SCHEMA = dev_staging
+ *   APP_ENV=production + NEXT_PUBLIC_SUPABASE_DB_SCHEMA=public  -> website-content
+ *   APP_ENV!=production + NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging -> website-content-dev
  *
  * Anything else stays on the legacy path, and an explicitly-enabled but
- * incompatible environment is rejected before any DB or Storage mutation.
- * Production must never read or write the pointer columns, never resolve
- * `website-content`, and never touch a content bucket.
+ * incompatible environment is rejected before any DB or Storage mutation, so
+ * the two environments can never write each other's bucket.
  *
  * Pure decision logic (injectable) so it can be unit-tested; the process
  * environment is read only by `currentBodyDualWrite()`.
  */
-import { CONTENT_BUCKET_DEV } from '@/libs/cms/storage/contentBucket';
+import { tryResolveContentBucket } from '@/libs/cms/storage/contentBucket';
 
 export const BODY_DUAL_WRITE_FLAG = 'CMS_BODY_DUAL_WRITE_ENABLED';
 
@@ -42,19 +41,11 @@ export function resolveBodyDualWrite(
       devClone: env.appEnv !== 'production' && env.schema === 'dev_staging',
     };
   }
-  if (env.appEnv === 'production') {
-    return {
-      mode: 'invalid',
-      error: `${BODY_DUAL_WRITE_FLAG} must not be enabled in production (APP_ENV=production)`,
-    };
+  const bucket = tryResolveContentBucket({ appEnv: env.appEnv, schema: env.schema });
+  if (!bucket.ok) {
+    return { mode: 'invalid', error: `${BODY_DUAL_WRITE_FLAG}: ${bucket.error}` };
   }
-  if (env.schema !== 'dev_staging') {
-    return {
-      mode: 'invalid',
-      error: `${BODY_DUAL_WRITE_FLAG} requires NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging, got '${env.schema}'`,
-    };
-  }
-  return { mode: 'enabled', bucket: CONTENT_BUCKET_DEV };
+  return { mode: 'enabled', bucket: bucket.bucket };
 }
 
 export function currentBodyDualWrite(): BodyDualWriteDecision {

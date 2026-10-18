@@ -150,7 +150,7 @@ describe('portfolio dual-write: feature isolation', () => {
   it('rejects an enabled flag in production before any mutation', async () => {
     vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
     vi.stubEnv('APP_ENV', 'production');
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
     h.fake = fake({ portfolio_posts: [] });
 
     const result = await portfolioActions({

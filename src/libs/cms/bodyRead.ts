@@ -3,22 +3,23 @@
  *
  * Storage-first reads are OPT-IN and only valid in the dev clone:
  *   CMS_BODY_STORAGE_READ_ENABLED=true
- *   APP_ENV != production
- *   NEXT_PUBLIC_SUPABASE_DB_SCHEMA = dev_staging
+ *   APP_ENV=production + NEXT_PUBLIC_SUPABASE_DB_SCHEMA=public  -> website-content
+ *   APP_ENV!=production + NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging -> website-content-dev
  *
  * The flag is deliberately INDEPENDENT of `CMS_BODY_DUAL_WRITE_ENABLED`: reading
  * bodies from Storage and writing them to Storage activate separately, so a
  * deployment may dual-write without switching its readers (and vice versa).
  *
- * When disabled the legacy `body_en`/`body_it` columns stay the only source:
- * production must never reference the pointer columns, resolve `website-content`
- * or depend on a content bucket. An explicitly enabled but incompatible
- * environment is rejected before any DB or Storage call.
+ * When disabled the legacy `body_en`/`body_it` columns stay the only source,
+ * so production keeps its existing queries until the flag is explicitly turned
+ * on. An enabled but incompatible environment is rejected before any DB or
+ * Storage call, and the bucket pairing is resolved in one place
+ * (`tryResolveContentBucket`) so the two environments can never cross over.
  *
  * Pure decision logic (injectable) so it can be unit-tested; the process
  * environment is read only by `currentBodyStorageRead()`.
  */
-import { CONTENT_BUCKET_DEV } from '@/libs/cms/storage/contentBucket';
+import { tryResolveContentBucket } from '@/libs/cms/storage/contentBucket';
 
 export const BODY_STORAGE_READ_FLAG = 'CMS_BODY_STORAGE_READ_ENABLED';
 
@@ -43,19 +44,15 @@ export function resolveBodyStorageRead(
   if (!env.enabled) {
     return { mode: 'disabled' };
   }
-  if (env.appEnv === 'production') {
-    return {
-      mode: 'invalid',
-      error: `${BODY_STORAGE_READ_FLAG} must not be enabled in production (APP_ENV=production)`,
-    };
+  // Exactly two pairings are valid: production+public (bucket website-content)
+  // and a non-production clone+dev_staging (bucket website-content-dev). Any
+  // other pairing fails closed, so production can never read the dev bucket and
+  // a dev clone can never read the production one.
+  const bucket = tryResolveContentBucket({ appEnv: env.appEnv, schema: env.schema });
+  if (!bucket.ok) {
+    return { mode: 'invalid', error: `${BODY_STORAGE_READ_FLAG}: ${bucket.error}` };
   }
-  if (env.schema !== 'dev_staging') {
-    return {
-      mode: 'invalid',
-      error: `${BODY_STORAGE_READ_FLAG} requires NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging, got '${env.schema}'`,
-    };
-  }
-  return { mode: 'enabled', bucket: CONTENT_BUCKET_DEV };
+  return { mode: 'enabled', bucket: bucket.bucket };
 }
 
 export function currentBodyStorageRead(): BodyStorageReadDecision {

@@ -49,6 +49,28 @@ export function resolveContentBucket(env: {
   );
 }
 
+/**
+ * Result-typed variant for the feature gates: the only two valid pairings
+ * resolve, everything else is reported instead of thrown, so a gate can fail
+ * closed with its own flag-specific message. Production resolves ONLY the
+ * production bucket and a dev clone ONLY the dev bucket — there is no pairing
+ * that crosses over.
+ */
+export type ContentBucketResolution =
+  | { ok: true; bucket: string }
+  | { ok: false; error: string };
+
+export function tryResolveContentBucket(env: {
+  appEnv: string;
+  schema: string;
+}): ContentBucketResolution {
+  try {
+    return { ok: true, bucket: resolveContentBucket(env) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export type StorageBucketRow = {
   id: string;
   name: string;

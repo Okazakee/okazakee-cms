@@ -311,7 +311,7 @@ describe.each(ENTITIES)('GET_BODIES ($name)', (entity) => {
 
   it('rejects an incompatible enabled configuration before any DB or Storage call', async () => {
     vi.stubEnv('APP_ENV', 'production');
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
     vi.stubEnv(BODY_STORAGE_READ_FLAG, 'true');
     h.fake = fake({ [entity.table]: [row()] });
     const { downloads } = instrument(h.fake);
@@ -319,7 +319,7 @@ describe.each(ENTITIES)('GET_BODIES ($name)', (entity) => {
     const result = await entity.run(7);
 
     expect(result.success).toBe(false);
-    expect(String(result.error)).toContain('must not be enabled in production');
+    expect(String(result.error)).toContain('refusing to resolve a content bucket');
     // Nothing reached the database or the bucket.
     expect(h.fake.state.log).toEqual([]);
     expect(downloads).toEqual([]);

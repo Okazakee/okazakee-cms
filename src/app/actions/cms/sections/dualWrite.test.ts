@@ -138,7 +138,7 @@ describe('blog dual-write: feature isolation', () => {
   it('rejects an enabled flag in production before any DB or Storage call', async () => {
     vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
     vi.stubEnv('APP_ENV', 'production');
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
     h.fake = fake({ blog_posts: [] });
 
     const result = await blogActions({
@@ -149,7 +149,7 @@ describe('blog dual-write: feature isolation', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('must not be enabled in production');
+    expect(result.error).toContain('refusing to resolve a content bucket');
     expect(h.fake.state.log).toEqual([]);
     expect(contentObjectKeys(h.fake)).toEqual([]);
   });

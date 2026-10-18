@@ -38,16 +38,26 @@ describe('resolveBodyStorageRead', () => {
     ).toEqual({ mode: 'enabled', bucket: 'website-content-dev' });
   });
 
-  it('rejects enablement in production', () => {
+  it('enables the production bucket for production+public', () => {
+    expect(
+      resolveBodyStorageRead({
+        enabled: true,
+        appEnv: 'production',
+        schema: 'public',
+      })
+    ).toEqual({ mode: 'enabled', bucket: 'website-content' });
+  });
+
+  it('rejects a production env pointed at the dev clone schema', () => {
     const decision = resolveBodyStorageRead({
       enabled: true,
       appEnv: 'production',
       schema: 'dev_staging',
     });
     expect(decision.mode).toBe('invalid');
-    expect(
-      decision.mode === 'invalid' ? decision.error : ''
-    ).toContain('must not be enabled in production');
+    expect(decision.mode === 'invalid' ? decision.error : '').toContain(
+      'refusing to resolve a content bucket'
+    );
   });
 
   it('rejects enablement outside the dev clone schema', () => {
@@ -58,7 +68,7 @@ describe('resolveBodyStorageRead', () => {
     });
     expect(decision.mode).toBe('invalid');
     expect(decision.mode === 'invalid' ? decision.error : '').toContain(
-      'NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging'
+      'refusing to resolve a content bucket'
     );
   });
 
@@ -106,8 +116,14 @@ describe('currentBodyStorageRead', () => {
   it('derives production semantics from NODE_ENV when APP_ENV is unset', () => {
     delete process.env.APP_ENV;
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
     vi.stubEnv(BODY_STORAGE_READ_FLAG, 'true');
-    expect(currentBodyStorageRead().mode).toBe('invalid');
+    // NODE_ENV=production resolves production semantics, so the public schema
+    // enables reads against the PRODUCTION bucket — never the dev one.
+    expect(currentBodyStorageRead()).toEqual({
+      mode: 'enabled',
+      bucket: 'website-content',
+    });
   });
 
   it('is independent of the dual-write flag in both directions', () => {
