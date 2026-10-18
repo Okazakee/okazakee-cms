@@ -1000,6 +1000,31 @@ describe('runProdBackfillRollback: read-only plan', () => {
     expect(h.service.calls).toHaveLength(0);
     expect(h.invalidations).toHaveLength(0);
   });
+
+  it('treats an absent journal as a pre-run readiness state, not a failure', async () => {
+    // No `seed`: the journal the first run will write does not exist yet, which
+    // is exactly the pre-backfill state the runbook's readiness step runs in.
+    const h = rollbackHarness({ argv: [] });
+    const outcome = await runProdBackfillRollback(h.deps);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.error).toBeNull();
+    const report = outcome.report as {
+      mode: string;
+      journalPath: string;
+      plan: unknown[];
+      summary: { planned: number; ready: number; conflicts: number };
+      mutationsPerformed: number;
+    } | null;
+    expect(report?.mode).toBe('plan');
+    expect(report?.journalPath).toBe(TEMP_JOURNAL);
+    expect(report?.plan).toEqual([]);
+    expect(report?.summary.planned).toBe(0);
+    expect(report?.summary.ready).toBe(0);
+    expect(report?.summary.conflicts).toBe(0);
+    expect(report?.mutationsPerformed).toBe(0);
+    expect(h.service.calls).toHaveLength(0);
+    expect(h.invalidations).toHaveLength(0);
+  });
 });
 
 describe('runProdBackfillRollback: refusal paths', () => {

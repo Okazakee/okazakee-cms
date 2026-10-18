@@ -6,8 +6,10 @@ into the private `website-content` bucket on project `mtvwynyikouqzmhqespl`,
 using atomic content-addressed pointer columns.
 
 This document is the GATE D deliverable of Phase 13. It describes the **exact
-Phase 14 sequence**. Nothing in it has been executed, and nothing in it may be
-executed during Phase 13.
+Phase 14 sequence**. Only its read-only inspections have been executed (CP-0,
+2026-10-18, recorded under *Exit codes, and expected-missing infrastructure
+during CP-0*); every mutation it describes is still unexecuted and remains gated
+by a named checkpoint.
 
 ## Scope and authorization boundary
 
@@ -19,15 +21,15 @@ Production and DEV are two schemas of the **same** Supabase project:
 | DEV clone | `dev_staging` | `website-content-dev` | already migrated, proven |
 
 Every production mutation below is a **Phase 14** action gated by a named
-authorization checkpoint. During **Phase 13** (this repository state) no
-production schema change, bucket creation, object upload, pointer switch, RLS
-change, flag activation, deployment or rollback may be performed. Read-only
-production inspection is the only production access allowed before Phase 14.
+authorization checkpoint. Until **CP-1** is held, no production schema change,
+bucket creation, object upload, pointer switch, RLS change, flag activation,
+deployment or rollback may be performed: CP-0 authorizes read-only production
+inspection only.
 
-Never run `supabase db push`, `supabase db reset` or any bulk migration command
-in this process: those can apply **unrelated pending migrations**. Apply only the
-two reviewed artifacts named here, each inside its own transaction, exactly as
-shown.
+Never run `supabase db push`, `supabase migration up`, `supabase db reset` or
+any bulk migration command in this process: those can apply **unrelated pending
+migrations**. Apply only the two reviewed artifacts named here, each inside its
+own transaction, exactly as shown.
 
 ### Named approval checkpoints
 
@@ -70,17 +72,24 @@ Expected:
 migration**: do not apply, move or delete it. Any checksum drift is a stop
 condition, not something to reconcile in passing.
 
+Re-verified **2026-10-18** with a read-only `sha256sum`: all three lines match
+the pinned digests above, so both reviewed artifacts are unchanged and the
+parked migration is untouched. Nothing in this runbook may apply a file whose
+checksum has not just been confirmed here, and no reviewed SQL is retyped
+anywhere in this document — the files are always applied by path.
+
 ### Production CLI commands
 
 | Command | Mode |
 |---|---|
 | `bun run storage:content:prod:setup` | read-only bucket inspection |
 | `bun run storage:content:prod:setup --apply` | creates `website-content` if missing |
-| `bun run storage:content:prod:backfill:plan` | read-only inventory / manifest |
-| `bun run storage:content:prod:backfill:exec --preflight` | read-only readiness |
+| `bun run storage:content:prod:backfill:plan --inventory` | read-only pointer-free inventory (**pre-schema**, the one that works today) |
+| `bun run storage:content:prod:backfill:plan --manifest` | read-only pointer-aware manifest (**post-schema** only) |
+| `bun run storage:content:prod:backfill:exec --preflight` | read-only readiness (pointer-aware, therefore **post-schema**) |
 | `bun run storage:content:prod:backfill:exec --apply --new-run` | mutation-gated backfill |
 | `bun run storage:content:prod:backfill:exec --apply --resume` | explicit recovery of an existing run |
-| `bun run storage:content:prod:backfill:rollback [--run-id=<id>]` | read-only rollback plan |
+| `bun run storage:content:prod:backfill:rollback` | read-only journal plan (needs `PROD_BACKFILL_JOURNAL_PATH`; empty plan before the first run) |
 | `bun run storage:content:prod:backfill:rollback --apply --run-id=<id> --expect-project-ref=<ref>` | mutation-gated rollback |
 
 Common production environment for every command above:
@@ -107,6 +116,71 @@ Exact production contract, verified against the CLIs' usage output:
 `--new-run` and `--resume` are mutually exclusive; a resumed run must pass the
 manifest digest recorded in the journal, never a freshly computed one.
 
+### Exit codes, and expected-missing infrastructure during CP-0
+
+Every command above shares one exit convention. `plan`, `exec --preflight` and
+`rollback` (without `--apply`) are read-only, so every code below is an
+**observed** result from this repository state against the live project, not a
+prediction:
+
+| Code | Meaning |
+|---|---|
+| 0 | settled — the read-only report was produced, or `--apply` finished with no failures |
+| 1 | attention required — blockers, a failed readiness probe, or the inspected bucket missing |
+| 2 | invalid usage |
+| 3 | environment/project gate refused (wrong `APP_ENV`, schema, project, bucket or missing secret) |
+| 4 | read or execution failure — including a projection that names a column the schema does not have |
+| 5 | refused by a gate — acknowledgement, `--expect-project-ref`, journal destination, or the apply/rollback arming gate |
+
+Observed **2026-10-18** on `https://mtvwynyikouqzmhqespl.supabase.co`
+(`APP_ENV=production`, schema `public`; all read-only, zero mutations):
+
+| Command | Exit | Observed |
+|---|---|---|
+| `…:plan --inventory` | **0** | `"mode": "inventory"`, digest `0ed666f4…`, 17 posts / 34 bodies / 275 670 bytes, `"pointerColumnsSelected": false` |
+| `…:plan` (no argument) | **0** | the same inventory report, `"modeSource": "flag"` (`CMS_BODY_POINTER_COLUMNS` absent) |
+| `…:plan --manifest` | **4** | `column blog_posts.body_en_path does not exist` — **expected pre-schema** |
+| `…:exec --preflight` | **4** | the same missing-column error: preflight reads the **pointer-aware** manifest, so it is a post-schema step — **expected pre-schema** |
+| `…:setup` | **1** | `"status": "missing"`, `"mutated": false`, `"mutationsPerformed": 0` — **expected pre-CP-1** |
+| `…:rollback` (no `PROD_BACKFILL_JOURNAL_PATH`) | **5** | `PROD_BACKFILL_JOURNAL_PATH must name the journal produced by the backfill run` — **expected before the first run** |
+| `…:rollback` with `PROD_BACKFILL_JOURNAL_PATH` set to a not-yet-created file | **0** | `"plan": []`, `"planned": 0`, `"mutationsPerformed": 0` — an absent journal is not an error |
+
+**Expected missing infrastructure is not a failure.** During CP-0 the bucket,
+the pointer columns, the CAS functions, the Storage RLS policy, every pointer
+and every object are *supposed* to be absent. A command that reports them
+missing — or that exits 4 because a projection named a column that does not
+exist yet — is confirming the baseline, and must not be "fixed" by changing
+production, by adding a nullable column, or by copying a parked migration. A
+real failure is: something *present* that should be absent, a checksum drift, a
+non-zero exit where this table records 0, or a success where it records 4/5.
+
+The read-only command that must always work pre-schema is the pointer-free
+inventory (`plan --inventory`), which projects exactly `id,body_en,body_it`.
+Nothing in this runbook may make a pre-schema query succeed by altering
+production.
+
+### Secret hygiene (logs, transcripts, HAR files, screenshots)
+
+`SUPABASE_SECRET_KEY`, `WEBSITE_REVALIDATION_SECRET` and any `PROD_DATABASE_URL`
+are server secrets and must never reach a log, a terminal transcript, a HAR file
+or a screenshot:
+
+- Read them from the environment or a `0600` file; never paste a value into a
+  command line, a document, an issue or a chat. The CLIs read them from the
+  environment and print no secret material — their reports carry counts,
+  digests, bucket status, journal run summaries and booleans only.
+- Keep shell tracing **off** (`set +x`); a traced shell echoes the expanded
+  `$SUPABASE_SECRET_KEY`.
+- `curl -H "Authorization: Bearer $SUPABASE_SECRET_KEY"` places the secret in
+  the process arguments, where `ps` can read it. Prefer a `0600` curl config
+  (`curl --config <file>`) or a wrapper that injects the header from the
+  environment, and never use `--verbose`/`-v` on an authenticated request.
+- In a browser session, do not capture an authenticated admin request with a
+  secret in a header: redact `apikey`, `Authorization` and `Cookie` before
+  saving a HAR or a screenshot, and prefer anonymous / publishable-key evidence.
+- Redirect command output only into a `0700` directory outside both
+  repositories (the same location as the snapshot and the journal).
+
 ---
 
 ## D1. Production infrastructure
@@ -125,11 +199,45 @@ pg_dump "$PROD_DATABASE_URL" \
   --data-only --column-inserts > /var/lib/cms-cutover/prod-<date>.sql
 ```
 
-Record the source fingerprints (deterministic; two runs on an unchanged DB are
-byte-identical):
+Record the source fingerprints in **two independently executable stages**. The
+stage-1 query runs now, before the pointer columns exist, and must never name
+them: production is never changed to make a snapshot work.
+
+**Stage 1 — pre-schema snapshot (run before D1 step 4).** It projects only
+columns that exist today — `id, body_en, body_it, hidden` on both tables,
+confirmed present by a read-only probe of the live project (2026-10-18) — and
+names no pointer column. It is byte-exact: `convert_to(...,'UTF8')` is the
+encoded body, never a normalized or estimated length, and `coalesce` only keeps
+the expression total for a NULL locale. It is deterministic: two runs on an
+unchanged database are identical.
 
 ```sql
-select 'blog' as kind, id,
+-- blog; repeat verbatim for public.portfolio_posts (same legacy columns)
+select 'blog' as kind, id, hidden,
+       length(convert_to(coalesce(body_en,''),'UTF8')) as en_bytes,
+       length(convert_to(coalesce(body_it,''),'UTF8')) as it_bytes,
+       encode(sha256(convert_to(coalesce(body_en,''),'UTF8')),'hex') as en_sha256,
+       encode(sha256(convert_to(coalesce(body_it,''),'UTF8')),'hex') as it_sha256
+  from public.blog_posts
+ order by id;
+```
+
+Expected baseline on the approved snapshot: **6 blog rows + 11 portfolio rows =
+17 rows**, **34 non-empty bodies**, **275 670 source bytes** summed from the
+`*_bytes` columns (this figure is the snapshot's own byte total; the DEV
+planner's 275 627 is DEV's own baseline and must not be substituted). Every
+`*_sha256` is the SHA-256 of the exact UTF-8 body bytes and is the same value
+the backfill keys objects by — the plan report's `sourceSha256` / `sizeBytes`
+for the same post/locale must equal it. Write the fingerprint file and its
+SHA-256 to `/var/lib/cms-cutover/prod-snapshot.sha256`.
+
+**Stage 2 — post-schema verification (run after D1 step 4, with D1 step 5).**
+Only this stage may inspect the pointer columns. Re-run the stage-1 query
+unchanged — the bodies must hash byte-identically, because installing the schema
+writes no row — then add the pointers:
+
+```sql
+select 'blog' as kind, id, hidden,
        body_en_path, body_it_path,
        length(convert_to(coalesce(body_en,''),'UTF8')) as en_bytes,
        length(convert_to(coalesce(body_it,''),'UTF8')) as it_bytes,
@@ -140,21 +248,24 @@ select 'blog' as kind, id,
 -- repeat for public.portfolio_posts
 ```
 
-Expected baseline on the approved snapshot: **6 blog rows + 11 portfolio rows =
-17 rows**, **34 non-empty bodies**, **275 670 source bytes** (this figure is the
-snapshot's own byte total; the DEV planner's 275 627 is DEV's own baseline and
-must not be substituted). Write the fingerprint file and its SHA-256 to
-`/var/lib/cms-cutover/prod-snapshot.sha256`.
+Stage 2 must reproduce the stage-1 hashes and byte totals exactly, and must
+still show `body_en_path` / `body_it_path` as `NULL` for every row (pre-backfill
+that is the expected state, not a defect).
 
 Pre-schema inventory is also read-only and works **before the pointer columns
-exist**:
+exist**; it is the pointer-free projection, so it never names a column the
+schema lacks:
 
 ```bash
-bun run storage:content:prod:backfill:plan
+bun run storage:content:prod:backfill:plan --inventory
 ```
 
-It must not fail or invent missing pointer columns. Pre-schema it reports a
-legacy-only inventory; post-schema it reports the pointer-aware manifest.
+Exit code **0**, `"mode": "inventory"`, `"pointerColumnsSelected": false`. With
+no argument the same command also selects `inventory` while
+`CMS_BODY_POINTER_COLUMNS` is not exactly `true`; the explicit `--inventory`
+removes the flag-accident risk. `--manifest` is the **post-schema** counterpart
+and exits **4** with `column blog_posts.body_en_path does not exist` until D1
+step 4 lands — expected, not a failure.
 
 ### 2. Confirm reviewed SQL checksums
 
@@ -168,28 +279,40 @@ bucket provisioning + Storage RLS). No mutation before this is written down.
 
 ### 4. Install the additive production pointer schema and CAS functions
 
-Promote the reviewed file into the migrations directory with a **fresh
-timestamp**, then apply **only that file** inside one transaction (never a bulk
-push):
+Apply **only** the reviewed file, atomically, with error-stop. Do **not** copy
+it into `supabase/migrations/`: that would leave a *pending migration* behind,
+and the parked `20261017161925_optimize_indexes_public.sql` is already pending,
+so any later bulk command would silently apply both. Never run
+`supabase db push`, `supabase migration up`, `supabase db reset` or any bulk
+apply in this process.
 
 ```bash
-cp supabase/review/prod_markdown_backfill_cas.sql \
-   supabase/migrations/$(date +%Y%m%d%H%M%S)_add_prod_body_storage_paths_public.sql
+# byte-exact apply of the reviewed artifact: one transaction, abort on first error
+psql "$PROD_DATABASE_URL" \
+  -v ON_ERROR_STOP=1 \
+  --single-transaction \
+  -f supabase/review/prod_markdown_backfill_cas.sql
 ```
 
-Apply atomically — the whole file lands or none of it does, so the CMS can never
-observe a half-installed capability:
+- `--single-transaction` wraps the whole file in one transaction. The file
+  deliberately carries no top-level `BEGIN`/`COMMIT` (its `begin` tokens are
+  PL/pgSQL block openers), so this is what makes the four columns, the four
+  CHECK constraints, both functions and the grants land together or not at all —
+  the CMS can never observe a half-installed capability.
+- `ON_ERROR_STOP=1` is the error-stop half: the first error aborts the file and
+  the transaction rolls back. A bare `BEGIN; \i <file>; COMMIT;` is **not**
+  equivalent — without `ON_ERROR_STOP`, psql keeps executing after an error and
+  still reaches `COMMIT`, committing partial work.
+- The file is applied **by path**, never retyped or excerpted, so the bytes that
+  land are exactly the bytes whose checksum D1 step 2 verified. If the reviewed
+  SQL is instead applied through the Supabase management API / MCP
+  `apply_migration`, that mechanism also takes the file's whole statement list
+  as one migration — but the SQL must be the exact file content, with no manual
+  edit and no partial paste.
 
-```sql
-BEGIN;
-\i supabase/migrations/<timestamp>_add_prod_body_storage_paths_public.sql
-COMMIT;
-```
-
-(Equivalent to what the reviewed migration flow does; the file is written for a
-single-transaction apply.) Re-visit the order-of-operations constraint: this is
-the step that creates the pointer columns and the two `prod_backfill_*`
-functions in `public`.
+Re-run the checksum block (D1 step 2) immediately before this command, and run
+D1 step 5 immediately after. This is the step that creates the pointer columns
+and the two `prod_backfill_*` functions in `public`.
 
 ### 5. Independently verify columns, constraints, function definitions and effective ACLs
 
@@ -299,43 +422,28 @@ Any `drift` entry, any `unexpectedBuckets` entry, or any status other than
 
 ### 8. Apply the reviewed Storage RLS policy in a single database transaction
 
-The `DROP POLICY IF EXISTS` and the `CREATE POLICY` must be **one transaction** —
-a partially replaced policy is unacceptable. Apply **only** this policy:
+The reviewed artifact is
+`supabase/review/prod_website_content_storage_rls.sql` and it is
+**authoritative**: this runbook deliberately does not retype the policy SQL,
+because an inlined copy can drift from the checksum-pinned file. The file
+contains exactly one `DROP POLICY IF EXISTS` + one `CREATE POLICY`, and they
+must be **one transaction** — a partially replaced policy is unacceptable.
 
-```sql
-BEGIN;
-
-drop policy if exists website_content_body_read on storage.objects;
-
-create policy website_content_body_read on storage.objects
-  for select to anon, authenticated
-  using (
-    bucket_id = 'website-content'
-    and storage.allow_any_operation (
-      array['object.get_authenticated_info', 'object.get_authenticated']
-    )
-    and (
-      exists (
-        select 1
-          from public.blog_posts b
-         where b.hidden = false
-           and storage.objects.name in (b.body_en_path, b.body_it_path)
-      )
-      or exists (
-        select 1
-          from public.portfolio_posts p
-         where p.hidden = false
-           and storage.objects.name in (p.body_en_path, p.body_it_path)
-      )
-    )
-  );
-
-COMMIT;
+```bash
+# byte-exact apply of the reviewed artifact: one transaction, abort on first error
+psql "$PROD_DATABASE_URL" \
+  -v ON_ERROR_STOP=1 \
+  --single-transaction \
+  -f supabase/review/prod_website_content_storage_rls.sql
 ```
 
-The policy CANNOT be created before D1 step 4 (its predicate references
-`body_en_path` / `body_it_path`). It touches `storage.objects` only — no bucket
-row, no `INSERT`/`UPDATE`/`DELETE` policy, no other `storage` policy.
+As in D1 step 4 the file is applied by path with `ON_ERROR_STOP` +
+`--single-transaction` (atomic, error-stop); re-confirm its checksum (step 2)
+immediately before. The policy CANNOT be created before D1 step 4 (its predicate
+references `body_en_path` / `body_it_path`). It touches `storage.objects` only —
+no bucket row, no `INSERT`/`UPDATE`/`DELETE` policy, no other `storage` policy.
+Its full text, read model, activation order and rollback are documented at the
+top of the file.
 
 ### 9. Independently verify Storage policy predicates and effective access
 
@@ -445,10 +553,12 @@ journal, endpoint and rollback readiness confirmed below.
 ### 1. Refresh the source inventory
 
 ```bash
-bun run storage:content:prod:backfill:plan
+bun run storage:content:prod:backfill:plan --manifest
 ```
 
-Read-only, pointer-aware (post-schema). It reads the current committed bodies,
+Read-only, pointer-aware (post-schema; `--manifest` is explicit so the mode never
+depends on the value of `CMS_BODY_POINTER_COLUMNS`). It reads the current
+committed bodies,
 captures exact SHA-256 and sizes, generates canonical production object paths,
 inspects committed pointers and classifies entries
 (`UPLOAD_AND_POINT` / `ALREADY_CURRENT` / `SKIP_EMPTY` / `BLOCKED`), and reports
@@ -487,7 +597,12 @@ bun run storage:content:prod:backfill:exec --preflight
 ```
 
 The preflight must report the journal destination as present, absolute and
-outside the repository.
+outside the repository. Before the first run the journal file does not exist
+yet, so the report shows `"pathConfigured": true`, `"trustworthy": true` and
+`"runs": []` (or `"pathConfigured": false` when the variable is unset). That is
+**expected** — the destination is validated against the roots and permissions,
+and the run list stays empty until the first `--apply` writes it. A
+`"destinationProblem"` or a non-trustworthy journal is a stop.
 
 ### 5. Verify the revalidation endpoint
 
@@ -499,16 +614,52 @@ configured HTTPS production origin with path
 present. The preflight reports whether the destination is configured **and
 approved**. Do not invent a hostname; use the approved production origin.
 
-### 6. Verify rollback readiness
+### 6. Verify rollback readiness — capability before the run, candidates after it
+
+Rollback has two distinct operations and they are verified at two different
+times. The **planner needs a recorded run and its journal**, and before the
+first run neither exists — so the planner invocation is *not* the pre-run
+readiness check, and an empty plan before the first run is expected, not a
+broken rollback.
+
+**(a) Rollback capability / readiness — no journal required.** The
+`--preflight` of step 4 *is* the rollback-readiness report: its `cas-rollback`
+probe proves the atomic rollback function exists with its exact signature and
+reaches its argument validation (a missing artifact reports `missing`), and its
+`cas-forward`, `cas-privileges`, `pointer-columns`, `bucket-config` and
+`storage-rls` probes cover the rest of the rollback surface. Preflight must be
+fully `"ok": true` before CP-2, and it reads no journal run state. The planner
+itself is reachable without a run too — an absent journal is *expected* here:
 
 ```bash
+PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-run.jsonl \
 bun run storage:content:prod:backfill:rollback
 ```
 
-Read-only by default. It reconstructs the candidates this run would restore from
-the run identity + manifest digest and classifies each against the live row; it
-must show no `BODY_CHANGED` / `POINTER_DRIFTED` candidates before apply.
-Rollback is the safety net (D5); confirm it before migrating.
+Exit **0** with `"plan": []`, `"summary": { "planned": 0, … }` and
+`"mutationsPerformed": 0` (observed on the un-run production project). The
+variable must be set: omitting it is refused with exit **5**
+(`PROD_BACKFILL_JOURNAL_PATH must name the journal produced by the backfill
+run`) — the CLI declining to guess a journal, not a broken rollback. A
+group/world-readable journal path, or one inside a repository root, is refused
+with exit **5** as well.
+
+**(b) Rollback candidate planning — after the backfill, still read-only.** Once
+D3 step 8 has written the run (and only then), the same command — still without
+`--apply` — reconstructs the candidates from the recorded run identity plus its
+immutable manifest digest and classifies each against the live row:
+
+```bash
+PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-run.jsonl \
+bun run storage:content:prod:backfill:rollback --run-id=<recorded run id>
+```
+
+Exit **0** when the plan is empty **or at least one** candidate is `READY`; exit
+**1** when candidates exist but none is `READY` (e.g. all `ALREADY_ROLLED_BACK`,
+or all conflicted). It must show no `BODY_CHANGED` / `POINTER_DRIFTED`
+candidate before any apply — read those states from the report's `summary`,
+never from the exit code alone. `--apply` is a separate, **CP-4**-gated mutation
+(D5 row 9) and is never part of readiness.
 
 ### 7. Obtain separate production backfill authorization — **CP-2**
 
@@ -585,19 +736,34 @@ select id, body_en_path, body_it_path
   from public.portfolio_posts order by id;
 ```
 
-For each pointer, download the object and re-hash the exact bytes; require the
-SHA-256 embedded in the key to equal both the stored object hash and the
-manifest `sourceSha256`:
+For each pointer, download the object and verify **HTTP success and the exact
+downloaded bytes** — never hash an error response. The object's name ends in the
+SHA-256 of its own content, so the download must hash back to its own key:
 
 ```bash
-# per entry, read-only
-curl -sS "$SUPABASE_URL/storage/v1/object/website-content/blog/<id>/<locale>/<sha>.md" \
-  -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
-  | sha256sum
+# per entry, read-only; the secret comes from the environment (see Secret hygiene)
+sha='<the 64 hex characters from the pointer key>'
+url="$SUPABASE_URL/storage/v1/object/website-content/blog/<id>/<locale>/$sha.md"
+out="/var/lib/cms-cutover/downloads/$sha.md"
+
+code=$(curl -sS --fail-with-body -o "$out" -w '%{http_code}' \
+  -H "apikey: $SUPABASE_SECRET_KEY" \
+  -H "Authorization: Bearer $SUPABASE_SECRET_KEY" \
+  "$url") || { echo "download failed (HTTP $code) — refusing to hash an error body"; exit 1; }
+[ "$code" = "200" ] || { echo "unexpected HTTP $code"; exit 1; }
+
+echo "$sha  $out" | sha256sum -c -    # exact bytes must equal the key's address
 ```
 
+`--fail-with-body` makes curl exit non-zero on 4xx/5xx, the explicit `$code`
+check pins the success status, and only then are the bytes hashed; a 404 body or
+an XML/JSON error page can never be compared against the key. Redirect output
+and downloads only into a `0700` directory outside both repositories (see
+*Secret hygiene*).
+
 Require: pointer count = 34, object count = 34, every object hash matches its
-key, and no orphan object exists without a committed pointer.
+key and the manifest `sourceSha256`, and no orphan object exists without a
+committed pointer.
 
 ---
 
@@ -667,15 +833,15 @@ conflict-free candidates.
 
 | # | Checkpoint / failure class | Preconditions | Expected state | Exact command | Verification | Safe stop | Recovery | New auth? |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **Infrastructure deployment failure** (schema install, D1 step 4) | CP-1 held; checksums match | One transaction committed | `BEGIN; \i <file>; COMMIT;` | D1 step 5 queries | Abort before COMMIT (transaction rollback leaves schema unchanged) | Re-run the single-file apply; the file is idempotent (`IF NOT EXISTS` / scoped `DO` blocks) | No (within CP-1) |
+| 1 | **Infrastructure deployment failure** (schema install, D1 step 4) | CP-1 held; checksums match | One transaction committed | `psql "$PROD_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/review/prod_markdown_backfill_cas.sql` | D1 step 5 queries | `ON_ERROR_STOP` aborts at the first error and the single transaction rolls back, leaving the schema unchanged | Re-run the same single-file apply; the file is idempotent (`IF NOT EXISTS` / scoped `DO` blocks) | No (within CP-1) |
 | 2 | **Bucket provisioning failure** (D1 step 6) | CP-1 held | Bucket `website-content` present, private | `CMS_PROD_STORAGE_APPLY_ACK=yes-apply-to-production bun run storage:content:prod:setup --apply` | D1 step 7 read-only status | Do not create by SQL; stop | Re-run `--apply`; if `drifted`, reconcile deliberately (never auto-repair) | No (within CP-1) |
-| 3 | **Security / RLS failure** (D1 step 8) | Bucket exists; pointer columns exist | Exactly one SELECT policy | `BEGIN; drop policy if exists …; create policy …; COMMIT;` | D1 step 9 `pg_policies` + anon download tests | Abort before COMMIT | Re-apply the policy transaction; drop the policy alone to revert (`drop policy if exists website_content_body_read on storage.objects;`) | No (within CP-1) |
+| 3 | **Security / RLS failure** (D1 step 8) | Bucket exists; pointer columns exist | Exactly one SELECT policy | `psql "$PROD_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f supabase/review/prod_website_content_storage_rls.sql` | D1 step 9 `pg_policies` + anon download tests | `ON_ERROR_STOP` aborts at the first error and the single transaction rolls back (the previous policy survives) | Re-run the same file; drop the policy alone to revert (`drop policy if exists website_content_body_read on storage.objects;`) | No (within CP-1) |
 | 4 | **Partial Markdown backfill** (D3 step 8) | CP-2 held; manifest digest recorded | Some `UPLOADED_AND_POINTED`, run stopped | Stop at first error (executor halts itself) | D3 step 10 per-entry pointer/object verify | Read flags stay off throughout; legacy serves | Fix the cause, then `storage:content:prod:backfill:exec --apply --resume --confirm-digest=<recorded>` | No (within CP-2) |
 | 5 | **Unexpected CMS edit** (during or after backfill) | — | Edited locale's pointer cleared by legacy-write pointer clearing | none (automatic) | Plan shows that locale pending/`BLOCKED` | Do not force a stale pointer | Re-migrate the edited locale via `--resume` or a fresh authorized run | New CP-2 if a new run/digest is required |
 | 6 | **Cache invalidation failure** (D3 step 8 / D4) | Pointer switched | Entry `REVALIDATION_FAILED`, post in pending list | `storage:content:prod:backfill:exec --apply --resume …` (retries pending invalidations) | Object/pointer unchanged; event returns `sent` | Reads still safe (pointers correct) | Retry invalidations without touching pointers/objects | No (retry of recorded work) |
 | 7 | **Storage-read failure** (D4) | Read flag enabled | Reads failing in one app | Disable the read flag and redeploy (`CMS_BODY_STORAGE_READ_ENABLED` / `WS_BODY_STORAGE_READ_ENABLED` unset) | Legacy body renders; no error | Immediate legacy fallback | Investigate (bucket/RLS/object), re-verify, re-enable | New CP-3 to re-enable |
 | 8 | **Failed application deployment** (D2/D4) | Prior revision known-good | New revision unhealthy | Roll back the app revision; keep flags off | Legacy path healthy | Reads off, legacy serves | Fix and redeploy; re-verify with reads disabled before re-enabling | New CP-3 to re-enable flags |
-| 9 | **Pointer rollback** (explicit) | CP-4 held; rollback plan shows zero conflicts | `ROLLED_BACK` pointers | `storage:content:prod:backfill:rollback --apply --run-id=<id> --expect-project-ref=mtvwynyikouqzmhqespl` + production rollback ack `CMS_PROD_BACKFILL_ROLLBACK_ACK=yes-rollback-to-production-backfill` | Per-entry restored pointer; no `BODY_CHANGED`/`POINTER_DRIFTED` | Stop on first conflict; restored entries stay | Re-invoke to resume; per-post invalidation after all locales restored | **Yes — CP-4** |
+| 9 | **Pointer rollback** (explicit) | CP-4 held; rollback plan shows zero conflicts | `ROLLED_BACK` pointers | `CMS_PROD_BACKFILL_ROLLBACK_ACK=yes-rollback-to-production-backfill PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-run.jsonl bun run storage:content:prod:backfill:rollback --apply --run-id=<id> --expect-project-ref=mtvwynyikouqzmhqespl` | Per-entry restored pointer; no `BODY_CHANGED`/`POINTER_DRIFTED` | Stop on first conflict; restored entries stay | Re-invoke to resume; per-post invalidation after all locales restored | **Yes — CP-4** |
 
 Rollback never modifies legacy Markdown, never performs Storage cleanup, and
 never removes the bucket or pointer columns. Any rollback candidate that drifted
