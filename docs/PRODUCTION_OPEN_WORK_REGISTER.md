@@ -6,7 +6,9 @@ record (`docs/PRODUCTION_DEPLOYMENT_RECORD.md`).
 
 Status values: **PASS** (verified with execution evidence) · **DEFERRED** (not
 yet due; checkpoint named) · **BLOCKED** (cannot proceed). Nothing here may be
-marked PASS without actual execution evidence.
+marked PASS without actual execution evidence. The authenticated CMS editor
+check (BW-6) was **not executed** during CP-1B: no authorized CMS session was
+available, so it is recorded as DEFERRED rather than PASS.
 
 `Mutation?` says whether closing the item requires a production mutation.
 
@@ -31,6 +33,7 @@ marked PASS without actual execution evidence.
 | BW-3 | Enable `CMS_BODY_POINTER_COLUMNS=true` **only** after independently confirmed schema readiness | PASS | Schema reverified (4 nullable columns, 4 validated canonical CHECKs, 2 secured CAS functions) before the change; the flag is now the **only** `CMS_BODY_*` variable in Production; redeployed to `dpl_9xSf1zh6RCSG5Wq9HeogEv2x94Bf` and health verified. Stale-pointer clearing and metadata-only preservation are covered by the automated suites; the live write-path proof remains BW-4 | No (flag change) | CP-1B |
 | BW-4 | CMS write-path proof that a legacy body edit cannot leave a stale pointer | DEFERRED | when migrated pointers exist, with separately authorized reversible content | Approved disposable/reversible test content only — never live content edited to manufacture evidence | Yes (test content) | CP-1B + explicit approval |
 | BW-5 | Production configuration and deployment-revision checks | PASS | Effective environment listing shows only the pointer flag present and the three read/dual-write flags absent (values are platform secrets, never printed); each production alias resolves to its recorded deployment ID; deployed revisions attributed via the GitHub commit-status API rather than deployment timestamps | No | CP-1B |
+| BW-6 | Authenticated CMS editor read-only observations (blog and portfolio editors, EN/IT body loading, hidden-post visibility, metadata and images, console/API errors) | DEFERRED | next authorized CMS session | Observations only — nothing saved or published, no content modified | No | CP-1B or later |
 
 ## CP-2 — authorized production Markdown backfill
 
