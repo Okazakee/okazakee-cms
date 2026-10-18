@@ -132,3 +132,21 @@ The production schema is intentionally not represented in
 - `docs/PRODUCTION_MARKDOWN_CUTOVER.md` — the operator runbook (D1–D6).
 - `docs/PRODUCTION_EVIDENCE_RECONCILIATION.md` — CP-0/CP-1 evidence reconciliation.
 - `docs/PRODUCTION_OPEN_WORK_REGISTER.md` — cumulative outstanding work.
+
+
+## Phase 14 CP-2 / CP-3 — execution record
+
+| Step | Result |
+|---|---|
+| CP-2 backfill | run `2ff5a39b-ffd8-4fec-a909-c67378d9afd1`, manifest `0ed666f425668578cb9249974865abdb54c52a89146049ec8f9247b0b63947ca`: 34/34 `UPLOADED_AND_POINTED`, 34 pointer switches, 34 immutable objects, 0 failures, 0 revalidation failures |
+| Independent verification | 34/34 objects downloaded and SHA-256-matched to the committed legacy bodies; 34/34 path hashes; 0 missing, 0 orphans; legacy 275 670 bytes unchanged; DEV unchanged |
+| Rollback readiness | read-only plan: 34 planned / 34 READY / 0 conflicts |
+| Live Storage RLS | anon referenced-visible **allowed**; anon referenced-hidden **denied** (service_role allowed); anon listing **0 objects** (root, `blog/`, `portfolio/5/`); anon write **denied** |
+| CP-3 CMS reads | `CMS_BODY_STORAGE_READ_ENABLED=true` → `dpl_Do83LQBExtDdfKTZSASVv8HWVWEc` (Ready, aliased) |
+| CP-3 WS reads | `WS_BODY_STORAGE_READ_ENABLED=true` → `dpl_E35oWnb18cyPu95RhSVyZiat475R` (Ready, aliased) |
+| CP-3 CMS dual-write | `CMS_BODY_DUAL_WRITE_ENABLED=true` → `dpl_BCbFAUDHZF9WRnhAjC3HLUrjJYfm` (Ready, aliased) |
+| Post-activation E2E | 24/24 visible pages 200 and clean, 10/10 hidden 404, mobile clean, text lengths identical to the pre-activation baseline |
+
+An accidental `service_role` write control during the RLS testing created one probe object
+(`rls-probe-does-not-persist.md`); it was deleted immediately (DELETE 200) and the bucket was
+re-verified at exactly 34 objects. No migration object was deleted, and no orphan remains.
