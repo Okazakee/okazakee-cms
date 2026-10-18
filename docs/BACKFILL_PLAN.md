@@ -181,3 +181,52 @@ appear there — so detail tags alone are sufficient. After invalidation the
 executor must confirm the public site actually reads Storage (request evidence:
 a `GET .../storage/v1/object/website-content-dev/<kind>/<id>/<locale>/<sha>.md`
 returning `text/markdown`), not merely that the page renders.
+
+## Production planner (Phase 13, gate C2)
+
+`src/libs/cms/storage/prodBackfillPlan.ts` is the production twin of this
+planner — the same classification, ordering, duplicate detection, summary
+arithmetic and manifest digest (shared through `backfillPlan.ts` and
+`backfillApply.manifestDigest`), with the values from the shared environment
+descriptor (`src/libs/cms/storage/backfillEnvironment.ts`: `public`,
+`website-content`, project `mtvwynyikouqzmhqespl`).
+
+```bash
+# declared state: inventory before the pointer columns exist, manifest after
+bun run storage:content:prod:backfill:plan
+
+# force one of the two operating states explicitly
+bun run storage:content:prod:backfill:plan --inventory
+bun run storage:content:prod:backfill:plan --manifest
+```
+
+Exit codes and the JSON shape match the DEV planner (`0` clean, `1` blockers,
+`2` invalid usage, `3` environment/project gate, `4` read failure), plus three
+production-only fields:
+
+- `mode` — `inventory` or `manifest`, and `modeSource` (`argument`/`flag`);
+- `digestKind` — `inventory-bodies-only` or `executable-manifest`. **Only the
+  executable manifest digest may be passed to `--apply --confirm-digest`**;
+- `baseline` — `blogRows`, `portfolioRows`, `posts`, `nonemptyBodies`,
+  `totalSourceBytes` (exact UTF-8 bytes) and the projection actually read.
+
+### Two operating states, one projection rule
+
+1. **`inventory`** runs BEFORE the additive schema is installed. It projects
+   exactly `id,body_en,body_it`, so it never names a column that does not exist
+   yet, and reports the production baseline. A missing pointer column is not a
+   failure here — the inventory cannot refer to one.
+2. **`manifest`** runs after the columns exist. It adds the pointers to the
+   projection and classifies every entry: `ALREADY_CURRENT`, `UPLOAD_AND_POINT`
+   (pending) or `BLOCKED` (conflicted: a non-canonical pointer, a pointer/body
+   disagreement, a duplicate row, or content over the 1 MiB limit).
+
+The state is selected by `CMS_BODY_POINTER_COLUMNS` (the same capability flag the
+CMS dual-write gate uses, enabled only when the value is exactly `true`), or
+explicitly on the command line. The flag is a deployment *assertion*: with it set
+and the columns absent, the manifest read fails loudly instead of planning
+against columns that are not there.
+
+Production always reads its OWN rows — the DEV manifest is never reused, and a
+digest computed from a pointer-free (inventory) view can never authorize an
+apply.

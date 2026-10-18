@@ -39,6 +39,10 @@ import {
   type BodyContentStorageApi,
 } from '@/libs/cms/storage/bodyContent';
 import type { BackfillCasApi, CasOutcome } from '@/libs/cms/storage/backfillCas';
+import {
+  DEV_BACKFILL_ENVIRONMENT,
+  validateRevalidationEndpointFor,
+} from '@/libs/cms/storage/backfillEnvironment';
 import type { BackfillPlanEntry } from '@/libs/cms/storage/backfillPlan';
 import {
   isSuccessfulOutcome,
@@ -1281,53 +1285,44 @@ export async function retryRollbackRevalidations(
 /* CLI argument contract                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Exact acknowledgement an operator must set in the environment to arm `--apply`. */
-export const APPLY_ACK_ENV = 'CMS_BACKFILL_APPLY_ACK';
-export const APPLY_ACK_VALUE = 'yes-apply-to-dev-staging';
+/**
+ * Exact acknowledgement an operator must set in the environment to arm `--apply`.
+ * The variable name and the value come from the shared descriptor, so the two
+ * environments can never accept each other's acknowledgement.
+ */
+export const APPLY_ACK_ENV = DEV_BACKFILL_ENVIRONMENT.applyAck.env;
+export const APPLY_ACK_VALUE = DEV_BACKFILL_ENVIRONMENT.applyAck.value;
 
 /** Acknowledgement required to arm rollback execution. */
-export const ROLLBACK_ACK_ENV = 'CMS_BACKFILL_ROLLBACK_ACK';
-export const ROLLBACK_ACK_VALUE = 'yes-rollback-dev-staging';
+export const ROLLBACK_ACK_ENV = DEV_BACKFILL_ENVIRONMENT.rollbackAck.env;
+export const ROLLBACK_ACK_VALUE = DEV_BACKFILL_ENVIRONMENT.rollbackAck.value;
 
 /** The only local DEV revalidation destination apply/rollback may target. */
-export const APPROVED_REVALIDATION_PATH = '/api/internal/content-revalidate';
+export const APPROVED_REVALIDATION_PATH =
+  DEV_BACKFILL_ENVIRONMENT.revalidation.allowedPath;
 
 /**
  * Validates the configured revalidation endpoint as an explicitly approved
  * local DEV destination. Anything else — a production host, a remote host, a
- * different path, a non-http scheme — is refused before any mutation.
+ * different path, a non-http scheme — is refused before any mutation. The
+ * production policy is a different branch of the same validator
+ * (`validateRevalidationEndpointFor`) and is never satisfied by these rules.
  */
 export function validateRevalidationEndpoint(rawUrl: string): string | null {
-  if (!rawUrl) return 'WEBSITE_REVALIDATION_URL is not configured';
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return `WEBSITE_REVALIDATION_URL '${rawUrl}' is not a valid URL`;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return `WEBSITE_REVALIDATION_URL must be http(s), got '${url.protocol}'`;
-  }
-  const host = url.hostname.toLowerCase();
-  const isLocal =
-    host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
-  if (!isLocal) {
-    return `WEBSITE_REVALIDATION_URL must target a local DEV host, got '${host}'`;
-  }
-  if (url.pathname !== APPROVED_REVALIDATION_PATH) {
-    return `WEBSITE_REVALIDATION_URL path must be '${APPROVED_REVALIDATION_PATH}', got '${url.pathname}'`;
-  }
-  return null;
+  return validateRevalidationEndpointFor(DEV_BACKFILL_ENVIRONMENT, rawUrl);
 }
+
+/** A gated apply: the reviewed digest, the project reference and the run choice. */
+export type ExecApplyArgs = {
+  mode: 'apply';
+  confirmDigest: string;
+  expectProjectRef: string;
+  runSelection: 'new' | 'resume';
+};
 
 export type ExecArgs =
   | { mode: 'preflight' }
-  | {
-      mode: 'apply';
-      confirmDigest: string;
-      expectProjectRef: string;
-      runSelection: 'new' | 'resume';
-    }
+  | ExecApplyArgs
   | { mode: 'invalid'; error: string };
 
 /**
@@ -1396,9 +1391,19 @@ export function parseExecArgs(argv: string[]): ExecArgs {
   return { mode: 'preflight' };
 }
 
+/** The read-only rollback plan (the default mode). */
+export type RollbackPlanArgs = { mode: 'plan'; runId?: string };
+
+/** A gated rollback execution: the run to undo and the project reference. */
+export type RollbackApplyArgs = {
+  mode: 'apply';
+  runId?: string;
+  expectProjectRef: string;
+};
+
 export type RollbackArgs =
-  | { mode: 'plan'; runId?: string }
-  | { mode: 'apply'; runId?: string; expectProjectRef: string }
+  | RollbackPlanArgs
+  | RollbackApplyArgs
   | { mode: 'invalid'; error: string };
 
 /**

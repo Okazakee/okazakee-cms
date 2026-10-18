@@ -1,21 +1,30 @@
 /**
- * Client for the REVIEW-ONLY atomic CAS functions staged in
- * `supabase/review/dev_markdown_backfill_cas.sql` (Phase 11B.1).
+ * Client for the atomic CAS functions.
  *
- * The functions are the only sanctioned way to switch a body pointer: the guard
- * (committed body hash + current pointer) lives inside the single UPDATE, so a
- * stale read can never repoint a row. This module never writes a pointer
- * itself; it only calls the CAS RPC and validates its arguments locally first,
- * mirroring the SQL checks so a bad call fails before the network.
+ * DEV uses `supabase/review/dev_markdown_backfill_cas.sql` (deployed to
+ * `dev_staging`); production uses `supabase/review/prod_markdown_backfill_cas.sql`
+ * once it is promoted. The two artifacts are the same implementation with the
+ * schema and function names changed, so this client is parameterised by the
+ * shared environment descriptor instead of being cloned. The functions are the
+ * only sanctioned way to switch a body pointer: the guard (committed body hash
+ * + current pointer) lives inside the single UPDATE, so a stale read can never
+ * repoint a row. This module never writes a pointer itself; it only calls the
+ * CAS RPC and validates its arguments locally first, mirroring the SQL checks
+ * so a bad call fails before the network.
  *
  * The functions are staged, not applied: until they exist in `dev_staging`,
- * every call fails and `probeCasReadiness()` reports `missing`.
+ * every call fails and `probeCasReadiness()` reports `missing`. The production
+ * functions have not been applied either, which is the same case.
  */
+import {
+  DEV_BACKFILL_ENVIRONMENT,
+  type BackfillEnvironmentSpec,
+} from '@/libs/cms/storage/backfillEnvironment';
 import type { BodyContentKind, BodyContentLocale } from '@/libs/cms/storage/bodyContent';
 
-/** Staged function names (dev_staging only). */
-export const BACKFILL_CAS_FUNCTION = 'dev_backfill_body_pointer_cas';
-export const BACKFILL_ROLLBACK_FUNCTION = 'dev_backfill_body_pointer_rollback';
+/** CAS function names for the DEV environment (and the historical exports). */
+export const BACKFILL_CAS_FUNCTION = DEV_BACKFILL_ENVIRONMENT.cas.forward;
+export const BACKFILL_ROLLBACK_FUNCTION = DEV_BACKFILL_ENVIRONMENT.cas.rollback;
 
 /** Sentinel entity used by the read-only readiness probe (always refused). */
 export const CAS_PROBE_ENTITY = '__probe__';
@@ -161,16 +170,21 @@ function casRow(result: { data: unknown; error: { message: string } | null }, fn
 }
 
 /**
- * Wraps a narrow RPC client into the CAS API. Arguments are validated locally
- * before every call; an invalid call is a thrown programming error, never a
- * silent no-op.
+ * Wraps a narrow RPC client into the CAS API for one environment. Arguments are
+ * validated locally before every call; an invalid call is a thrown programming
+ * error, never a silent no-op.
  */
-export function createBackfillCasApi(client: CasRpcClient): BackfillCasApi {
+export function createBackfillCasApi(
+  client: CasRpcClient,
+  spec: BackfillEnvironmentSpec = DEV_BACKFILL_ENVIRONMENT
+): BackfillCasApi {
+  const forward = spec.cas.forward;
+  const rollback = spec.cas.rollback;
   return {
     async pointerCas(args) {
       const invalid = validatePointerCasArgs(args);
       if (invalid) throw new Error(`[backfill-cas] refusing pointer CAS: ${invalid}`);
-      const result = await client.rpc(BACKFILL_CAS_FUNCTION, {
+      const result = await client.rpc(forward, {
         p_kind: args.kind,
         p_post_id: args.postId,
         p_locale: args.locale,
@@ -178,13 +192,13 @@ export function createBackfillCasApi(client: CasRpcClient): BackfillCasApi {
         p_expected_previous: args.expectedPrevious,
         p_new_path: args.newPath,
       });
-      return casRow(result, BACKFILL_CAS_FUNCTION);
+      return casRow(result, forward);
     },
 
     async pointerRollback(args) {
       const invalid = validateRollbackCasArgs(args);
       if (invalid) throw new Error(`[backfill-cas] refusing rollback CAS: ${invalid}`);
-      const result = await client.rpc(BACKFILL_ROLLBACK_FUNCTION, {
+      const result = await client.rpc(rollback, {
         p_kind: args.kind,
         p_post_id: args.postId,
         p_locale: args.locale,
@@ -192,7 +206,7 @@ export function createBackfillCasApi(client: CasRpcClient): BackfillCasApi {
         p_expected_sha256: args.expectedSha256,
         p_previous_path: args.previousPath,
       });
-      return casRow(result, BACKFILL_ROLLBACK_FUNCTION);
+      return casRow(result, rollback);
     },
   };
 }
@@ -202,21 +216,49 @@ export type CasReadiness =
   | { state: 'missing'; detail: string }
   | { state: 'unexpected'; detail: string };
 
+/** Which of the two staged/live functions is being probed. */
+export type CasFunctionRole = 'forward' | 'rollback';
+
 /**
- * Read-only readiness probe: calls the forward CAS with an entity the SQL
- * refuses before it can write anything (`__probe__`), so the presence of the
- * function can be confirmed without any possibility of mutation.
+ * The sentinel call for one function. Every argument is invalid on purpose so
+ * the SQL refuses at its first validation branch (`INVALID_ENTITY`) before the
+ * write statement is reached, which makes the probe safe on a live database.
  */
-export async function probeCasReadiness(client: CasRpcClient): Promise<CasReadiness> {
+const PROBE_ARGS: Record<CasFunctionRole, Record<string, unknown>> = {
+  forward: {
+    p_kind: CAS_PROBE_ENTITY,
+    p_post_id: 0,
+    p_locale: 'en',
+    p_expected_sha256: '0'.repeat(64),
+    p_expected_previous: null,
+    p_new_path: '',
+  },
+  rollback: {
+    p_kind: CAS_PROBE_ENTITY,
+    p_post_id: 0,
+    p_locale: 'en',
+    p_installed_path: '',
+    p_expected_sha256: '0'.repeat(64),
+    p_previous_path: null,
+  },
+};
+
+/**
+ * Read-only readiness probe: calls one CAS function with an entity the SQL
+ * refuses before it can write anything (`__probe__`), so the presence of the
+ * function — and, through PostgREST's argument-name resolution, of its exact
+ * signature — can be confirmed without any possibility of mutation. Missing,
+ * refused by privilege, or answering with an unexpected outcome all report as
+ * not-ready.
+ */
+export async function probeCasReadiness(
+  client: CasRpcClient,
+  spec: BackfillEnvironmentSpec = DEV_BACKFILL_ENVIRONMENT,
+  role: CasFunctionRole = 'forward'
+): Promise<CasReadiness> {
+  const fn = role === 'forward' ? spec.cas.forward : spec.cas.rollback;
   try {
-    const result = await client.rpc(BACKFILL_CAS_FUNCTION, {
-      p_kind: CAS_PROBE_ENTITY,
-      p_post_id: 0,
-      p_locale: 'en',
-      p_expected_sha256: '0'.repeat(64),
-      p_expected_previous: null,
-      p_new_path: '',
-    });
+    const result = await client.rpc(fn, PROBE_ARGS[role]);
     if (result.error) {
       return { state: 'missing', detail: result.error.message };
     }

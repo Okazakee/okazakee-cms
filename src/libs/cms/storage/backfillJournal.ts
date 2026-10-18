@@ -919,17 +919,26 @@ export function createMemoryJournal(now: () => Date = () => new Date()): Backfil
 
 /**
  * Validates a journal destination for a mutating run: absolute, outside the
- * repository, and not group/world readable when it already exists.
+ * repository (and any configured sibling root), and not group/world readable
+ * when it already exists.
+ *
+ * `additionalRoots` exists for the production tooling: the CMS checkout is the
+ * only root the process can infer, but the operator also works in the public
+ * site checkout, and a journal must never land in either. Every root is
+ * normalised the same way, so `/srv/repo/` and `/srv/repo` behave identically.
  */
 export async function assertJournalDestination(
   path: string,
   fs: JournalFsApi,
-  options: { repositoryRoot: string }
+  options: { repositoryRoot: string; additionalRoots?: string[] }
 ): Promise<void> {
   if (!path.startsWith('/')) {
     throw new Error(`[backfill-journal] BACKFILL_JOURNAL_PATH must be an absolute path, got '${path}'`);
   }
-  if (path.startsWith(`${options.repositoryRoot.replace(/\/+$/, '')}/`)) {
+  const roots = [options.repositoryRoot, ...(options.additionalRoots ?? [])]
+    .filter((root) => root !== '')
+    .map((root) => root.replace(/\/+$/, ''));
+  if (roots.some((root) => path === root || path.startsWith(`${root}/`))) {
     throw new Error('[backfill-journal] the journal must live outside the repository');
   }
   if (path.endsWith('/')) {

@@ -325,3 +325,131 @@ cache is incomplete work. Live invalidation was not performed in this phase.
    for the switched posts (request evidence), and keep the journal.
 5. If a cutover must be undone, run the rollback CAS per entry — never a manual
    pointer write.
+
+## Production executor and rollback (Phase 13, gates C3/C4)
+
+```bash
+# read-only: gates, production manifest + digest, readiness probes, journal state
+bun run storage:content:prod:backfill:exec --preflight
+
+# gated apply (new run, then explicit recovery of an interrupted one)
+PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-<date>.jsonl \
+CMS_PROD_BACKFILL_APPLY_ACK=yes-apply-to-production-backfill \
+CMS_PROD_REVALIDATION_ORIGINS=https://<approved-origin> \
+bun run storage:content:prod:backfill:exec \
+  --apply --new-run --confirm-digest=<manifest sha256> \
+  --expect-project-ref=mtvwynyikouqzmhqespl
+
+PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-<date>.jsonl \
+CMS_PROD_BACKFILL_APPLY_ACK=yes-apply-to-production-backfill \
+CMS_PROD_REVALIDATION_ORIGINS=https://<approved-origin> \
+bun run storage:content:prod:backfill:exec \
+  --apply --resume --confirm-digest=<recorded manifest sha256> \
+  --expect-project-ref=mtvwynyikouqzmhqespl
+
+# rollback: READ-ONLY plan by default, execution only on a separate invocation
+PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-<date>.jsonl \
+bun run storage:content:prod:backfill:rollback [--run-id=<id>]
+
+PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-<date>.jsonl \
+CMS_PROD_BACKFILL_ROLLBACK_ACK=yes-rollback-to-production-backfill \
+CMS_PROD_REVALIDATION_ORIGINS=https://<approved-origin> \
+bun run storage:content:prod:backfill:rollback --apply --run-id=<id> \
+  --expect-project-ref=mtvwynyikouqzmhqespl
+```
+
+Exit codes are the DEV convention: `0` settled, `1` blockers/failures, `2`
+invalid usage, `3` environment/project gate, `4` read or execution failure, `5`
+refused by a gate.
+
+### One implementation, two environments
+
+`src/libs/cms/storage/backfillEnvironment.ts` is the only place the two
+environments differ: APP_ENV, schema, project reference, bucket, CAS function
+names, projections, journal variable, acknowledgement pair and the
+cache-invalidation policy. Everything else is shared and DEV-proven: canonical
+SHA-256 paths and immutable uploads (`bodyContent`), atomic CAS
+(`backfillCas`, now parameterised by the descriptor), exact-byte verification,
+the durable JSONL journal (`backfillJournal`), fail-fast per-entry ordering,
+revalidation and the guarded rollback (`backfillApply`). The DEV entry points
+keep their pinned values by deriving them from the DEV descriptor.
+
+### Apply gates (checked in this order, before any mutation)
+
+1. `APP_ENV=production`, schema `public`, project
+   `mtvwynyikouqzmhqespl`, bucket `website-content`, server secret — checked
+   BEFORE the first network or database call.
+2. `CMS_PROD_BACKFILL_APPLY_ACK=yes-apply-to-production-backfill`. Both the
+   variable name and the value differ from DEV's, so `yes-apply-to-dev-staging`
+   is refused by construction.
+3. `--expect-project-ref` equal to the configured project.
+4. `PROD_BACKFILL_JOURNAL_PATH` (a production-specific variable): absolute,
+   outside the CMS checkout and every `CMS_PROD_BACKFILL_FORBIDDEN_ROOTS` root,
+   not group/world readable, and the journal readable and trustworthy.
+   Convention: `/var/lib/cms-backfill/prod/backfill-<date>.jsonl`, created `0600`.
+5. `WEBSITE_REVALIDATION_URL` on an HTTPS origin listed verbatim in
+   `CMS_PROD_REVALIDATION_ORIGINS` (comma-separated bare origins), on the exact
+   route `/api/internal/content-revalidate`, plus `WEBSITE_REVALIDATION_SECRET`.
+   There is NO default origin — the DEV local-HTTP rules are never consulted for
+   production, so the tooling cannot invent a hostname.
+6. Readiness probes (all read-only): pointer columns present and every committed
+   pointer canonical; both CAS functions answering their `__probe__` refusal
+   (exact signature); the CAS functions NOT callable through the publishable
+   (anon) path; `website-content` present, private, 1 MiB, `text/markdown`; the
+   publishable path enumerating no object in that bucket. The four CHECK
+   constraints are not observable through PostgREST: they are covered by the
+   reviewed artifact's checksum and its isolated PostgreSQL suite, and their
+   effect is observed through canonicality of the committed pointers.
+7. A fresh production manifest digest (`--confirm-digest`) and a manifest with no
+   blockers; for `--resume`, the digest recorded with the run's immutable
+   manifest, which is what the resume executes from.
+
+### Execution and stop behaviour
+
+Strictly sequential fail-fast, per entry: verify the source Markdown → verify the
+intended immutable path → upload without upsert → download and hash-verify → run
+the production CAS → verify the committed pointer → send the signed invalidation
+(one per post, after both locales) → durably record. On the first unexpected
+failure the run stops starting new work, preserves every committed pointer, every
+object and the journal, reports the failed entry and the remaining ones, exits
+nonzero, and never resumes, rolls back or deletes anything by itself. A retry
+(`--apply --resume`) re-verifies the database and Storage, keeps the original
+immutable manifest, and records each attempt without contradicting the earlier
+one.
+
+### Rollback
+
+The default is READ-ONLY. The candidate set is reconstructed from the recorded
+run (stable `runId` + immutable manifest digest) and verified against the live
+row: the committed pointer must still be the key that run installed and the
+committed body must still hash to the recorded source. A conflicting CMS edit
+(stale pointer or changed body) is refused, never forced; legacy Markdown is
+never written; no Storage object is ever removed; every restored entry is
+recorded and each post is invalidated once after ALL its locales are restored.
+Execution requires a separate invocation with
+`CMS_PROD_BACKFILL_ROLLBACK_ACK=yes-rollback-to-production-backfill`, the
+environment tuple, the project reference, the journal and the approved endpoint.
+An interrupted rollback is recovered safely: already-restored entries are
+classified as such and never re-written, and pending rollback invalidations are
+retried (order-aware: only an acknowledgement written after the rollback record
+settles it).
+
+### Tests
+
+- `src/libs/cms/storage/backfillEnvironment.test.ts` — descriptor pinning, the
+  shared environment gate, the origin allowlist and both revalidation policies.
+- `src/libs/cms/storage/prodBackfillGates.test.ts` — the journal/endpoint/secret
+  gates and DEV-value cross-refusals.
+- `src/libs/cms/storage/prodBackfillPlan.test.ts` — inventory vs manifest, the
+  projection rule, conflicts, digest determinism, CLI exit codes.
+- `src/libs/cms/storage/prodBackfillReadiness.test.ts` — every readiness probe.
+- `src/utils/cms/prodBackfillCli.test.ts` — the full gate matrix, read-only
+  preflight/plan, resume, and spawned commands proving each refusal precedes the
+  network.
+- `src/testing/sql/prodBackfillExecutor.test.ts` and
+  `prodBackfillRollback.test.ts` — real-Postgres (PGlite) fixtures carrying the
+  reviewed production artifact, with injected Storage and signed invalidation:
+  fully/partially/fully migrated states, edits before and after the switch,
+  pointer clearing, metadata-only edits, missing/corrupt objects, wrong journal
+  identity, interruptions before upload / after upload / after CAS / after the
+  pointer verification / during invalidation, resume, and the guarded rollback.

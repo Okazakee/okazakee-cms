@@ -24,21 +24,32 @@ import {
   type BodyContentKind,
   type BodyContentLocale,
 } from '@/libs/cms/storage/bodyContent';
+import {
+  DEV_BACKFILL_ENVIRONMENT,
+  projectRefFromUrl,
+} from '@/libs/cms/storage/backfillEnvironment';
 import { CONTENT_BUCKET_DEV } from '@/libs/cms/storage/contentBucket';
+
+/** Re-exported: the project-reference parser is shared by every entry point. */
+export { projectRefFromUrl };
 
 /** CLI name (matches the `package.json` script). */
 export const BACKFILL_PLAN_COMMAND = 'storage:content:dev:backfill:plan';
 
-/** The only project this dev-only planner may ever run against. */
-export const EXPECTED_DEV_PROJECT_REF = 'mtvwynyikouqzmhqespl';
+/**
+ * The dev environment's pinned values live in the shared descriptor
+ * (`backfillEnvironment.ts`) so the DEV and production tooling cannot drift
+ * apart. These names are kept because the DEV entry points and tests use them.
+ */
+export const EXPECTED_DEV_PROJECT_REF = DEV_BACKFILL_ENVIRONMENT.projectRef;
 
 /** The only schema and destination bucket this planner may read/plan for. */
-export const BACKFILL_PLAN_SCHEMA = 'dev_staging';
-export const BACKFILL_PLAN_BUCKET = CONTENT_BUCKET_DEV;
+export const BACKFILL_PLAN_SCHEMA = DEV_BACKFILL_ENVIRONMENT.schema;
+export const BACKFILL_PLAN_BUCKET = DEV_BACKFILL_ENVIRONMENT.bucket;
 
 /** Explicit projection — the planner reads bodies and pointers, nothing else. */
 export const BACKFILL_PLAN_COLUMNS =
-  'id,body_en,body_it,body_en_path,body_it_path';
+  DEV_BACKFILL_ENVIRONMENT.projections.pointers;
 
 /** Stable manifest order: blog before portfolio, EN before IT. */
 export const BACKFILL_PLAN_KINDS: BodyContentKind[] = ['blog', 'portfolio'];
@@ -114,20 +125,6 @@ export type BackfillPlanEnv = {
   supabaseUrl: string;
   hasServerSecret: boolean;
 };
-
-/** `https://<ref>.supabase.co` -> `<ref>`; null when the URL is not usable. */
-export function projectRefFromUrl(rawUrl: string): string | null {
-  if (!rawUrl) return null;
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== 'https:') return null;
-  const match = /^([a-z0-9]{20})\.supabase\.(co|in)$/.exec(url.hostname);
-  return match ? match[1] : null;
-}
 
 /**
  * Fail-closed environment gate: this planner is dev-only and project-bound.
@@ -515,21 +512,32 @@ function toPostBodyRow(row: unknown): PostBodyRow {
  * Wraps a read-only client into the planner's reader. Every call is a plain
  * `select(...).order('id')` on an explicit projection; a Postgrest error is
  * rethrown with its message.
+ *
+ * The projection and schema label are the only knobs: the production inventory
+ * runs before the pointer columns exist, so it must ask for `id,body_en,body_it`
+ * and never name a column the schema does not have. A row missing a projected
+ * key reads as NULL, so a bodies-only projection is a pointer-free row.
  */
-export function createPostBodyReader(client: ReadOnlyPostBodyClient): PostBodyReader {
+export function createPostBodyReader(
+  client: ReadOnlyPostBodyClient,
+  options: { columns?: string; schema?: string; label?: string } = {}
+): PostBodyReader {
+  const columns = options.columns ?? BACKFILL_PLAN_COLUMNS;
+  const schema = options.schema ?? BACKFILL_PLAN_SCHEMA;
+  const label = options.label ?? 'backfill-plan';
   return {
     async listPostBodies(kind) {
       const table = POST_BODY_TABLES[kind];
       if (!table) {
-        throw new Error(`[backfill-plan] unknown entity '${String(kind)}'`);
+        throw new Error(`[${label}] unknown entity '${String(kind)}'`);
       }
       const result = await client
         .from(table)
-        .select(BACKFILL_PLAN_COLUMNS)
+        .select(columns)
         .order('id', { ascending: true });
       if (result.error) {
         throw new Error(
-          `[backfill-plan] reading ${BACKFILL_PLAN_SCHEMA}.${table} failed: ${result.error.message}`
+          `[${label}] reading ${schema}.${table} failed: ${result.error.message}`
         );
       }
       return (result.data ?? []).map(toPostBodyRow);
