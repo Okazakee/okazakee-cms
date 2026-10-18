@@ -11,8 +11,10 @@
     "lint-fix": "biome check . --write --unsafe",
     "format": "biome format . --write",
     "test": "vitest run",
+    "test:prod-infra": "vitest run src/testing/sql/productionMarkdownBackfillCas.test.ts src/testing/sql/productionContentStorageReadPolicy.test.ts src/utils/cms/prodStorageSetup.test.ts",
     "db:dev:check": "bun src/utils/cms/devMigrations.ts check",
     "storage:content:dev:setup": "bun src/utils/cms/storageSetup.ts",
+    "storage:content:prod:setup": "bun src/utils/cms/prodStorageSetup.ts",
     "storage:content:dev:backfill:plan": "bun src/utils/cms/backfillPlan.ts",
     "storage:content:dev:backfill:exec": "bun src/utils/cms/backfillExec.ts",
     "storage:content:dev:backfill:rollback": "bun src/utils/cms/backfillRollback.ts"
