@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BODY_DUAL_WRITE_FLAG,
+  POINTER_COLUMNS_FLAG,
   resolveBodyDualWrite,
 } from '@/libs/cms/bodyDualWrite';
 
@@ -16,7 +17,7 @@ describe('body dual-write feature gate', () => {
         appEnv: 'development',
         schema: 'dev_staging',
       })
-    ).toEqual({ mode: 'disabled', devClone: true });
+    ).toEqual({ mode: 'disabled', devClone: true, pointerColumns: true });
 
     expect(
       resolveBodyDualWrite({
@@ -24,7 +25,7 @@ describe('body dual-write feature gate', () => {
         appEnv: 'production',
         schema: 'public',
       })
-    ).toEqual({ mode: 'disabled', devClone: false });
+    ).toEqual({ mode: 'disabled', devClone: false, pointerColumns: false });
   });
 
   it('enables only for the dev clone and names the dev content bucket', () => {
@@ -93,7 +94,42 @@ describe('body dual-write feature gate', () => {
     expect(decision.mode).toBe('invalid');
   });
 
-  it('exposes the flag name used by the environment', () => {
+  it('exposes the flag names used by the environment', () => {
     expect(BODY_DUAL_WRITE_FLAG).toBe('CMS_BODY_DUAL_WRITE_ENABLED');
+    expect(POINTER_COLUMNS_FLAG).toBe('CMS_BODY_POINTER_COLUMNS');
+  });
+
+  it('declares pointer columns only in the two valid pairings', () => {
+    expect(
+      resolveBodyDualWrite({ enabled: false, appEnv: 'development', schema: 'dev_staging' })
+    ).toMatchObject({ mode: 'disabled', devClone: true, pointerColumns: true });
+    expect(
+      resolveBodyDualWrite({ enabled: false, appEnv: 'production', schema: 'public' })
+    ).toMatchObject({ mode: 'disabled', devClone: false, pointerColumns: false });
+    expect(
+      resolveBodyDualWrite({
+        enabled: false,
+        appEnv: 'production',
+        schema: 'public',
+        pointerColumns: true,
+      })
+    ).toMatchObject({ mode: 'disabled', devClone: false, pointerColumns: true });
+    // A declared capability in a mismatched environment fails closed.
+    expect(
+      resolveBodyDualWrite({
+        enabled: false,
+        appEnv: 'development',
+        schema: 'public',
+        pointerColumns: true,
+      }).mode
+    ).toBe('invalid');
+    expect(
+      resolveBodyDualWrite({
+        enabled: false,
+        appEnv: 'production',
+        schema: 'dev_staging',
+        pointerColumns: true,
+      }).mode
+    ).toBe('invalid');
   });
 });

@@ -280,6 +280,48 @@ describe('portfolio dual-write: batch update', () => {
     expect(contentObjectKeys(h.fake)).toEqual([]);
   });
 
+  it('clears only the edited pointer once production declares the columns', async () => {
+    vi.stubEnv('APP_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'false');
+    vi.stubEnv('CMS_BODY_POINTER_COLUMNS', 'true');
+    h.fake = fake(seeded());
+
+    const result = await portfolioActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [update({ body_en: '# new en' })],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const row = h.fake.state.tables.portfolio_posts[0];
+    expect(row?.body_en).toBe('# new en');
+    expect(row?.body_en_path).toBeNull();
+    expect(row?.body_it_path).toBe(`portfolio/11/it/${'b'.repeat(64)}.md`);
+    expect(contentObjectKeys(h.fake)).toEqual([]);
+  });
+
+  it('keeps both pointers on a metadata-only update with the capability declared', async () => {
+    vi.stubEnv('APP_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'false');
+    vi.stubEnv('CMS_BODY_POINTER_COLUMNS', 'true');
+    h.fake = fake(seeded());
+
+    const result = await portfolioActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [update({ title_en: 'Renamed' })],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const row = h.fake.state.tables.portfolio_posts[0];
+    expect(row?.body_en_path).toBe(`portfolio/11/en/${'a'.repeat(64)}.md`);
+    expect(row?.body_it_path).toBe(`portfolio/11/it/${'b'.repeat(64)}.md`);
+  });
+
   it('initialises a NULL pointer when the body is supplied', async () => {
     vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
     h.fake = fake({

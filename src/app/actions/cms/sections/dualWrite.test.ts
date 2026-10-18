@@ -238,6 +238,50 @@ describe('blog dual-write: batch update', () => {
     expect(contentObjectKeys(h.fake)).toEqual([]);
   });
 
+  it('clears only the edited pointer once production declares the columns', async () => {
+    vi.stubEnv('APP_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'false');
+    vi.stubEnv('CMS_BODY_POINTER_COLUMNS', 'true');
+    h.fake = fake(seeded());
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [update({ body_en: '# new en' })],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const row = h.fake.state.tables.blog_posts[0];
+    // The legacy body moved, so the old pointer must not survive it.
+    expect(row?.body_en).toBe('# new en');
+    expect(row?.body_en_path).toBeNull();
+    // The untouched locale keeps its pointer, and nothing was uploaded.
+    expect(row?.body_it_path).toBe(`blog/7/it/${'b'.repeat(64)}.md`);
+    expect(contentObjectKeys(h.fake)).toEqual([]);
+  });
+
+  it('keeps both pointers on a metadata-only update with the capability declared', async () => {
+    vi.stubEnv('APP_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'false');
+    vi.stubEnv('CMS_BODY_POINTER_COLUMNS', 'true');
+    h.fake = fake(seeded());
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [update({ title_en: 'Renamed' })],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const row = h.fake.state.tables.blog_posts[0];
+    expect(row?.body_en_path).toBe(`blog/7/en/${'a'.repeat(64)}.md`);
+    expect(row?.body_it_path).toBe(`blog/7/it/${'b'.repeat(64)}.md`);
+  });
+
   it('leaves the committed pointers intact when the DB update fails', async () => {
     vi.stubEnv('CMS_BODY_DUAL_WRITE_ENABLED', 'true');
     h.fake = fake(seeded(), {

@@ -660,11 +660,12 @@ async function batchPublishBlog(
       let oldBodies: Array<string | undefined> = [];
       let bodyStaged: string[] = [];
 
-      // Pointer columns exist only in the dev clone; production must never
+      // Pointer columns exist in the dev clone and in production once the
+      // capability is declared; before that migration production must never
       // reference them, so the projection depends on the resolved mode.
       const pointerColumnsAvailable =
         dualWrite.mode === 'enabled' ||
-        (dualWrite.mode === 'disabled' && dualWrite.devClone);
+        (dualWrite.mode === 'disabled' && dualWrite.pointerColumns);
       // Runtime-chosen projection: production must never reference the pointer
       // columns, so the superset row shape is asserted once below.
       const priorSelect: string = pointerColumnsAvailable
@@ -802,10 +803,12 @@ async function batchPublishBlog(
             continue;
           }
         }
-      } else if (dualWrite.mode === 'disabled' && dualWrite.devClone) {
-        // Stale-pointer safeguard: with dual-write off in the dev clone, a
-        // legacy body edit must not leave a pointer to the previous Markdown.
-        // Production never reaches this branch.
+      } else if (dualWrite.mode === 'disabled' && dualWrite.pointerColumns) {
+        // Stale-pointer safeguard: with dual-write off but the pointer
+        // columns present, a legacy body edit must not leave a pointer to the
+        // previous Markdown (a later Storage-first read would then disagree
+        // with the committed body). Applies to the dev clone and to production
+        // once CMS_BODY_POINTER_COLUMNS declares the columns.
         for (const request of modifiedLocales(updateData)) {
           dbUpdate[`body_${request.locale}_path`] = null;
         }
@@ -1204,7 +1207,7 @@ async function updateBlog(
     const admin = getAdminClient();
     const pointerColumnsAvailable =
       dualWrite.mode === 'enabled' ||
-      (dualWrite.mode === 'disabled' && dualWrite.devClone);
+      (dualWrite.mode === 'disabled' && dualWrite.pointerColumns);
     const priorSelect: string = pointerColumnsAvailable
       ? 'id, body_en, body_it, body_en_path, body_it_path'
       : 'id';
@@ -1246,7 +1249,7 @@ async function updateBlog(
         );
         Object.assign(dbUpdate, bodyPointerUpdates(storedBodies));
       }
-    } else if (dualWrite.mode === 'disabled' && dualWrite.devClone) {
+    } else if (dualWrite.mode === 'disabled' && dualWrite.pointerColumns) {
       // Stale-pointer safeguard in the dev clone only; production never
       // references the pointer columns.
       for (const request of modifiedLocales(data)) {
