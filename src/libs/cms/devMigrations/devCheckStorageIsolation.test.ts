@@ -13,10 +13,11 @@ import {
   loadRegistry,
   PROD_CAS_FUNCTIONS_QUERY,
   PROD_CONSTRAINTS_QUERY,
+  PROD_LEGACY_BODY_COLUMNS_QUERY,
   PROD_POINTER_COLUMNS_QUERY,
   type ProdCasFunctionFact,
+  type ProdColumnFact,
   type ProdConstraintFact,
-  type ProdPointerColumnFact,
   runDevCheck,
   STORAGE_BUCKETS_QUERY,
   STORAGE_POLICIES_QUERY,
@@ -114,7 +115,7 @@ const PROD_BINDINGS = bindings('website_content_body_read', [
   'public.portfolio_posts',
 ]);
 
-const PROD_COLUMNS: ProdPointerColumnFact[] = [
+const PROD_COLUMNS: ProdColumnFact[] = [
   'blog_posts',
   'portfolio_posts',
 ].flatMap((table_name) =>
@@ -147,6 +148,11 @@ const PROD_CONSTRAINTS: ProdConstraintFact[] = [
   pointerCheck('portfolio_posts', 'body_it_path', 'it', 'portfolio'),
 ];
 
+/**
+ * The RETIRED CAS pair, as the pre-contraction project reported it. Present in
+ * the fixtures only to prove that a surviving function FAILS the contracted
+ * contract; the contracted state has neither.
+ */
 const PROD_FUNCTIONS: ProdCasFunctionFact[] = [
   {
     name: 'prod_backfill_body_pointer_cas',
@@ -164,6 +170,23 @@ const PROD_FUNCTIONS: ProdCasFunctionFact[] = [
   },
 ];
 
+/**
+ * The RETIRED legacy body columns, as the pre-contraction project reported
+ * them. Present in the fixtures only to prove that a surviving column FAILS the
+ * contracted contract; the contracted state has neither.
+ */
+const PROD_LEGACY_COLUMNS: ProdColumnFact[] = [
+  'blog_posts',
+  'portfolio_posts',
+].flatMap((table_name) =>
+  ['body_en', 'body_it'].map((name) => ({
+    table_name,
+    name,
+    formatted_type: 'text',
+    nullable: true,
+  }))
+);
+
 /** The DEV plane only: the pre-CP-1 lifecycle state. */
 const PRE_CP1_FACTS: ContentStorageFacts = {
   buckets: [...ASSET_BUCKETS, DEV_BUCKET],
@@ -171,21 +194,23 @@ const PRE_CP1_FACTS: ContentStorageFacts = {
   bindings: DEV_BINDINGS,
   prodColumns: [],
   prodConstraints: [],
+  prodLegacyColumns: [],
   prodFunctions: [],
 };
 
-/** Everything CP-1 installed, exactly as the live project reports it. */
-const POST_CP1_FACTS: ContentStorageFacts = {
+/** The CONTRACTED production plane, exactly as the live project reports it. */
+const CONTRACTED_FACTS: ContentStorageFacts = {
   buckets: [...ASSET_BUCKETS, PROD_BUCKET, DEV_BUCKET],
   policies: [PROD_POLICY, DEV_POLICY],
   bindings: [...PROD_BINDINGS, ...DEV_BINDINGS],
   prodColumns: PROD_COLUMNS,
   prodConstraints: PROD_CONSTRAINTS,
-  prodFunctions: PROD_FUNCTIONS,
+  prodLegacyColumns: [],
+  prodFunctions: [],
 };
 
 function facts(overrides: Partial<ContentStorageFacts>): ContentStorageFacts {
-  return { ...POST_CP1_FACTS, ...overrides };
+  return { ...CONTRACTED_FACTS, ...overrides };
 }
 
 function evaluate(f: ContentStorageFacts): CheckFinding[] {
@@ -215,6 +240,9 @@ describe('content Storage contract — lifecycle states', () => {
     ).toContain('valid pre-CP-1');
     expect(detailOf(findings, 'S-prod-columns')).toContain('valid pre-CP-1');
     expect(detailOf(findings, 'S-prod-checks')).toContain('valid pre-CP-1');
+    expect(detailOf(findings, 'S-prod-legacy-columns')).toContain(
+      'contraction applied'
+    );
     expect(detailOf(findings, 'S-prod-cas')).toContain('valid pre-CP-1');
     expect(detailOf(findings, 'S-prod-consistency')).toContain(
       'absent in full'
@@ -223,8 +251,8 @@ describe('content Storage contract — lifecycle states', () => {
     expect(findings.some((f) => f.id === 'S-bucket-prod-absent')).toBe(false);
   });
 
-  it('accepts a full post-CP-1 state and certifies every production artifact', () => {
-    const findings = evaluate(POST_CP1_FACTS);
+  it('accepts a CONTRACTED production plane and certifies every remaining artifact', () => {
+    const findings = evaluate(CONTRACTED_FACTS);
     expect(fails(findings)).toEqual([]);
     expect(detailOf(findings, 'S-bucket-prod')).toContain(
       'website-content: private, 1048576B limit, text/markdown only'
@@ -237,11 +265,17 @@ describe('content Storage contract — lifecycle states', () => {
     ).toContain('binds only public.blog_posts + public.portfolio_posts');
     expect(detailOf(findings, 'S-prod-columns')).toContain('4 nullable text');
     expect(detailOf(findings, 'S-prod-checks')).toContain('4 canonical');
+    expect(detailOf(findings, 'S-prod-legacy-columns')).toContain(
+      'no legacy body_en/body_it columns'
+    );
     expect(detailOf(findings, 'S-prod-cas')).toContain(
-      'EXECUTE to service_role only'
+      'no prod_backfill_* CAS functions'
     );
     expect(detailOf(findings, 'S-prod-consistency')).toContain(
-      'plane complete'
+      'plane contracted'
+    );
+    expect(detailOf(findings, 'S-prod-consistency')).toContain(
+      'legacy body columns and prod_backfill_* CAS functions absent'
     );
     expect(detailOf(findings, 'S-bucket-isolation')).toContain('stay distinct');
     expect(
@@ -253,7 +287,7 @@ describe('content Storage contract — lifecycle states', () => {
   });
 
   it('keeps the completed DEV migration valid alongside the production plane', () => {
-    const findings = evaluate(POST_CP1_FACTS);
+    const findings = evaluate(CONTRACTED_FACTS);
     for (const id of [
       'S-bucket',
       'S-website_content_dev_body_read',
@@ -493,17 +527,69 @@ describe('content Storage contract — cross-environment contamination', () => {
 });
 
 describe('content Storage contract — partial production infrastructure', () => {
-  it('fails when the bucket exists but the CAS functions are missing', () => {
-    const findings = evaluate(facts({ prodFunctions: [] }));
+  it('fails when a contracted plane carries a resurrected CAS function', () => {
+    const findings = evaluate(facts({ prodFunctions: PROD_FUNCTIONS }));
     expect(findings.find((f) => f.id === 'S-prod-cas')?.status).toBe('FAIL');
     expect(detailOf(findings, 'S-prod-cas')).toContain(
       'prod_backfill_body_pointer_cas'
+    );
+    expect(detailOf(findings, 'S-prod-cas')).toContain(
+      'prod_backfill_body_pointer_rollback'
+    );
+    expect(detailOf(findings, 'S-prod-cas')).toContain('still present');
+    expect(findings.find((f) => f.id === 'S-prod-consistency')?.status).toBe(
+      'FAIL'
+    );
+    expect(detailOf(findings, 'S-prod-consistency')).toContain(
+      'retired CAS functions'
+    );
+    // The rest of the plane is intact: only the contraction artifact is wrong.
+    expect(detailOf(findings, 'S-prod-columns')).toContain('4 nullable text');
+    expect(detailOf(findings, 'S-prod-checks')).toContain('4 canonical');
+    expect(detailOf(findings, 'S-prod-legacy-columns')).toContain(
+      'no legacy body_en/body_it columns'
+    );
+  });
+
+  it('fails when a contracted plane still carries a retired legacy body column', () => {
+    const findings = evaluate(
+      facts({ prodLegacyColumns: PROD_LEGACY_COLUMNS })
+    );
+    expect(findings.find((f) => f.id === 'S-prod-legacy-columns')?.status).toBe(
+      'FAIL'
+    );
+    expect(detailOf(findings, 'S-prod-legacy-columns')).toContain(
+      'blog_posts.body_en'
+    );
+    expect(detailOf(findings, 'S-prod-legacy-columns')).toContain(
+      'portfolio_posts.body_it'
     );
     expect(findings.find((f) => f.id === 'S-prod-consistency')?.status).toBe(
       'FAIL'
     );
     expect(detailOf(findings, 'S-prod-consistency')).toContain(
-      '2 CAS functions'
+      'retired legacy body columns'
+    );
+  });
+
+  it('fails when a legacy body column survives without the contracted plane', () => {
+    const findings = evaluate({
+      buckets: [...ASSET_BUCKETS, DEV_BUCKET],
+      policies: [DEV_POLICY],
+      bindings: DEV_BINDINGS,
+      prodColumns: [],
+      prodConstraints: [],
+      prodLegacyColumns: PROD_LEGACY_COLUMNS,
+      prodFunctions: [],
+    });
+    expect(findings.find((f) => f.id === 'S-prod-legacy-columns')?.status).toBe(
+      'FAIL'
+    );
+    expect(findings.find((f) => f.id === 'S-prod-consistency')?.status).toBe(
+      'FAIL'
+    );
+    expect(detailOf(findings, 'S-prod-consistency')).toContain(
+      'unexpected=[retired legacy body columns]'
     );
   });
 
@@ -553,32 +639,6 @@ describe('content Storage contract — partial production infrastructure', () =>
     );
   });
 
-  it('fails on an unsafe search_path or a public EXECUTE grant', () => {
-    const unsafe = evaluate(
-      facts({
-        prodFunctions: [
-          { ...PROD_FUNCTIONS[0], proconfig: 'search_path=public' },
-          PROD_FUNCTIONS[1],
-        ],
-      })
-    );
-    expect(detailOf(unsafe, 'S-prod-cas')).toContain('unsafe search_path');
-    const exposed = evaluate(
-      facts({
-        prodFunctions: [
-          {
-            ...PROD_FUNCTIONS[0],
-            acl_raw:
-              '{postgres=X/postgres,anon=X/postgres,service_role=X/postgres}',
-          },
-          PROD_FUNCTIONS[1],
-        ],
-      })
-    );
-    expect(detailOf(exposed, 'S-prod-cas')).toContain('EXECUTE grantees got=');
-    expect(detailOf(exposed, 'S-prod-cas')).toContain('anon');
-  });
-
   it('fails on a weakened production pointer CHECK', () => {
     const findings = evaluate(
       facts({
@@ -617,18 +677,27 @@ describe('content Storage contract — partial production infrastructure', () =>
 });
 
 describe('checkContentStorageIsolation — query wiring', () => {
-  it('reads all six catalog facts and evaluates the injected state', async () => {
+  it('reads all seven catalog facts and evaluates the injected state', async () => {
     const seen: string[] = [];
     const queryJson = async (sql: string): Promise<unknown[]> => {
       seen.push(sql);
-      if (sql === STORAGE_BUCKETS_QUERY) return POST_CP1_FACTS.buckets;
-      if (sql === STORAGE_POLICIES_QUERY) return POST_CP1_FACTS.policies;
+      if (sql === STORAGE_BUCKETS_QUERY) return CONTRACTED_FACTS.buckets;
+      if (sql === STORAGE_POLICIES_QUERY) return CONTRACTED_FACTS.policies;
       if (sql === STORAGE_POLICY_RELATION_BINDINGS_QUERY) {
-        return POST_CP1_FACTS.bindings;
+        return CONTRACTED_FACTS.bindings;
       }
-      if (sql === PROD_POINTER_COLUMNS_QUERY) return POST_CP1_FACTS.prodColumns;
-      if (sql === PROD_CONSTRAINTS_QUERY) return POST_CP1_FACTS.prodConstraints;
-      if (sql === PROD_CAS_FUNCTIONS_QUERY) return POST_CP1_FACTS.prodFunctions;
+      if (sql === PROD_POINTER_COLUMNS_QUERY) {
+        return CONTRACTED_FACTS.prodColumns;
+      }
+      if (sql === PROD_CONSTRAINTS_QUERY) {
+        return CONTRACTED_FACTS.prodConstraints;
+      }
+      if (sql === PROD_LEGACY_BODY_COLUMNS_QUERY) {
+        return CONTRACTED_FACTS.prodLegacyColumns;
+      }
+      if (sql === PROD_CAS_FUNCTIONS_QUERY) {
+        return CONTRACTED_FACTS.prodFunctions;
+      }
       throw new Error(`unexpected query: ${sql.slice(0, 60)}`);
     };
     const findings: CheckFinding[] = [];
@@ -639,6 +708,7 @@ describe('checkContentStorageIsolation — query wiring', () => {
       STORAGE_POLICY_RELATION_BINDINGS_QUERY,
       PROD_POINTER_COLUMNS_QUERY,
       PROD_CONSTRAINTS_QUERY,
+      PROD_LEGACY_BODY_COLUMNS_QUERY,
       PROD_CAS_FUNCTIONS_QUERY,
     ]);
     expect(fails(findings)).toEqual([]);

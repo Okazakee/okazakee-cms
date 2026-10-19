@@ -71,7 +71,24 @@ export const PROD_POINTER_COLUMNS_QUERY = `select c.relname as table_name, a.att
 
 export const PROD_CONSTRAINTS_QUERY = `select c.relname as table_name, con.conname as constraint_name, con.contype::text as contype, pg_get_constraintdef(con.oid, true) as definition from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname in ('blog_posts', 'portfolio_posts') order by c.relname, con.conname`;
 
-export const PROD_CAS_FUNCTIONS_QUERY = `select p.proname as name, pg_catalog.pg_get_function_identity_arguments(p.oid) as args, p.prosecdef as security_definer, coalesce(array_to_string(p.proconfig, ','), '') as proconfig, coalesce(p.proacl::text, '') as acl_raw from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in ('prod_backfill_body_pointer_cas', 'prod_backfill_body_pointer_rollback') order by p.proname`;
+/**
+ * The production CAS functions the contraction RETIRES. They are queried by
+ * name rather than assumed gone: a matching row is a FAIL, because a present
+ * function means the contraction never ran or was reverted.
+ */
+export const PROD_RETIRED_CAS_FUNCTIONS = [
+  'prod_backfill_body_pointer_cas',
+  'prod_backfill_body_pointer_rollback',
+] as const;
+
+export const PROD_CAS_FUNCTIONS_QUERY = `select p.proname as name, pg_catalog.pg_get_function_identity_arguments(p.oid) as args, p.prosecdef as security_definer, coalesce(array_to_string(p.proconfig, ','), '') as proconfig, coalesce(p.proacl::text, '') as acl_raw from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in (${PROD_RETIRED_CAS_FUNCTIONS.map((name) => `'${name}'`).join(', ')}) order by p.proname`;
+
+/**
+ * The RETIRED legacy body columns, read from `public`. The contraction drops
+ * `body_en`/`body_it` from both post tables; any row returned here is a FAIL,
+ * because a surviving column means the contraction never ran or was reverted.
+ */
+export const PROD_LEGACY_BODY_COLUMNS_QUERY = `select c.relname as table_name, a.attname as name, pg_catalog.format_type(a.atttypid, a.atttypmod) as formatted_type, not a.attnotnull as nullable from pg_class c join pg_namespace n on n.oid = c.relnamespace join pg_attribute a on a.attrelid = c.oid where n.nspname = 'public' and c.relname in ('blog_posts', 'portfolio_posts') and a.attname in ('body_en', 'body_it') and a.attnum > 0 and not a.attisdropped order by c.relname, a.attname`;
 
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
@@ -1266,10 +1283,14 @@ async function checkBodyPathChecks(
  * lifecycle-aware:
  *
  *   - pre-CP-1  — the production plane is absent in full: a valid expected
- *     state (no bucket, no read policy, no pointer columns, no CAS functions);
- *   - post-CP-1 — bucket, read policy, the four pointer columns, the four
- *     canonical CHECK constraints and both CAS functions must ALL be present
- *     and exactly correct;
+ *     state (no bucket, no read policy, no pointer columns, no retired legacy
+ *     columns, no CAS functions);
+ *   - CONTRACTED — the only state production must be in now: bucket, read
+ *     policy, the four pointer columns and the four canonical CHECK constraints
+ *     all present and exactly correct, with the legacy `body_en`/`body_it`
+ *     columns and both `prod_backfill_*` CAS functions DROPPED. A surviving
+ *     legacy column or CAS function is a FAIL (the contraction did not happen
+ *     or was reverted);
  *   - anything in between — an unannounced half-migration, reported as FAIL.
  *
  * No production pointer COUNT is asserted: 0 committed pointers is correct
@@ -1301,21 +1322,6 @@ export const PROD_POINTER_COLUMNS = EXPECTED_BODY_PATH_CHECKS.map((c) => ({
   column: c.column,
 }));
 
-/** The production CAS pair, with its exact reviewed identity signature. */
-export const PROD_CAS_FUNCTIONS: Array<{ name: string; args: string }> = [
-  {
-    name: 'prod_backfill_body_pointer_cas',
-    args: 'p_kind text, p_post_id bigint, p_locale text, p_expected_sha256 text, p_expected_previous text, p_new_path text',
-  },
-  {
-    name: 'prod_backfill_body_pointer_rollback',
-    args: 'p_kind text, p_post_id bigint, p_locale text, p_installed_path text, p_expected_sha256 text, p_previous_path text',
-  },
-];
-
-/** The only safe `search_path` for the SECURITY DEFINER production functions. */
-export const PROD_CAS_SAFE_SEARCH_PATH = 'search_path=pg_catalog, pg_temp';
-
 export type StorageBucketFact = {
   id: string;
   name: string;
@@ -1338,18 +1344,19 @@ export type StoragePolicyBindingFact = {
   ref_relation: string;
 };
 
-export type ProdPointerColumnFact = {
-  table_name: string;
-  name: string;
-  formatted_type: string;
-  nullable: boolean;
-};
-
 export type ProdConstraintFact = {
   table_name: string;
   constraint_name: string;
   contype: string;
   definition: string;
+};
+
+/** A `public` post-table column: a surviving pointer, or a retired legacy one. */
+export type ProdColumnFact = {
+  table_name: string;
+  name: string;
+  formatted_type: string;
+  nullable: boolean;
 };
 
 export type ProdCasFunctionFact = {
@@ -1365,8 +1372,9 @@ export type ContentStorageFacts = {
   buckets: StorageBucketFact[];
   policies: StoragePolicyFact[];
   bindings: StoragePolicyBindingFact[];
-  prodColumns: ProdPointerColumnFact[];
+  prodColumns: ProdColumnFact[];
   prodConstraints: ProdConstraintFact[];
+  prodLegacyColumns: ProdColumnFact[];
   prodFunctions: ProdCasFunctionFact[];
 };
 
@@ -1605,9 +1613,10 @@ function evaluateDevStoragePlane(
 
 /**
  * The production plane, validated INDEPENDENTLY of DEV: bucket configuration,
- * read-policy scope, relation bindings, the four pointer columns, the four
- * canonical CHECK constraints and the two CAS functions (signature, SECURITY
- * DEFINER, safe `search_path`, EXECUTE to `service_role` only).
+ * read-policy scope, relation bindings and the four pointer columns with their
+ * four canonical CHECK constraints. The legacy `body_en`/`body_it` columns and
+ * the `prod_backfill_*` CAS functions are RETIRED: they are queried so their
+ * absence is certified, and any surviving row is a FAIL.
  *
  * Absence is a PASS only while the WHOLE plane is absent (the pre-CP-1 state);
  * once any part exists, every missing part is a FAIL, so a half-migration can
@@ -1626,6 +1635,7 @@ function evaluateProdStoragePlane(
     Boolean(policy) ||
     facts.prodColumns.length > 0 ||
     facts.prodConstraints.length > 0 ||
+    facts.prodLegacyColumns.length > 0 ||
     facts.prodFunctions.length > 0;
 
   if (!bucket) {
@@ -1726,7 +1736,7 @@ function evaluateProdStoragePlane(
     }
     if (got.nullable !== true) {
       columnViolations.push(
-        `${want.table}.${want.column} is NOT NULL (legacy text bodies must stay readable)`
+        `${want.table}.${want.column} is NOT NULL (a post without a committed body must keep a NULL pointer)`
       );
     }
   }
@@ -1792,71 +1802,50 @@ function evaluateProdStoragePlane(
     );
   }
 
-  const functionViolations: string[] = [];
-  const missingFunctions: string[] = [];
-  for (const want of PROD_CAS_FUNCTIONS) {
-    const got = facts.prodFunctions.find((f) => f.name === want.name);
-    if (!got) {
-      missingFunctions.push(want.name);
-      continue;
-    }
-    if (got.args !== want.args) {
-      functionViolations.push(
-        `${want.name}: identity signature got=(${got.args}) exp=(${want.args})`
-      );
-    }
-    if (got.security_definer !== true) {
-      functionViolations.push(`${want.name}: not SECURITY DEFINER`);
-    }
-    const searchPath = (got.proconfig ?? '').replace(/\s+/g, '');
-    if (searchPath !== PROD_CAS_SAFE_SEARCH_PATH.replace(/\s+/g, '')) {
-      functionViolations.push(
-        `${want.name}: unsafe search_path got=${got.proconfig || '(none)'} exp=${PROD_CAS_SAFE_SEARCH_PATH}`
-      );
-    }
-    const acl = parseAcl(got.acl_raw ?? '');
-    const executors = Object.keys(acl)
-      .filter((role) => acl[role].includes('X'))
-      .sort();
-    // The function owner always holds EXECUTE; what matters is that no public
-    // role does and that `service_role` (the CMS path) still can.
-    const exposed = executors.filter((role) =>
-      ['PUBLIC', 'anon', 'authenticated', 'authenticator'].includes(role)
+  if (facts.prodLegacyColumns.length) {
+    finding(
+      findings,
+      'S-prod-legacy-columns',
+      'FAIL',
+      `retired legacy body columns still present: present=${JSON.stringify(facts.prodLegacyColumns.map((c) => `${c.table_name}.${c.name}`).sort())} — the contraction drops body_en/body_it from both public post tables`
     );
-    if (!executors.includes('service_role') || exposed.length) {
-      functionViolations.push(
-        `${want.name}: EXECUTE grantees got=${JSON.stringify(executors)} exp=service_role only (no PUBLIC/anon/authenticated)`
-      );
-    }
+  } else {
+    finding(
+      findings,
+      'S-prod-legacy-columns',
+      'PASS',
+      'no legacy body_en/body_it columns remain on public.blog_posts / public.portfolio_posts (contraction applied)'
+    );
   }
-  if (!missingFunctions.length && !functionViolations.length) {
+
+  // The contraction RETIRES the CAS pair. Absence is the contracted state; a
+  // surviving function means the contraction did not happen or was reverted, so
+  // it fails by name rather than being silently tolerated.
+  if (facts.prodFunctions.length) {
     finding(
       findings,
       'S-prod-cas',
-      'PASS',
-      `${PROD_CAS_FUNCTIONS.map((f) => f.name).join(' + ')}: exact signature, SECURITY DEFINER, ${PROD_CAS_SAFE_SEARCH_PATH}, EXECUTE to service_role only`
-    );
-  } else if (!planeStarted) {
-    finding(
-      findings,
-      'S-prod-cas',
-      'PASS',
-      'production CAS functions absent — valid pre-CP-1 expected state (no production content plane installed)'
+      'FAIL',
+      `retired production CAS functions still present: present=${JSON.stringify(facts.prodFunctions.map((f) => f.name).sort())} — the contraction drops ${PROD_RETIRED_CAS_FUNCTIONS.join(' + ')}`
     );
   } else {
     finding(
       findings,
       'S-prod-cas',
-      'FAIL',
-      `production CAS functions missing/divergent: missing=${JSON.stringify(missingFunctions)}; violations=${JSON.stringify(functionViolations)}`
+      'PASS',
+      planeStarted
+        ? 'no prod_backfill_* CAS functions remain in public (contraction applied)'
+        : 'production CAS functions absent — valid pre-CP-1 expected state (no production content plane installed)'
     );
   }
 }
 
 /**
- * Lifecycle coherence of the production plane: it is installed in FULL or not
- * at all. "Bucket present but the CAS functions are missing", "pointer columns
- * without their CHECKs" and every other half-state fail here by name.
+ * Lifecycle coherence of the production plane. The state that must hold in
+ * production is the CONTRACTED one: bucket + read policy + four pointer columns
+ * + four canonical CHECKs present, with the legacy `body_en`/`body_it` columns
+ * and the `prod_backfill_*` CAS functions dropped. Any half-state, and any
+ * pre-contraction artifact that survived, fails here by name.
  */
 function evaluateProdPlaneConsistency(
   facts: ContentStorageFacts,
@@ -1887,35 +1876,35 @@ function evaluateProdPlaneConsistency(
         )
       ),
     ],
-    [
-      `${PROD_CAS_FUNCTIONS.length} CAS functions`,
-      PROD_CAS_FUNCTIONS.every((want) =>
-        facts.prodFunctions.some((f) => f.name === want.name)
-      ),
-    ],
+  ];
+  // Artifacts the contraction removes: their PRESENCE is the anomaly.
+  const carried: Array<[string, boolean]> = [
+    ['retired legacy body columns', facts.prodLegacyColumns.length === 0],
+    ['retired CAS functions', facts.prodFunctions.length === 0],
   ];
   const present = parts.filter(([, ok]) => ok).map(([label]) => label);
   const missing = parts.filter(([, ok]) => !ok).map(([label]) => label);
-  if (!present.length) {
+  const unexpected = carried.filter(([, ok]) => !ok).map(([label]) => label);
+  if (!present.length && !unexpected.length) {
     finding(
       findings,
       'S-prod-consistency',
       'PASS',
-      'production content plane absent in full — valid pre-CP-1 lifecycle state (no bucket, no read policy, no pointer columns, no CAS functions)'
+      'production content plane absent in full — valid pre-CP-1 lifecycle state (no bucket, no read policy, no pointer columns, no CHECKs, no legacy body columns, no CAS functions)'
     );
-  } else if (!missing.length) {
+  } else if (!missing.length && !unexpected.length) {
     finding(
       findings,
       'S-prod-consistency',
       'PASS',
-      `production content plane complete: bucket + read policy + ${PROD_POINTER_COLUMNS.length} pointer columns + ${EXPECTED_BODY_PATH_CHECKS.length} canonical CHECKs + ${PROD_CAS_FUNCTIONS.length} CAS functions`
+      `production content plane contracted: bucket + read policy + ${PROD_POINTER_COLUMNS.length} pointer columns + ${EXPECTED_BODY_PATH_CHECKS.length} canonical CHECKs; legacy body columns and prod_backfill_* CAS functions absent`
     );
   } else {
     finding(
       findings,
       'S-prod-consistency',
       'FAIL',
-      `partial production content plane: present=[${present.join(', ')}]; missing=[${missing.join(', ')}] — the plane must be installed in full (CP-1 artifact -> bucket -> read policy) or not at all`
+      `production content plane not contracted: present=[${present.join(', ')}]; missing=[${missing.join(', ')}]${unexpected.length ? `; unexpected=[${unexpected.join(', ')}]` : ''} — production must be CONTRACTED: bucket + read policy + ${PROD_POINTER_COLUMNS.length} pointer columns + ${EXPECTED_BODY_PATH_CHECKS.length} canonical CHECKs present, with the legacy body columns and the prod_backfill_* CAS functions dropped`
     );
   }
 }
@@ -2034,7 +2023,7 @@ export function evaluateContentStorageIsolation(
     findings,
     'S-prod-pointers-lifecycle',
     'INFO',
-    'production pointer POPULATION is deliberately not asserted: 0 committed pointers is correct before the authorized CP-2 backfill and 34 is correct after it, so only the canonical column/CHECK/CAS shape is certified here'
+    'production pointer POPULATION is deliberately not asserted: 0 committed pointers is correct before the authorized CP-2 backfill and 34 is correct after it, so only the canonical column/CHECK shape, and the absence of the retired legacy columns and CAS functions, is certified here'
   );
 }
 
@@ -2054,10 +2043,13 @@ export async function checkContentStorageIsolation(
   )) as StoragePolicyBindingFact[];
   const prodColumns = (await queryJson(
     PROD_POINTER_COLUMNS_QUERY
-  )) as ProdPointerColumnFact[];
+  )) as ProdColumnFact[];
   const prodConstraints = (await queryJson(
     PROD_CONSTRAINTS_QUERY
   )) as ProdConstraintFact[];
+  const prodLegacyColumns = (await queryJson(
+    PROD_LEGACY_BODY_COLUMNS_QUERY
+  )) as ProdColumnFact[];
   const prodFunctions = (await queryJson(
     PROD_CAS_FUNCTIONS_QUERY
   )) as ProdCasFunctionFact[];
@@ -2068,6 +2060,7 @@ export async function checkContentStorageIsolation(
       bindings,
       prodColumns,
       prodConstraints,
+      prodLegacyColumns,
       prodFunctions,
     },
     findings
