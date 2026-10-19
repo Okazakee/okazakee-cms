@@ -357,11 +357,12 @@ describe('cli on the real filesystem', () => {
 
     const exported = await runLegacyBodyBackupCli({
       ...deps,
-      argv: [`--out-dir=${root}`, '--apply'],
+      argv: [`--out-dir=${root}`, '--apply', '--storage-authoritative'],
     });
     expect(exported.exitCode).toBe(0);
     const report = reportOf(exported);
     expect(report.mode).toBe('apply');
+    expect(report.kind).toBe('storage-authoritative');
     const runDirectory = report.runDirectory;
     if (runDirectory === null) throw new Error('expected a run directory');
     expect(runDirectory.startsWith(root)).toBe(true);

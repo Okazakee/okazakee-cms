@@ -132,6 +132,22 @@ objects and pointers, so a legacy-only backup would restore stale content. Do **
 the historical `275 670`-byte legacy total as a requirement — compare against the artifact's
 own manifest and the live pointers and report any drift rather than forcing the old number.
 
+Take that snapshot with the explicit post-shim mode, which records
+`kind: storage-authoritative` in its manifest and treats the shim placeholder in the legacy
+columns as the expected state (an informational finding, plus a placeholder count) instead of
+an error — the pointer + object pairs stay the authoritative content and every one of them
+must still be captured and hash to its own key:
+
+```bash
+CMS_PROD_BACKUP_APPLY_ACK=yes-export-production-bodies \
+  bun run storage:content:prod:backup --out-dir=<dir> --apply \
+    --storage-authoritative --baseline-dir=<the pre-shim baseline run dir>
+```
+
+The pre-shim baseline (no flag) is the other artifact kind and stays pristine; a restore
+requires `kind: storage-authoritative` unless `--require-kind=legacy-baseline` is passed
+explicitly, so the two are never confused (`docs/PRODUCTION_BACKUP_RESTORE.md`).
+
 Run the scratch-restore rehearsal in `docs/PRODUCTION_BACKUP_RESTORE.md` before the
 contraction; it is the proof that the artifact is actually restorable.
 

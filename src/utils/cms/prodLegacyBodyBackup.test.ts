@@ -10,6 +10,7 @@ import {
 } from '@/libs/cms/storage/bodyContent';
 import {
   ARTIFACT_FILE_MODE,
+  applyBaselineComparison,
   assertBackupApplyAcknowledged,
   assertBackupOutDirAllowed,
   assertBackupRestoreAcknowledged,
@@ -95,6 +96,17 @@ const RUN_DIRECTORY =
 const BACKUP_DIR = '/tmp/backups/run';
 const RESTORE_ARGS = ['--restore', `--backup-dir=${BACKUP_DIR}`];
 
+/** The `buildBackupArtifact` metadata every lower-level test shares. */
+const ARTIFACT_META = {
+  runId: 'run',
+  runDirectory: '/tmp/x',
+  generatedAt: '2026-10-19T14:15:30.123Z',
+  appEnv: 'production',
+  schema: 'public',
+  projectRef: BACKUP_PROJECT_REF,
+  bucket: BACKUP_BUCKET,
+};
+
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                    */
 /* -------------------------------------------------------------------------- */
@@ -156,6 +168,27 @@ function productionFixture(): Fixture {
     ],
   };
   return { rows, objects };
+}
+
+/**
+ * One blog post exactly as the shim-enabled CMS leaves it: the real body is in
+ * Storage under its committed canonical pointer, while `body_en` holds the
+ * placeholder. This is the shape a post-shim snapshot has to accept.
+ */
+function placeholderFixture(): { fixture: Fixture; pointer: string } {
+  const objects: Record<string, Buffer> = {};
+  const row = postRow('blog', 3, { en: '# Real body\n' }, objects);
+  if (row.body_en_path === null) throw new Error('expected a pointer');
+  return {
+    fixture: {
+      rows: {
+        blog: [{ ...row, body_en: LEGACY_BODY_EN_PLACEHOLDER }],
+        portfolio: [],
+      },
+      objects,
+    },
+    pointer: row.body_en_path,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -537,6 +570,8 @@ describe('argument parsing', () => {
       outDir: null,
       apply: false,
       json: false,
+      kind: 'legacy-baseline',
+      baselineDir: null,
     });
   });
 
@@ -564,10 +599,60 @@ describe('argument parsing', () => {
       ['--restore', '--backup-dir=/tmp/a', '--restore-table=bad name'],
       ['--restore', '--backup-dir=/tmp/a', '--restore-bucket=bad/bucket'],
       ['--out-dir='],
+      ['--storage-authoritative', '--storage-authoritative'],
+      ['--verify', '--backup-dir=/tmp/a', '--storage-authoritative'],
+      ['--restore', '--backup-dir=/tmp/a', '--storage-authoritative'],
+      ['--verify', '--backup-dir=/tmp/a', '--baseline-dir=/tmp/b'],
+      ['--restore', '--backup-dir=/tmp/a', '--baseline-dir=/tmp/b'],
+      ['--out-dir=/tmp/a', '--require-kind=legacy-baseline'],
+      ['--verify', '--backup-dir=/tmp/a', '--require-kind=pre-shim'],
+      ['--require-kind=storage-authoritative'],
     ];
     for (const argv of errors) {
       expect(parseLegacyBodyBackupArgs(argv).mode).toBe('invalid');
     }
+  });
+
+  it('names the storage-authoritative export and the kind assertion', () => {
+    expect(
+      parseLegacyBodyBackupArgs([
+        '--out-dir=/tmp/a',
+        '--apply',
+        '--storage-authoritative',
+        '--baseline-dir=/tmp/baseline',
+      ])
+    ).toMatchObject({
+      mode: 'export',
+      apply: true,
+      kind: 'storage-authoritative',
+      baselineDir: '/tmp/baseline',
+    });
+    expect(
+      parseLegacyBodyBackupArgs(['--out-dir=/tmp/a', '--storage-authoritative'])
+    ).toMatchObject({
+      mode: 'export',
+      apply: false,
+      kind: 'storage-authoritative',
+    });
+    expect(
+      parseLegacyBodyBackupArgs([
+        '--verify',
+        '--backup-dir=/tmp/a',
+        '--require-kind=storage-authoritative',
+      ])
+    ).toMatchObject({ mode: 'verify', requireKind: 'storage-authoritative' });
+    expect(
+      parseLegacyBodyBackupArgs([
+        '--restore',
+        '--backup-dir=/tmp/a',
+        '--require-kind=legacy-baseline',
+      ])
+    ).toMatchObject({ mode: 'restore', requireKind: 'legacy-baseline' });
+    expect(parseLegacyBodyBackupArgs(['--require-kind=pre-shim'])).toEqual({
+      mode: 'invalid',
+      error:
+        "--require-kind 'pre-shim' is not one of legacy-baseline | storage-authoritative",
+    });
   });
 
   it('accepts the documented modes', () => {
@@ -584,6 +669,7 @@ describe('argument parsing', () => {
       mode: 'verify',
       backupDir: '/tmp/a',
       json: false,
+      requireKind: null,
     });
     expect(
       parseLegacyBodyBackupArgs([
@@ -601,6 +687,7 @@ describe('argument parsing', () => {
       schema: 'scratch',
       table: 'legacy_restore',
       bucket: 'scratch-content',
+      requireKind: null,
     });
     expect(parseLegacyBodyBackupArgs(['--help'])).toEqual({ mode: 'help' });
   });
@@ -899,24 +986,16 @@ describe('findings', () => {
   });
 
   it('reports the shim placeholder as a failed baseline', async () => {
-    const objects: Record<string, Buffer> = {};
-    const fixture: Fixture = {
-      rows: {
-        blog: [
-          {
-            ...postRow('blog', 3, { en: '# Real body\n' }, objects),
-            body_en: LEGACY_BODY_EN_PLACEHOLDER,
-          },
-        ],
-        portfolio: [],
-      },
-      objects,
-    };
+    const { fixture } = placeholderFixture();
     const h = harness({ fixture });
     const outcome = await h.run(['--out-dir=/tmp/backups', '--apply']);
     expect(outcome.exitCode).toBe(1);
     const report = backupReportOf(outcome);
+    // The default export is still the pre-shim baseline: the placeholder means
+    // the run is too late, and the artifact is not a baseline.
+    expect(report.kind).toBe('legacy-baseline');
     expect(report.complete).toBe(false);
+    expect(report.counts.placeholders).toBe(1);
     expect(report.findings).toEqual([
       expect.objectContaining({
         code: 'legacy-body-placeholder',
@@ -981,10 +1060,163 @@ describe('findings', () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* Storage-authoritative snapshots                                             */
+/* -------------------------------------------------------------------------- */
+
+describe('storage-authoritative snapshot', () => {
+  it('treats the shim placeholder as expected and stays complete', async () => {
+    const { fixture, pointer } = placeholderFixture();
+    const h = harness({ fixture });
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    const report = backupReportOf(outcome);
+    expect(report.kind).toBe('storage-authoritative');
+    expect(report.complete).toBe(true);
+    expect(report.counts.placeholders).toBe(1);
+    expect(report.counts.errors).toBe(0);
+    expect(report.counts.infos).toBe(1);
+    expect(report.findings).toEqual([
+      expect.objectContaining({
+        code: 'legacy-body-placeholder',
+        severity: 'info',
+        pointer,
+      }),
+    ]);
+
+    // The manifest says what the artifact is, and the pointer + object pair is
+    // what it holds: captured byte-for-byte under the canonical key.
+    const manifest = await h.manifest();
+    expect(manifest.kind).toBe('storage-authoritative');
+    expect(manifest.complete).toBe(true);
+    expect(manifest.counts.placeholders).toBe(1);
+    expect(manifest.objects).toEqual([
+      expect.objectContaining({ path: pointer, captured: true }),
+    ]);
+    expect(sha256Hex(h.file(`${OBJECTS_DIR}/${pointer}`))).toBe(
+      pointerHashFor('blog', 3, 'en', pointer)
+    );
+    expect(manifest.rows[0].en.objectMatchesBody).toBe(false);
+  });
+
+  it('still fails when a referenced object is missing', async () => {
+    const { fixture, pointer } = placeholderFixture();
+    delete fixture.objects[pointer];
+    const h = harness({ fixture });
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
+    expect(outcome.exitCode).toBe(1);
+    const report = backupReportOf(outcome);
+    expect(report.kind).toBe('storage-authoritative');
+    expect(report.complete).toBe(false);
+    expect(report.counts.placeholders).toBe(1);
+    expect(
+      report.findings.map((finding) => [finding.code, finding.severity])
+    ).toEqual([
+      ['legacy-body-placeholder', 'info'],
+      ['object-missing', 'error'],
+    ]);
+  });
+
+  it('still fails when a referenced object does not hash to its own key', async () => {
+    const { fixture, pointer } = placeholderFixture();
+    fixture.objects[pointer] = Buffer.from('# Not the body that key names\n');
+    const h = harness({ fixture });
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
+    expect(outcome.exitCode).toBe(1);
+    const report = backupReportOf(outcome);
+    expect(report.complete).toBe(false);
+    expect(
+      report.findings.map((finding) => [finding.code, finding.severity])
+    ).toEqual([
+      ['legacy-body-placeholder', 'info'],
+      ['object-hash-mismatch', 'error'],
+    ]);
+  });
+
+  it('reports a legacy value that is neither the placeholder nor the object', async () => {
+    const fixture = productionFixture();
+    fixture.rows.blog[0].body_en = '# Edited after the backfill\n';
+    const h = harness({ fixture });
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
+    // A review item, not a failure: the object is the content of record, so the
+    // disagreement is captured on both sides and recorded as a warning.
+    expect(outcome.exitCode).toBe(0);
+    const report = backupReportOf(outcome);
+    expect(report.complete).toBe(true);
+    expect(report.findings).toEqual([
+      expect.objectContaining({
+        code: 'body-object-mismatch',
+        severity: 'warning',
+      }),
+    ]);
+  });
+
+  it('never lets the placeholder excuse a missing pointer', async () => {
+    const { fixture } = placeholderFixture();
+    fixture.rows.blog[0].body_it = LEGACY_BODY_EN_PLACEHOLDER;
+    const h = harness({ fixture });
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
+    expect(outcome.exitCode).toBe(1);
+    const report = backupReportOf(outcome);
+    expect(report.complete).toBe(false);
+    expect(report.counts.placeholders).toBe(2);
+    // `en` is a placeholder with its object; `it` is a placeholder with no
+    // pointer at all, so its body is in neither the column nor Storage.
+    expect(
+      report.findings.map((finding) => [
+        finding.locale,
+        finding.code,
+        finding.severity,
+      ])
+    ).toEqual([
+      ['en', 'legacy-body-placeholder', 'info'],
+      ['it', 'body-without-pointer', 'error'],
+      ['it', 'legacy-body-placeholder', 'info'],
+    ]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /* --verify                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * A storage-authoritative artifact, the kind a restore requires by default:
+ * the recovery artifact for the contraction. Its fixture has no placeholder, so
+ * the two kinds differ only in the recorded kind here.
+ */
 async function exportArtifact(): Promise<Harness> {
+  const h = harness({});
+  const outcome = await h.run([
+    '--out-dir=/tmp/backups',
+    '--apply',
+    '--storage-authoritative',
+  ]);
+  expect(outcome.exitCode).toBe(0);
+  return h;
+}
+
+/** A pre-shim legacy baseline, written by the same export path. */
+async function exportBaselineArtifact(): Promise<Harness> {
   const h = harness({});
   const outcome = await h.run(['--out-dir=/tmp/backups', '--apply']);
   expect(outcome.exitCode).toBe(0);
@@ -1080,6 +1312,87 @@ describe('--verify', () => {
     expect(
       verifyReportOf(outcome).problems.map((problem) => problem.code)
     ).toEqual(expect.arrayContaining(['manifest-unreadable', 'sums-missing']));
+  });
+
+  it('round-trips a storage-authoritative artifact and asserts its kind', async () => {
+    const h = await exportArtifact();
+    const asserted = await h.run([
+      '--verify',
+      `--backup-dir=${BACKUP_DIR}`,
+      '--require-kind=storage-authoritative',
+    ]);
+    expect(asserted.exitCode).toBe(0);
+    const report = verifyReportOf(asserted);
+    expect(report.ok).toBe(true);
+    expect(report.kind).toBe('storage-authoritative');
+    expect(report.problems).toEqual([]);
+    expect(report.sumsSha256).toBe(sha256Hex(h.file(SUMS_FILE)));
+    expect(asserted.lines.join('\n')).toContain(
+      'kind=storage-authoritative intact=true'
+    );
+
+    const wrongKind = await h.run([
+      '--verify',
+      `--backup-dir=${BACKUP_DIR}`,
+      '--require-kind=legacy-baseline',
+    ]);
+    expect(wrongKind.exitCode).toBe(1);
+    const wrongReport = verifyReportOf(wrongKind);
+    expect(wrongReport.ok).toBe(false);
+    expect(wrongReport.kind).toBe('storage-authoritative');
+    expect(wrongReport.counts.filesMismatched).toBe(0);
+    expect(wrongReport.problems).toEqual([
+      expect.objectContaining({ code: 'artifact-kind-mismatch' }),
+    ]);
+  });
+
+  it('never accepts a baseline artifact as the authoritative one', async () => {
+    const h = await exportBaselineArtifact();
+    // Verification itself is kind-neutral: the artifact is intact...
+    const neutral = await h.run(['--verify', `--backup-dir=${BACKUP_DIR}`]);
+    expect(verifyReportOf(neutral).ok).toBe(true);
+    expect(verifyReportOf(neutral).kind).toBe('legacy-baseline');
+    // ...but a caller that states the kind it needs is refused, loudly.
+    const asserted = await h.run([
+      '--verify',
+      `--backup-dir=${BACKUP_DIR}`,
+      '--require-kind=storage-authoritative',
+    ]);
+    expect(asserted.exitCode).toBe(1);
+    const report = verifyReportOf(asserted);
+    expect(report.ok).toBe(false);
+    expect(report.kind).toBe('legacy-baseline');
+    expect(report.problems).toEqual([
+      expect.objectContaining({
+        code: 'artifact-kind-mismatch',
+        message: expect.stringContaining("kind='legacy-baseline'"),
+      }),
+    ]);
+  });
+
+  it('reads a manifest written before `kind` existed as a legacy baseline', async () => {
+    const h = await exportBaselineArtifact();
+    const manifest = JSON.parse(h.text(MANIFEST_FILE)) as Record<
+      string,
+      unknown
+    >;
+    expect(manifest.kind).toBe('legacy-baseline');
+    delete manifest.kind;
+    h.files.set(MANIFEST_FILE, Buffer.from(`${JSON.stringify(manifest)}\n`));
+    const loaded = await loadBackupManifest(h.reader);
+    expect(loaded.ok).toBe(true);
+    expect(loaded.ok ? loaded.manifest.kind : null).toBe('legacy-baseline');
+    expect(loaded.ok ? loaded.manifest.baseline : 'unset').toBeNull();
+
+    // A kind that is present but unknown is refused outright, so a new field
+    // can never be mistaken for a kind this build understands.
+    h.files.set(
+      MANIFEST_FILE,
+      Buffer.from(JSON.stringify({ ...manifest, kind: 'post-shim' }))
+    );
+    const rejected = await loadBackupManifest(h.reader);
+    expect(rejected.ok).toBe(false);
+    expect(rejected.ok ? '' : rejected.error).toContain('is not a');
   });
 });
 
@@ -1204,7 +1517,11 @@ describe('--restore', () => {
     if (missing === null) throw new Error('expected a pointer');
     delete fixture.objects[missing];
     const h = harness({ fixture });
-    await h.run(['--out-dir=/tmp/backups', '--apply']);
+    await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
     const outcome = await h.run([
       ...RESTORE_ARGS,
       '--restore-bucket=scratch-content',
@@ -1267,7 +1584,11 @@ describe('--restore', () => {
 
   it('records a failed upsert instead of pretending it succeeded', async () => {
     const h = harness({ upsertError: 'permission denied for table' });
-    await h.run(['--out-dir=/tmp/backups', '--apply']);
+    await h.run([
+      '--out-dir=/tmp/backups',
+      '--apply',
+      '--storage-authoritative',
+    ]);
     const outcome = await h.run([...RESTORE_ARGS, '--apply']);
     expect(outcome.exitCode).toBe(1);
     const report = restoreReportOf(outcome);
@@ -1278,6 +1599,111 @@ describe('--restore', () => {
       scope: 'rows',
       message: 'permission denied for table',
     });
+  });
+
+  it('restores a storage-authoritative artifact with no kind flag', async () => {
+    const h = await exportArtifact();
+    const outcome = await h.run([...RESTORE_ARGS, '--apply']);
+    expect(outcome.exitCode).toBe(0);
+    const report = restoreReportOf(outcome);
+    expect(report.kind).toBe('storage-authoritative');
+    expect(report.requiredKind).toBe('storage-authoritative');
+    expect(report.counts.rowsRestored).toBe(3);
+    expect(outcome.lines.join('\n')).toContain('kind=storage-authoritative');
+  });
+
+  it('never silently restores a baseline artifact as the authoritative one', async () => {
+    const h = await exportBaselineArtifact();
+    const refused = await h.run([...RESTORE_ARGS, '--apply']);
+    expect(refused.exitCode).toBe(3);
+    const report = restoreReportOf(refused);
+    expect(report.kind).toBe('legacy-baseline');
+    expect(report.requiredKind).toBe('storage-authoritative');
+    expect(report.blocked).toContain("kind='legacy-baseline'");
+    expect(report.blocked).toContain('--require-kind=legacy-baseline');
+    expect(h.upserts).toHaveLength(0);
+    expect(h.uploads).toHaveLength(0);
+    expect(h.factories).not.toContain('restoreRows');
+    expect(h.factories).not.toContain('restoreObjects');
+
+    // Named deliberately, the baseline is restorable — it holds real rows.
+    const deliberate = await h.run([
+      ...RESTORE_ARGS,
+      '--require-kind=legacy-baseline',
+      '--apply',
+    ]);
+    expect(deliberate.exitCode).toBe(0);
+    const deliberateReport = restoreReportOf(deliberate);
+    expect(deliberateReport.kind).toBe('legacy-baseline');
+    expect(deliberateReport.requiredKind).toBe('legacy-baseline');
+    expect(deliberateReport.counts.rowsRestored).toBe(3);
+    expect(h.upserts).toHaveLength(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Baseline comparison                                                         */
+/* -------------------------------------------------------------------------- */
+
+describe('--baseline-dir comparison', () => {
+  it('records drift from the baseline instead of enforcing it', async () => {
+    const fixture = productionFixture();
+    const h = harness({ fixture });
+    const reference = await h.run(['--out-dir=/tmp/backups', '--apply']);
+    expect(reference.exitCode).toBe(0);
+    const referenceManifestSha256 =
+      backupReportOf(reference).artifact?.manifestSha256;
+
+    // The live data moves on: one of the two blog posts is gone. The snapshot
+    // must still be written and stay complete; the difference is recorded.
+    fixture.rows.blog = [fixture.rows.blog[0]];
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--baseline-dir=/tmp/backups/run',
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.error).toBeNull();
+    const report = backupReportOf(outcome);
+    expect(report.mode).toBe('dry-run');
+    expect(report.complete).toBe(true);
+    expect(report.counts.rows).toBe(2);
+    expect(report.counts.errors).toBe(0);
+    expect(report.baseline).toMatchObject({
+      directory: '/tmp/backups/run',
+      runId: 'abcdef123456',
+      kind: 'legacy-baseline',
+      metrics: { rows: 3 },
+    });
+    expect(report.baseline?.drift).toContain('rows 3 -> 2');
+    expect(report.findings).toEqual([
+      expect.objectContaining({ code: 'baseline-drift', severity: 'info' }),
+    ]);
+    // Nothing was overwritten: the reference artifact is byte-identical.
+    expect(sha256Hex(h.file(MANIFEST_FILE))).toBe(referenceManifestSha256);
+  });
+
+  it('refuses a reference that is not the legacy baseline', async () => {
+    const h = await exportArtifact();
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--baseline-dir=/tmp/backups/run',
+    ]);
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.error).toContain(
+      "--baseline-dir '/tmp/backups/run' records kind='storage-authoritative'"
+    );
+    // Refused before any artifact exists: no report, no writer.
+    expect(outcome.report).toBeNull();
+  });
+
+  it('reports an unreadable reference instead of inventing one', async () => {
+    const h = harness({});
+    const outcome = await h.run([
+      '--out-dir=/tmp/backups',
+      '--baseline-dir=/tmp/absent',
+    ]);
+    expect(outcome.exitCode).toBe(4);
+    expect(outcome.error).toContain('could not be read');
   });
 });
 
@@ -1526,5 +1952,92 @@ describe('capture and artifact helpers', () => {
     expect(plan.objects).toHaveLength(0);
     expect(plan.uncaptured).toHaveLength(4);
     expect(artifact.manifest.complete).toBe(false);
+  });
+
+  it('records the artifact kind on the capture and in the manifest', async () => {
+    const fixture = productionFixture();
+    const readFixture = {
+      async listLegacyBodies(kind: BodyContentKind) {
+        return fixture.rows[kind];
+      },
+    };
+    const capture = await captureLegacyBodies(
+      { reader: readFixture, objects: fixtureObjectsApi(fixture) },
+      { kind: 'storage-authoritative' }
+    );
+    expect(capture.kind).toBe('storage-authoritative');
+    expect(capture.baseline).toBeNull();
+
+    const artifact = buildBackupArtifact(capture, ARTIFACT_META);
+    expect(artifact.manifest.kind).toBe('storage-authoritative');
+    expect(artifact.manifest.baseline).toBeNull();
+    expect(artifact.manifest.complete).toBe(true);
+    const written = JSON.parse(artifact.manifestBytes.toString('utf8')) as {
+      kind: unknown;
+      baseline: unknown;
+    };
+    expect(written.kind).toBe('storage-authoritative');
+    expect(written.baseline).toBeNull();
+
+    // The default stays the pre-shim baseline.
+    const baseline = await captureLegacyBodies({
+      reader: readFixture,
+      objects: fixtureObjectsApi(fixture),
+    });
+    expect(baseline.kind).toBe('legacy-baseline');
+    expect(baseline.findings).toEqual([]);
+  });
+
+  it('compares a capture with a baseline and records the drift', async () => {
+    const fixture = productionFixture();
+    const capture = await captureLegacyBodies({
+      reader: {
+        async listLegacyBodies(kind) {
+          return fixture.rows[kind];
+        },
+      },
+      objects: fixtureObjectsApi(fixture),
+    });
+    const smaller = await captureLegacyBodies({
+      reader: {
+        async listLegacyBodies(kind) {
+          return kind === 'blog' ? fixture.rows.blog.slice(0, 1) : [];
+        },
+      },
+      objects: fixtureObjectsApi(fixture),
+    });
+    const reference = buildBackupArtifact(smaller, ARTIFACT_META).manifest;
+    expect(reference.counts.rows).toBe(1);
+
+    applyBaselineComparison(capture, reference, '/tmp/baseline');
+    expect(capture.baseline).toMatchObject({
+      directory: '/tmp/baseline',
+      runId: 'run',
+      kind: 'legacy-baseline',
+      metrics: { rows: 1 },
+    });
+    expect(capture.baseline?.drift).toContain('rows 1 -> 3');
+    expect(capture.counts).toMatchObject({ errors: 0, infos: 1 });
+
+    const artifact = buildBackupArtifact(capture, ARTIFACT_META);
+    expect(artifact.manifest.complete).toBe(true);
+    expect(artifact.manifest.baseline?.drift).toContain('rows 1 -> 3');
+    expect(artifact.manifest.findings).toEqual([
+      expect.objectContaining({ code: 'baseline-drift', severity: 'info' }),
+    ]);
+
+    // No drift, and no finding, when the reference is the same capture.
+    const identical = await captureLegacyBodies({
+      reader: {
+        async listLegacyBodies(kind) {
+          return fixture.rows[kind];
+        },
+      },
+      objects: fixtureObjectsApi(fixture),
+    });
+    applyBaselineComparison(identical, artifact.manifest, '/tmp/baseline');
+    expect(identical.baseline?.drift).toEqual([]);
+    expect(identical.findings).toEqual([]);
+    expect(identical.counts).toMatchObject({ infos: 0 });
   });
 });

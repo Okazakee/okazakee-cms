@@ -6,12 +6,20 @@
  *     # read-only dry run: reads production, writes nothing anywhere
  *   CMS_PROD_BACKUP_APPLY_ACK=yes-export-production-bodies \
  *     bun src/utils/cms/prodLegacyBodyBackup.ts --out-dir=<dir> --apply
- *     # write the baseline artifact (rows + Storage bytes + manifest + sums)
- *   bun src/utils/cms/prodLegacyBodyBackup.ts --verify --backup-dir=<dir>
+ *     # write a LEGACY-BASELINE artifact (pre-shim; placeholder = error)
+ *   CMS_PROD_BACKUP_APPLY_ACK=yes-export-production-bodies \
+ *     bun src/utils/cms/prodLegacyBodyBackup.ts --out-dir=<dir> --apply \
+ *       --storage-authoritative [--baseline-dir=<legacy baseline run dir>]
+ *     # write a STORAGE-AUTHORITATIVE artifact (post-shim; placeholder = info)
+ *   bun src/utils/cms/prodLegacyBodyBackup.ts --verify --backup-dir=<dir> \
+ *       [--require-kind=<legacy-baseline|storage-authoritative>]
  *     # offline: re-hash every on-disk file against the manifest
  *   CMS_BACKUP_RESTORE_ACK=yes-restore-to-scratch-target \
- *     bun src/utils/cms/prodLegacyBodyBackup.ts --restore --backup-dir=<dir> --apply
- *     # restore the artifact into a SCRATCH target (never a live content table)
+ *     bun src/utils/cms/prodLegacyBodyBackup.ts --restore --backup-dir=<dir> --apply \
+ *       [--require-kind=<kind>]
+ *     # restore into a SCRATCH target (never a live content table); the
+ *     # artifact must be of the required kind, 'storage-authoritative' by
+ *     # default, so a pre-shim baseline is never silently restored as current
  *
  * WHY THIS EXISTS
  *   Before `supabase/review/prod_legacy_body_retirement.sql` drops `body_en`
@@ -37,16 +45,34 @@
  *   - `--restore` replays the artifact into a scratch table or a scratch
  *     project, and refuses any live production content table.
  *
- * TIMING — THE BASELINE MUST PRECEDE THE SHIM DEPLOYMENT
+ * TWO ARTIFACT KINDS — THE MANIFEST SAYS WHICH ONE IT IS
  *   `src/libs/cms/legacyBodyEnShim.ts` keeps `body_en` NOT NULL until the
  *   contraction by writing the placeholder `[content moved to object storage]`
- *   into it on every create/update. A post saved by the shim-enabled CMS has
- *   already LOST its legacy English body, and the loss is not recoverable from
- *   Postgres afterwards. The baseline export must therefore be taken BEFORE
- *   that revision reaches production; a captured body equal to the placeholder
- *   is reported as an error (`legacy-body-placeholder`) and marks the artifact
- *   incomplete, so a too-late run can never be mistaken for a baseline. The
- *   full ordering and the restore procedure live in
+ *   into it on every create/update. That splits this command into two modes,
+ *   and every artifact records its own `kind` so the operator can tell them
+ *   apart from `manifest.json` alone:
+ *
+ *   - `legacy-baseline` (the default, `--storage-authoritative` absent): the
+ *     PRE-shim snapshot. It must be taken before the shim reaches production,
+ *     because it is the only copy of the pre-shim English text and a post saved
+ *     by the shim-enabled CMS has already LOST its legacy body. A captured body
+ *     equal to the placeholder is therefore an ERROR
+ *     (`legacy-body-placeholder`) that marks the artifact incomplete, so a
+ *     too-late run can never be mistaken for a baseline.
+ *   - `storage-authoritative` (`--storage-authoritative`): the POST-shim
+ *     snapshot, and the recovery artifact for the contraction. Here the
+ *     authoritative content of a post is its pointer + object pair, so the
+ *     placeholder is EXPECTED and is recorded as an informational finding
+ *     (`legacy-body-placeholder`, severity `info`) with the placeholder count.
+ *     A missing, unreadable or hash-mismatched object is still a hard error.
+ *     Completeness is judged from the pointers/objects and the manifest's own
+ *     records — never against a historical legacy-byte total; drift from the
+ *     baseline is REPORTED (`baseline-drift`) rather than enforced.
+ *
+ *   `--restore` defaults to `--require-kind=storage-authoritative` and refuses
+ *   a `legacy-baseline` artifact unless the operator names that kind
+ *   explicitly, so a pre-shim artifact is never silently restored as current.
+ *   The full ordering, commands and completeness meaning per kind live in
  *   `docs/PRODUCTION_BACKUP_RESTORE.md`.
  *
  * Everything below is pure/injectable: the module reads no environment, builds
@@ -190,6 +216,34 @@ export const ARTIFACT_FILE_MODE = 0o600;
  * afterwards; `prodLegacyBodyBackup.test.ts` pins the two to each other.
  */
 export const LEGACY_BODY_EN_PLACEHOLDER = '[content moved to object storage]';
+
+/**
+ * The two kinds of artifact this command writes. `kind` is recorded in every
+ * new manifest, so an operator (and `--verify`/`--restore`) can tell them apart
+ * without guessing from the contents.
+ */
+export type BackupArtifactKind = 'legacy-baseline' | 'storage-authoritative';
+
+export const BACKUP_ARTIFACT_KINDS: Record<BackupArtifactKind, true> = {
+  'legacy-baseline': true,
+  'storage-authoritative': true,
+};
+
+/** An export without `--storage-authoritative` stays the pre-shim baseline. */
+export const DEFAULT_EXPORT_KIND: BackupArtifactKind = 'legacy-baseline';
+
+/**
+ * What `--restore` insists on unless told otherwise: the post-contraction
+ * recovery artifact, never the pre-shim baseline.
+ */
+export const DEFAULT_RESTORE_REQUIRED_KIND: BackupArtifactKind =
+  'storage-authoritative';
+
+export function isBackupArtifactKind(
+  value: unknown
+): value is BackupArtifactKind {
+  return value === 'legacy-baseline' || value === 'storage-authoritative';
+}
 
 /* -------------------------------------------------------------------------- */
 /* Gates                                                                       */
@@ -545,19 +599,32 @@ export type BackupFindingCode =
   | 'body-missing-with-pointer'
   /** A pointer that is not the canonical key for its own kind/id/locale. */
   | 'unaddressable-pointer'
-  /** The captured `body_en` is the shim placeholder — the run is too late. */
+  /**
+   * A captured legacy value equals the shim placeholder. An ERROR in a
+   * `legacy-baseline` artifact (the run is too late); informational in a
+   * `storage-authoritative` one (the pointer's object is the content).
+   */
   | 'legacy-body-placeholder'
   /** The legacy column and the canonical object disagree (shim, or an edit). */
   | 'body-object-mismatch'
   /** `hidden` is NULL, so visibility had to be recorded as unknown. */
   | 'visibility-unknown'
   /** Two owners reference the same object key (impossible for canonical keys). */
-  | 'duplicate-pointer';
+  | 'duplicate-pointer'
+  /**
+   * The capture does not match the reference baseline it was compared with
+   * (`--baseline-dir`). Informational: drift is reported, never enforced.
+   */
+  | 'baseline-drift';
 
 export type BackupFinding = {
   code: BackupFindingCode;
-  /** `error` marks the artifact incomplete; `warning` is recorded only. */
-  severity: 'error' | 'warning';
+  /**
+   * `error` marks the artifact incomplete; `warning` asks for review;
+   * `info` records an expected condition (the post-shim placeholder, baseline
+   * drift) that changes nothing about completeness.
+   */
+  severity: 'error' | 'warning' | 'info';
   kind: BodyContentKind | null;
   id: number | null;
   locale: BodyContentLocale | null;
@@ -575,6 +642,8 @@ export type CapturedBody = {
   pointer: string | null;
   /** Hash parsed out of `pointer`, or null when it is not canonical. */
   pointerHash: string | null;
+  /** The legacy value is the shim placeholder: expected after the shim ships. */
+  placeholder: boolean;
 };
 
 export type CapturedRow = {
@@ -601,11 +670,63 @@ export type CapturedObject = {
   data: Buffer | null;
 };
 
+/**
+ * The subset of an artifact's counts that a later snapshot can be compared
+ * against. Deliberately narrow and stable: it never needs the counters that a
+ * newer artifact adds, so a v1 baseline stays comparable.
+ */
+export type BackupBaselineMetrics = {
+  rows: number;
+  blog: number;
+  portfolio: number;
+  hidden: number;
+  visible: number;
+  bodies: number;
+  bodyBytes: number;
+  pointers: number;
+  objects: number;
+  objectsMissing: number;
+  objectBytes: number;
+};
+
+/** Reads those metrics off any artifact's counts. */
+export function backupBaselineMetrics(
+  counts: BackupCounts
+): BackupBaselineMetrics {
+  return {
+    rows: counts.rows,
+    blog: counts.blog,
+    portfolio: counts.portfolio,
+    hidden: counts.hidden,
+    visible: counts.visible,
+    bodies: counts.bodies,
+    bodyBytes: counts.bodyBytes,
+    pointers: counts.pointers,
+    objects: counts.objects,
+    objectsMissing: counts.objectsMissing,
+    objectBytes: counts.objectBytes,
+  };
+}
+
+/** How a snapshot compares with the reference baseline it was run against. */
+export type BackupBaselineComparison = {
+  /** The `--baseline-dir` that was read (local, read-only). */
+  directory: string;
+  runId: string;
+  kind: BackupArtifactKind;
+  metrics: BackupBaselineMetrics;
+  /** Human-readable differences, in a stable order; empty when identical. */
+  drift: string[];
+};
+
 export type BackupCapture = {
+  kind: BackupArtifactKind;
   rows: CapturedRow[];
   objects: CapturedObject[];
   findings: BackupFinding[];
   counts: BackupCounts;
+  /** Set only when the capture was compared with `--baseline-dir`. */
+  baseline: BackupBaselineComparison | null;
 };
 
 export type BackupCounts = {
@@ -623,8 +744,11 @@ export type BackupCounts = {
   objects: number;
   objectsMissing: number;
   objectBytes: number;
+  /** Legacy values equal to the shim placeholder (both locales). */
+  placeholders: number;
   errors: number;
   warnings: number;
+  infos: number;
 };
 
 const BODY_LOCALES: readonly BodyContentLocale[] = ['en', 'it'];
@@ -642,8 +766,15 @@ const BODY_COLUMNS: Record<
  * Captures one locale of one row: the legacy value, its hash/length, the
  * committed pointer and (via `pointerHashFor`) proof that the pointer names
  * this exact kind/id/locale. Pure; it reads no clock and no storage.
+ *
+ * `artifactKind` decides what the shim placeholder MEANS, and nothing else: in
+ * a `legacy-baseline` artifact it is an error (the run is too late), in a
+ * `storage-authoritative` one it is expected and informational (the pointer's
+ * object is the authoritative content). Every other classification is
+ * mode-independent, so a placeholder can never excuse a broken pointer/object.
  */
 function captureBody(
+  artifactKind: BackupArtifactKind,
   kind: BodyContentKind,
   id: number,
   locale: BodyContentLocale,
@@ -658,6 +789,7 @@ function captureBody(
     body === null ? null : sha256Hex(Buffer.from(body, 'utf8'));
   const pointerHash =
     pointer === null ? null : pointerHashFor(kind, id, locale, pointer);
+  const placeholder = body === LEGACY_BODY_EN_PLACEHOLDER;
 
   const where = `${kind}/${id}/${locale}`;
   if (pointer !== null && pointerHash === null) {
@@ -691,22 +823,44 @@ function captureBody(
       id,
       locale,
       pointer: null,
-      message: `${where}: legacy ${columns.body} holds ${bodyBytes} bytes with no committed pointer; no canonical object exists for them`,
+      message: placeholder
+        ? `${where}: legacy ${columns.body} holds the post-migration placeholder with no committed pointer, so the body it replaced is in neither the column nor Storage`
+        : `${where}: legacy ${columns.body} holds ${bodyBytes} bytes with no committed pointer; no canonical object exists for them`,
     });
   }
-  if (body === LEGACY_BODY_EN_PLACEHOLDER) {
-    findings.push({
-      code: 'legacy-body-placeholder',
-      severity: 'error',
-      kind,
-      id,
-      locale,
-      pointer,
-      message: `${where}: legacy ${columns.body} holds the post-migration placeholder — this artifact is NOT a baseline (the shim-enabled CMS already deployed)`,
-    });
+  if (placeholder) {
+    findings.push(
+      artifactKind === 'storage-authoritative'
+        ? {
+            code: 'legacy-body-placeholder',
+            severity: 'info',
+            kind,
+            id,
+            locale,
+            pointer,
+            message: `${where}: legacy ${columns.body} holds the post-migration placeholder, which is expected here; the authoritative content of this locale is the object named by its pointer`,
+          }
+        : {
+            code: 'legacy-body-placeholder',
+            severity: 'error',
+            kind,
+            id,
+            locale,
+            pointer,
+            message: `${where}: legacy ${columns.body} holds the post-migration placeholder — this artifact is NOT a baseline (the shim-enabled CMS already deployed)`,
+          }
+    );
   }
 
-  return { locale, body, bodySha256, bodyBytes, pointer, pointerHash };
+  return {
+    locale,
+    body,
+    bodySha256,
+    bodyBytes,
+    pointer,
+    pointerHash,
+    placeholder,
+  };
 }
 
 /**
@@ -714,11 +868,20 @@ function captureBody(
  * anomaly as a finding instead of skipping it. Read-only on both surfaces: the
  * row client cannot express a mutation, and the object surface is only ever
  * `download`ed.
+ *
+ * `options.kind` is the kind of artifact being captured, and it changes exactly
+ * one classification (see `captureBody`); it does not relax any check. It is
+ * recorded on the capture, and `buildBackupArtifact` copies it into the
+ * manifest, so the artifact itself says what it is.
  */
-export async function captureLegacyBodies(deps: {
-  reader: LegacyBodyReader;
-  objects: BodyContentStorageApi;
-}): Promise<BackupCapture> {
+export async function captureLegacyBodies(
+  deps: {
+    reader: LegacyBodyReader;
+    objects: BodyContentStorageApi;
+  },
+  options: { kind?: BackupArtifactKind } = {}
+): Promise<BackupCapture> {
+  const artifactKind = options.kind ?? DEFAULT_EXPORT_KIND;
   const findings: BackupFinding[] = [];
   const rows: CapturedRow[] = [];
 
@@ -748,8 +911,8 @@ export async function captureLegacyBodies(deps: {
         kind,
         id: row.id,
         hidden: row.hidden,
-        en: captureBody(kind, row.id, 'en', row, findings),
-        it: captureBody(kind, row.id, 'it', row, findings),
+        en: captureBody(artifactKind, kind, row.id, 'en', row, findings),
+        it: captureBody(artifactKind, kind, row.id, 'it', row, findings),
       });
     }
   }
@@ -852,24 +1015,37 @@ export async function captureLegacyBodies(deps: {
         });
       }
       if (body.bodySha256 !== null && body.bodySha256 !== object.sha256) {
-        findings.push({
-          code: 'body-object-mismatch',
-          severity: 'warning',
-          kind: row.kind,
-          id: row.id,
-          locale,
-          pointer: body.pointer,
-          message: `${row.kind}/${row.id}/${locale}: legacy ${BODY_COLUMNS[locale].body} (${body.bodySha256}) differs from the canonical object (${object.sha256}); take the baseline before the shim-enabled CMS deploys`,
-        });
+        // A placeholder is SUPPOSED to differ from its object. In a
+        // storage-authoritative artifact that is the expected post-shim state,
+        // already recorded as the `legacy-body-placeholder` info finding, so it
+        // is not repeated here. Every other disagreement is a review item:
+        // severity `warning`, which never touches completeness, because in
+        // storage-authoritative mode the object is the content of record.
+        if (!(body.placeholder && artifactKind === 'storage-authoritative')) {
+          findings.push({
+            code: 'body-object-mismatch',
+            severity: 'warning',
+            kind: row.kind,
+            id: row.id,
+            locale,
+            pointer: body.pointer,
+            message:
+              artifactKind === 'storage-authoritative'
+                ? `${row.kind}/${row.id}/${locale}: legacy ${BODY_COLUMNS[locale].body} (${body.bodySha256}) differs from the object its pointer names (${object.sha256}); the object is the authoritative content, so this needs review`
+                : `${row.kind}/${row.id}/${locale}: legacy ${BODY_COLUMNS[locale].body} (${body.bodySha256}) differs from the canonical object (${object.sha256}); take the baseline before the shim-enabled CMS deploys`,
+          });
+        }
       }
     }
   }
 
   return {
+    kind: artifactKind,
     rows,
     objects,
     findings,
     counts: countCapture(rows, objects, findings),
+    baseline: null,
   };
 }
 
@@ -881,10 +1057,12 @@ function countCapture(
   let hidden = 0;
   let bodies = 0;
   let bodyBytes = 0;
+  let placeholders = 0;
   for (const row of rows) {
     if (row.hidden === true) hidden += 1;
     for (const locale of BODY_LOCALES) {
       const body = locale === 'en' ? row.en : row.it;
+      if (body.placeholder) placeholders += 1;
       if (body.body !== null && body.body !== '') {
         bodies += 1;
         bodyBytes += body.bodyBytes;
@@ -906,10 +1084,69 @@ function countCapture(
       (total, object) => total + (object.captured ? (object.bytes ?? 0) : 0),
       0
     ),
+    placeholders,
     errors: findings.filter((finding) => finding.severity === 'error').length,
     warnings: findings.filter((finding) => finding.severity === 'warning')
       .length,
+    infos: findings.filter((finding) => finding.severity === 'info').length,
   };
+}
+
+const BASELINE_METRIC_NAMES: Array<keyof BackupBaselineMetrics> = [
+  'rows',
+  'blog',
+  'portfolio',
+  'hidden',
+  'visible',
+  'bodies',
+  'bodyBytes',
+  'pointers',
+  'objects',
+  'objectsMissing',
+  'objectBytes',
+];
+
+/**
+ * Compares a capture with a reference baseline artifact and RECORDS the
+ * differences on the capture: an informational `baseline-drift` finding (one
+ * aggregate, listing every metric that moved) plus the reference itself, so the
+ * manifest records what was compared. It never touches `complete` — the
+ * historical legacy-byte total is context, not a threshold.
+ */
+export function applyBaselineComparison(
+  capture: BackupCapture,
+  baseline: BackupManifest,
+  directory: string
+): void {
+  const reference = backupBaselineMetrics(baseline.counts);
+  const current = backupBaselineMetrics(capture.counts);
+  const drift = BASELINE_METRIC_NAMES.filter(
+    (metric) => reference[metric] !== current[metric]
+  ).map((metric) => `${metric} ${reference[metric]} -> ${current[metric]}`);
+
+  capture.baseline = {
+    directory,
+    runId: baseline.runId,
+    kind: baseline.kind,
+    metrics: reference,
+    drift,
+  };
+  if (drift.length === 0) return;
+
+  capture.findings.push({
+    code: 'baseline-drift',
+    severity: 'info',
+    kind: null,
+    id: null,
+    locale: null,
+    pointer: null,
+    message: `baseline ${baseline.runId} (${directory}) differs from this capture: ${drift.join('; ')} — reported, not enforced`,
+  });
+  capture.counts = countCapture(
+    capture.rows,
+    capture.objects,
+    capture.findings
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -970,11 +1207,18 @@ export type BackupManifestFile = {
   bytes: number;
 };
 
-/** Exact contents of `manifest.json`: every recorded hash, no payload bytes. */
+/**
+ * Exact contents of `manifest.json`: every recorded hash, no payload bytes.
+ *
+ * `kind` is the artifact's identity: a `legacy-baseline` was taken before the
+ * shim, a `storage-authoritative` one after it. Artifacts written before `kind`
+ * existed omit the field; they can only be baselines (see `loadBackupManifest`).
+ */
 export type BackupManifest = {
   format: typeof BACKUP_FORMAT;
   version: number;
   command: typeof LEGACY_BODY_BACKUP_COMMAND;
+  kind: BackupArtifactKind;
   runId: string;
   runDirectory: string;
   generatedAt: string;
@@ -990,6 +1234,8 @@ export type BackupManifest = {
   objects: BackupManifestObject[];
   files: BackupManifestFile[];
   findings: BackupFinding[];
+  /** The reference this capture was compared with, or null. */
+  baseline: BackupBaselineComparison | null;
 };
 
 export type BackupArtifact = {
@@ -1107,6 +1353,7 @@ export function buildBackupArtifact(
     format: BACKUP_FORMAT,
     version: BACKUP_FORMAT_VERSION,
     command: LEGACY_BODY_BACKUP_COMMAND,
+    kind: capture.kind,
     runId: meta.runId,
     runDirectory: meta.runDirectory,
     generatedAt: meta.generatedAt,
@@ -1134,6 +1381,7 @@ export function buildBackupArtifact(
     objects,
     files,
     findings: capture.findings,
+    baseline: capture.baseline,
   };
 
   const manifestBytes = Buffer.from(
@@ -1309,6 +1557,12 @@ export type VerifyReport = {
   mode: 'verify';
   backupDir: string;
   runId: string | null;
+  /**
+   * The artifact's recorded kind, as read from its manifest (a manifest without
+   * the field is a pre-`kind` artifact and therefore a `legacy-baseline`), or
+   * null when the manifest could not be read at all.
+   */
+  kind: BackupArtifactKind | null;
   generatedAt: string;
   ok: boolean;
   manifestSha256: string | null;
@@ -1402,13 +1656,41 @@ export function parseRowsJsonl(
   });
 }
 
-function isManifest(value: unknown): value is BackupManifest {
+/** A manifest as it may appear on disk: `kind`/`baseline` may predate them. */
+type RawManifest = Omit<BackupManifest, 'kind' | 'baseline'> & {
+  kind?: unknown;
+  baseline?: unknown;
+};
+
+function isBackupBaselineComparison(
+  value: unknown
+): value is BackupBaselineComparison {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.directory === 'string' &&
+    typeof record.runId === 'string' &&
+    isBackupArtifactKind(record.kind) &&
+    typeof record.metrics === 'object' &&
+    record.metrics !== null &&
+    Array.isArray(record.drift) &&
+    record.drift.every((entry) => typeof entry === 'string')
+  );
+}
+
+function isManifest(value: unknown): value is RawManifest {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
     record.format === BACKUP_FORMAT &&
     record.version === BACKUP_FORMAT_VERSION &&
     typeof record.runId === 'string' &&
+    typeof record.counts === 'object' &&
+    record.counts !== null &&
+    (record.kind === undefined || isBackupArtifactKind(record.kind)) &&
+    (record.baseline === undefined ||
+      record.baseline === null ||
+      isBackupBaselineComparison(record.baseline)) &&
     Array.isArray(record.rows) &&
     Array.isArray(record.objects) &&
     Array.isArray(record.files)
@@ -1442,7 +1724,24 @@ export async function loadBackupManifest(
       error: `${MANIFEST_FILE} is not a ${BACKUP_FORMAT} v${BACKUP_FORMAT_VERSION} manifest`,
     };
   }
-  return { ok: true, manifest: parsed, bytes };
+  // An artifact written before `kind` existed omits the field, and the
+  // storage-authoritative mode did not exist then either: it can only be a
+  // legacy baseline. That is a fact about the format, not a silent default, and
+  // every artifact written now records the field explicitly (see
+  // `buildBackupArtifact`).
+  return {
+    ok: true,
+    manifest: {
+      ...parsed,
+      kind: isBackupArtifactKind(parsed.kind)
+        ? parsed.kind
+        : DEFAULT_EXPORT_KIND,
+      baseline: isBackupBaselineComparison(parsed.baseline)
+        ? parsed.baseline
+        : null,
+    },
+    bytes,
+  };
 }
 
 /**
@@ -1454,10 +1753,20 @@ export async function loadBackupManifest(
  * file and an extra file are both reported), and the semantic level — every
  * captured body re-hashed from `rows.jsonl`, and every object re-hashed against
  * both the manifest and the hash embedded in its own canonical key.
+ *
+ * `options.requireKind` additionally asserts the artifact's identity: a
+ * `legacy-baseline` artifact handed to a caller that expects the
+ * `storage-authoritative` one is a problem (`artifact-kind-mismatch`), never a
+ * silent pass. Verification is otherwise kind-agnostic — it reports the kind it
+ * read either way.
  */
 export async function verifyBackupArtifact(
   reader: BackupReader,
-  options: { backupDir: string; now: number }
+  options: {
+    backupDir: string;
+    now: number;
+    requireKind?: BackupArtifactKind;
+  }
 ): Promise<VerifyReport> {
   const problems: VerifyProblem[] = [];
   const files: VerifyFile[] = [];
@@ -1473,6 +1782,18 @@ export async function verifyBackupArtifact(
     });
   }
   const manifest = loaded.ok ? loaded.manifest : null;
+
+  if (
+    manifest &&
+    options.requireKind &&
+    manifest.kind !== options.requireKind
+  ) {
+    problems.push({
+      code: 'artifact-kind-mismatch',
+      path: MANIFEST_FILE,
+      message: `this artifact records kind='${manifest.kind}', not the required kind='${options.requireKind}'${manifest.kind === 'legacy-baseline' ? ': it was captured before the shim-enabled deployment, so its legacy text is not the authoritative content of the posts' : ''}`,
+    });
+  }
 
   // 1. SHA256SUMS -> every file it lists (including the manifest itself).
   const sums = sumsBytes ? parseSums(sumsBytes.toString('utf8')) : null;
@@ -1768,6 +2089,7 @@ export async function verifyBackupArtifact(
     mode: 'verify',
     backupDir: resolve(options.backupDir),
     runId: manifest ? manifest.runId : null,
+    kind: manifest ? manifest.kind : null,
     generatedAt: new Date(options.now).toISOString(),
     ok: problems.length === 0,
     manifestSha256: loaded.ok ? sha256Hex(loaded.bytes) : null,
@@ -1810,6 +2132,10 @@ export type RestoreReport = {
   apply: boolean;
   backupDir: string;
   runId: string | null;
+  /** The artifact's recorded kind (see `VerifyReport.kind`), or null. */
+  kind: BackupArtifactKind | null;
+  /** What the restore insisted on; the artifact must match it. */
+  requiredKind: BackupArtifactKind;
   generatedAt: string;
   ok: boolean;
   target: {
@@ -2019,14 +2345,26 @@ export const LEGACY_BODY_BACKUP_USAGE = [
   '      read-only dry run: reads production, writes nothing',
   `  CMS_PROD_BACKUP_APPLY_ACK=${BACKUP_APPLY_ACK_VALUE} \\`,
   `    bun src/utils/cms/prodLegacyBodyBackup.ts --out-dir=<dir> --apply`,
-  '      write the baseline artifact (needs the acknowledgement)',
-  `  bun src/utils/cms/prodLegacyBodyBackup.ts --verify --backup-dir=<dir>`,
+  '      write a legacy-baseline artifact (needs the acknowledgement)',
+  `  CMS_PROD_BACKUP_APPLY_ACK=${BACKUP_APPLY_ACK_VALUE} \\`,
+  `    bun src/utils/cms/prodLegacyBodyBackup.ts --out-dir=<dir> --apply \\`,
+  '      --storage-authoritative [--baseline-dir=<legacy baseline run dir>]',
+  '      write a storage-authoritative artifact (post-shim recovery snapshot)',
+  `  bun src/utils/cms/prodLegacyBodyBackup.ts --verify --backup-dir=<dir> \\`,
+  '      [--require-kind=<legacy-baseline|storage-authoritative>]',
   '      offline: re-hash the on-disk files against the manifest',
   `  CMS_BACKUP_RESTORE_ACK=${BACKUP_RESTORE_ACK_VALUE} \\`,
   '    bun src/utils/cms/prodLegacyBodyBackup.ts --restore --backup-dir=<dir> \\',
   `      [--restore-schema=${DEFAULT_RESTORE_SCHEMA}] [--restore-table=${DEFAULT_RESTORE_TABLE}] \\`,
-  '      [--restore-bucket=<bucket>] --apply',
+  '      [--restore-bucket=<bucket>] [--require-kind=<kind>] --apply',
   '      restore into a SCRATCH target (needs the acknowledgement)',
+  '',
+  'Every artifact records its own kind in manifest.json: a legacy-baseline is',
+  'the pre-shim snapshot (a placeholder legacy value is an error), a',
+  'storage-authoritative one is the post-shim recovery snapshot (a placeholder',
+  'is expected; the pointer + object pair is the authoritative content).',
+  `--restore requires kind='${DEFAULT_RESTORE_REQUIRED_KIND}' unless --require-kind`,
+  'names another kind, so a baseline is never silently restored as current.',
   '',
   `--apply additionally requires APP_ENV=${BACKUP_APP_ENV},`,
   `NEXT_PUBLIC_SUPABASE_DB_SCHEMA=${BACKUP_SCHEMA} and`,
@@ -2039,8 +2377,22 @@ export const LEGACY_BODY_BACKUP_USAGE = [
 ].join('\n');
 
 export type LegacyBodyBackupArgs =
-  | { mode: 'export'; outDir: string | null; apply: boolean; json: boolean }
-  | { mode: 'verify'; backupDir: string; json: boolean }
+  | {
+      mode: 'export';
+      outDir: string | null;
+      apply: boolean;
+      json: boolean;
+      /** `legacy-baseline` unless `--storage-authoritative` was given. */
+      kind: BackupArtifactKind;
+      /** `--baseline-dir`: a reference artifact to compare against, or null. */
+      baselineDir: string | null;
+    }
+  | {
+      mode: 'verify';
+      backupDir: string;
+      json: boolean;
+      requireKind: BackupArtifactKind | null;
+    }
   | {
       mode: 'restore';
       backupDir: string;
@@ -2049,6 +2401,8 @@ export type LegacyBodyBackupArgs =
       schema: string;
       table: string;
       bucket: string | null;
+      /** null means the restore's own default kind. */
+      requireKind: BackupArtifactKind | null;
     }
   | { mode: 'help' }
   | { mode: 'invalid'; error: string };
@@ -2059,6 +2413,9 @@ type ParsedFlags = {
   restoreSchema: string | null;
   restoreTable: string | null;
   restoreBucket: string | null;
+  baselineDir: string | null;
+  requireKind: BackupArtifactKind | null;
+  storageAuthoritative: boolean;
   verify: boolean;
   restore: boolean;
   apply: boolean;
@@ -2079,6 +2436,9 @@ export function parseLegacyBodyBackupArgs(
     restoreSchema: null,
     restoreTable: null,
     restoreBucket: null,
+    baselineDir: null,
+    requireKind: null,
+    storageAuthoritative: false,
     verify: false,
     restore: false,
     apply: false,
@@ -2116,6 +2476,15 @@ export function parseLegacyBodyBackupArgs(
       flags.restore = true;
       continue;
     }
+    if (arg === '--storage-authoritative') {
+      if (flags.storageAuthoritative)
+        return {
+          mode: 'invalid',
+          error: 'duplicate --storage-authoritative',
+        };
+      flags.storageAuthoritative = true;
+      continue;
+    }
     const assignment = /^--([a-z-]+)=(.*)$/.exec(arg);
     if (!assignment) {
       return { mode: 'invalid', error: `unexpected argument: ${arg}` };
@@ -2126,7 +2495,9 @@ export function parseLegacyBodyBackupArgs(
       name !== 'backup-dir' &&
       name !== 'restore-schema' &&
       name !== 'restore-table' &&
-      name !== 'restore-bucket'
+      name !== 'restore-bucket' &&
+      name !== 'baseline-dir' &&
+      name !== 'require-kind'
     ) {
       return { mode: 'invalid', error: `unexpected argument: ${arg}` };
     }
@@ -2137,6 +2508,16 @@ export function parseLegacyBodyBackupArgs(
     if (name === 'restore-schema') flags.restoreSchema = value;
     if (name === 'restore-table') flags.restoreTable = value;
     if (name === 'restore-bucket') flags.restoreBucket = value;
+    if (name === 'baseline-dir') flags.baselineDir = value;
+    if (name === 'require-kind') {
+      if (!isBackupArtifactKind(value)) {
+        return {
+          mode: 'invalid',
+          error: `--require-kind '${value}' is not one of ${Object.keys(BACKUP_ARTIFACT_KINDS).join(' | ')}`,
+        };
+      }
+      flags.requireKind = value;
+    }
   }
 
   if (flags.verify && flags.restore) {
@@ -2163,12 +2544,37 @@ export function parseLegacyBodyBackupArgs(
       error: '--verify never writes, so --apply is not accepted with it',
     };
   }
+  if (flags.storageAuthoritative && (flags.verify || flags.restore)) {
+    return {
+      mode: 'invalid',
+      error:
+        '--storage-authoritative describes the artifact an export writes, so it is only valid for an export',
+    };
+  }
+  if (flags.baselineDir && (flags.verify || flags.restore)) {
+    return {
+      mode: 'invalid',
+      error:
+        '--baseline-dir compares an export with a reference artifact, so it is only valid for an export',
+    };
+  }
+  if (flags.requireKind !== null && !flags.verify && !flags.restore) {
+    return {
+      mode: 'invalid',
+      error: '--require-kind is only valid with --verify or --restore',
+    };
+  }
 
   if (flags.verify) {
     if (!flags.backupDir) {
       return { mode: 'invalid', error: '--verify requires --backup-dir=<dir>' };
     }
-    return { mode: 'verify', backupDir: flags.backupDir, json: flags.json };
+    return {
+      mode: 'verify',
+      backupDir: flags.backupDir,
+      json: flags.json,
+      requireKind: flags.requireKind,
+    };
   }
 
   if (flags.restore) {
@@ -2209,6 +2615,7 @@ export function parseLegacyBodyBackupArgs(
       schema,
       table,
       bucket: flags.restoreBucket,
+      requireKind: flags.requireKind,
     };
   }
 
@@ -2230,6 +2637,10 @@ export function parseLegacyBodyBackupArgs(
     outDir: flags.outDir,
     apply: flags.apply,
     json: flags.json,
+    kind: flags.storageAuthoritative
+      ? 'storage-authoritative'
+      : DEFAULT_EXPORT_KIND,
+    baselineDir: flags.baselineDir,
   };
 }
 
@@ -2258,6 +2669,8 @@ export type BackupReport = {
   schema: string;
   projectRef: string;
   bucket: string;
+  /** The artifact kind this run wrote: `legacy-baseline` or `storage-authoritative`. */
+  kind: BackupArtifactKind;
   generatedAt: string;
   runId: string;
   /**
@@ -2270,6 +2683,8 @@ export type BackupReport = {
   rows: BackupManifestRow[];
   objects: BackupManifestObject[];
   findings: BackupFinding[];
+  /** The reference `--baseline-dir` was compared with, or null. */
+  baseline: BackupBaselineComparison | null;
   artifact: {
     manifestSha256: string;
     rowsSha256: string;
@@ -2282,11 +2697,14 @@ export type BackupReport = {
 /** Human-readable audit of an export, one line per recorded fact. */
 export function humanBackupLines(report: BackupReport): string[] {
   const lines = [
-    `command=${report.command} mode=${report.mode} appEnv=${report.appEnv} schema=${report.schema} project=${report.projectRef} bucket=${report.bucket}`,
+    `command=${report.command} mode=${report.mode} kind=${report.kind} appEnv=${report.appEnv} schema=${report.schema} project=${report.projectRef} bucket=${report.bucket}`,
     `rows: total=${report.counts.rows} blog=${report.counts.blog} portfolio=${report.counts.portfolio} hidden=${report.counts.hidden} visible=${report.counts.visible}`,
-    `bodies: captured=${report.counts.bodies} bytes=${report.counts.bodyBytes}`,
+    `bodies: captured=${report.counts.bodies} bytes=${report.counts.bodyBytes} placeholders=${report.counts.placeholders}`,
     `objects: referenced=${report.counts.pointers} captured=${report.counts.objects} bytes=${report.counts.objectBytes} missing=${report.counts.objectsMissing}`,
-    `findings: errors=${report.counts.errors} warnings=${report.counts.warnings} complete=${report.complete}`,
+    `findings: errors=${report.counts.errors} warnings=${report.counts.warnings} infos=${report.counts.infos} complete=${report.complete}`,
+    report.baseline
+      ? `baseline: runId=${report.baseline.runId} dir=${report.baseline.directory} drift=${report.baseline.drift.length === 0 ? 'none' : report.baseline.drift.join('; ')}`
+      : 'baseline: not compared (no --baseline-dir)',
   ];
   for (const finding of report.findings) {
     lines.push(
@@ -2316,7 +2734,7 @@ export function humanBackupLines(report: BackupReport): string[] {
 
 export function humanVerifyLines(report: VerifyReport): string[] {
   const lines = [
-    `command=${report.command} mode=verify dir=${report.backupDir} runId=${report.runId ?? 'unknown'} intact=${report.ok}`,
+    `command=${report.command} mode=verify dir=${report.backupDir} runId=${report.runId ?? 'unknown'} kind=${report.kind ?? 'unknown'} intact=${report.ok}`,
     `sha256sums-sha256 ${report.sumsSha256 ?? 'missing'}  # compare with the value retained out of band`,
     `manifest-sha256 ${report.manifestSha256 ?? 'missing'}`,
     `files: checked=${report.counts.files} ok=${report.counts.filesOk} mismatched=${report.counts.filesMismatched} missing=${report.counts.filesMissing} unexpected=${report.counts.filesUnexpected}`,
@@ -2340,7 +2758,7 @@ export function humanVerifyLines(report: VerifyReport): string[] {
 export function humanRestoreLines(report: RestoreReport): string[] {
   const target = report.target;
   const lines = [
-    `command=${report.command} mode=restore apply=${report.apply} dir=${report.backupDir} runId=${report.runId ?? 'unknown'}`,
+    `command=${report.command} mode=restore apply=${report.apply} dir=${report.backupDir} runId=${report.runId ?? 'unknown'} kind=${report.kind ?? 'unknown'} requiredKind=${report.requiredKind}`,
     target
       ? `target: ${target.schema}.${target.table} project=${target.ref} bucket=${target.bucket ?? '(rows only)'}`
       : 'target: none',
@@ -2387,7 +2805,10 @@ export type LegacyBodyBackupCliDeps = {
   openObjects(): BodyContentStorageApi;
   /** Called only for an armed export, after every gate. */
   openWriter(runDirectory: string): BackupWriter;
-  /** Called by `--verify` and `--restore` (local files only). */
+  /**
+   * Called by `--verify`, `--restore` and an export's `--baseline-dir` (local
+   * files only, always read-only).
+   */
   openReader(runDirectory: string): BackupReader;
   /** Called only for an armed restore, after every gate and the verification. */
   openRestoreRows(target: RestoreTarget): RestoreRowClient;
@@ -2448,6 +2869,9 @@ export async function runLegacyBodyBackupCli(
         {
           backupDir: args.backupDir,
           now: now(),
+          ...(args.requireKind === null
+            ? {}
+            : { requireKind: args.requireKind }),
         }
       );
       return {
@@ -2503,10 +2927,38 @@ async function runExportCli(
       : join(resolve(args.outDir), runDirectoryName(at, runId));
 
   try {
-    const capture = await captureLegacyBodies({
-      reader: deps.openRowReader(),
-      objects: deps.openObjects(),
-    });
+    const capture = await captureLegacyBodies(
+      {
+        reader: deps.openRowReader(),
+        objects: deps.openObjects(),
+      },
+      { kind: args.kind }
+    );
+    if (args.baselineDir !== null) {
+      // A local, read-only read of the reference artifact. It decides nothing
+      // about completeness: it only records what moved, so a snapshot that
+      // legitimately differs from the baseline stays a valid artifact.
+      const reference = await loadBackupManifest(
+        deps.openReader(args.baselineDir)
+      );
+      if (!reference.ok) {
+        return refusal(
+          4,
+          new Error(
+            `--baseline-dir '${args.baselineDir}' could not be read: ${reference.error}`
+          )
+        );
+      }
+      if (reference.manifest.kind !== DEFAULT_EXPORT_KIND) {
+        return refusal(
+          3,
+          new Error(
+            `--baseline-dir '${args.baselineDir}' records kind='${reference.manifest.kind}', but the reference baseline is always a '${DEFAULT_EXPORT_KIND}' artifact; compare against the baseline itself, not against another snapshot`
+          )
+        );
+      }
+      applyBaselineComparison(capture, reference.manifest, args.baselineDir);
+    }
     // Built exactly once, whether or not it is written: the report and the
     // artifact must never be two different descriptions of the same capture.
     const artifact = buildBackupArtifact(capture, {
@@ -2529,6 +2981,7 @@ async function runExportCli(
       schema: deps.observed.schema,
       projectRef: projectRefFromUrl(deps.observed.supabaseUrl) ?? '',
       bucket: BACKUP_BUCKET,
+      kind: artifact.manifest.kind,
       generatedAt: new Date(at).toISOString(),
       runId,
       runDirectory,
@@ -2537,6 +2990,7 @@ async function runExportCli(
       rows: artifact.manifest.rows,
       objects: artifact.manifest.objects,
       findings: artifact.manifest.findings,
+      baseline: artifact.manifest.baseline,
       artifact: armed
         ? {
             manifestSha256: sha256Hex(artifact.manifestBytes),
@@ -2608,6 +3062,7 @@ async function runRestoreCli(
       now: now(),
     });
     const loaded = await loadBackupManifest(reader);
+    const requiredKind = args.requireKind ?? DEFAULT_RESTORE_REQUIRED_KIND;
 
     const counts = {
       rowsPlanned: 0,
@@ -2625,6 +3080,8 @@ async function runRestoreCli(
       apply: args.apply,
       backupDir: resolve(args.backupDir),
       runId: loaded.ok ? loaded.manifest.runId : null,
+      kind: loaded.ok ? loaded.manifest.kind : null,
+      requiredKind,
       generatedAt: new Date(now()).toISOString(),
       ok: false,
       target: {
@@ -2651,6 +3108,24 @@ async function runRestoreCli(
         report,
         lines: args.json ? [] : humanRestoreLines(report),
         error: null,
+      };
+    }
+
+    // The kind gate: a `legacy-baseline` artifact is the pre-shim snapshot, so
+    // restoring it as if it were the post-shim content of record would be
+    // wrong. It is only ever used when the operator says so explicitly.
+    if (loaded.manifest.kind !== requiredKind) {
+      const blocked = `this artifact records kind='${loaded.manifest.kind}' but the restore requires kind='${requiredKind}'${
+        loaded.manifest.kind === DEFAULT_EXPORT_KIND
+          ? `: it was captured before the shim-enabled deployment, so its legacy text is the pre-shim copy and not the authoritative content of the posts. Pass --require-kind=${loaded.manifest.kind} to restore it deliberately`
+          : ''
+      }`;
+      const report = { ...base, blocked, ok: false };
+      return {
+        exitCode: 3,
+        report,
+        lines: args.json ? [] : humanRestoreLines(report),
+        error: blocked,
       };
     }
 
