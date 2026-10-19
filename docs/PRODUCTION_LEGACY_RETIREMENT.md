@@ -235,7 +235,8 @@ the previous one:
 7. **Shim removed** — `legacyBodyEnShim.ts`, its flag and the now-dead
    `CMS_BODY_DUAL_WRITE_ENABLED` / `CMS_BODY_STORAGE_READ_ENABLED` /
    `WS_BODY_STORAGE_READ_ENABLED` configuration are being retired in the follow-up
-   revision; `CMS_BODY_POINTER_COLUMNS` remains only for the obsolete backfill CLIs.
+   revision; `CMS_BODY_POINTER_COLUMNS` and the obsolete production backfill CLIs
+   were removed in the follow-up revision (retired 2026-10-19).
 
 **Unreferenced objects at completion: 3** — the two `portfolio/27` orphans and the
 EN object superseded by the post-20 edit. Their 14-day retention has not elapsed;

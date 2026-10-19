@@ -19,10 +19,7 @@
     "storage:content:prod:backup": "bun src/utils/cms/prodLegacyBodyBackup.ts",
     "storage:content:dev:backfill:plan": "bun src/utils/cms/backfillPlan.ts",
     "storage:content:dev:backfill:exec": "bun src/utils/cms/backfillExec.ts",
-    "storage:content:dev:backfill:rollback": "bun src/utils/cms/backfillRollback.ts",
-    "storage:content:prod:backfill:plan": "bun src/utils/cms/prodBackfillPlan.ts",
-    "storage:content:prod:backfill:exec": "bun src/utils/cms/prodBackfillExec.ts",
-    "storage:content:prod:backfill:rollback": "bun src/utils/cms/prodBackfillRollback.ts"
+    "storage:content:dev:backfill:rollback": "bun src/utils/cms/backfillRollback.ts"
   },
   "dependencies": {
     "@img/sharp-libvips-linux-x64": "1.3.4",

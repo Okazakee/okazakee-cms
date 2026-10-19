@@ -21,15 +21,6 @@
  */
 import { tryResolveContentBucket } from '@/libs/cms/storage/contentBucket';
 
-/**
- * Schema-capability flag: declares that the pointer columns EXIST in the
- * configured schema. It no longer gates a CMS write (every schema in the
- * cutover has the columns); `src/libs/cms/storage/prodBackfillPlan.ts` and the
- * production backfill CLI still import it to decide whether a plan may name
- * `body_*_path`.
- */
-export const POINTER_COLUMNS_FLAG = 'CMS_BODY_POINTER_COLUMNS';
-
 export type BodyWriteEnv = {
   appEnv: string;
   schema: string;

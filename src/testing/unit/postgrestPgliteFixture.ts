@@ -47,9 +47,8 @@
  *     path touches are omitted on purpose, so the rehearsal cannot pass because
  *     of an over-permissive table.
  *
- * This module is a test helper (like `src/testing/unit/supabaseFake.ts` and
- * `src/testing/sql/prodBackfillPostgresFixture.ts`), not a test: it exports no
- * assertions.
+ * This module is a test helper (like `src/testing/unit/supabaseFake.ts`),
+ * not a test: it exports no assertions.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';

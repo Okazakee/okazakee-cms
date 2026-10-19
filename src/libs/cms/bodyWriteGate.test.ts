@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  POINTER_COLUMNS_FLAG,
-  resolveBodyWrite,
-} from '@/libs/cms/bodyWriteGate';
+import { resolveBodyWrite } from '@/libs/cms/bodyWriteGate';
 
 /**
  * The write gate no longer has an enable flag (Storage is the only body store);
@@ -35,9 +32,5 @@ describe('resolveBodyWrite', () => {
         expect(decision.error).toMatch(/refusing to resolve a content bucket/);
       }
     }
-  });
-
-  it('keeps the pointer-columns capability flag stable for the backfill tooling', () => {
-    expect(POINTER_COLUMNS_FLAG).toBe('CMS_BODY_POINTER_COLUMNS');
   });
 });

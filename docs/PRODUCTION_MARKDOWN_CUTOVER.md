@@ -1,5 +1,10 @@
 # Production Markdown body cutover — operator runbook (Phase 14)
 
+> **Retired 2026-10-19.** The production backfill CLIs and the
+> `storage:content:prod:backfill:*` scripts referenced below were deleted once the
+> cutover completed, and `CMS_BODY_POINTER_COLUMNS` was removed from the code.
+> The command transcripts and flag references in this runbook are historical.
+
 Executable runbook for moving long-form Markdown bodies out of the legacy
 `public.blog_posts` / `public.portfolio_posts` `body_en` / `body_it` columns and
 into the private `website-content` bucket on project `mtvwynyikouqzmhqespl`,

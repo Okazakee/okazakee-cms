@@ -4,6 +4,10 @@ Single source of truth for everything still open in the Markdown cutover, kept
 with the runbook (`docs/PRODUCTION_MARKDOWN_CUTOVER.md`) and the deployment
 record (`docs/PRODUCTION_DEPLOYMENT_RECORD.md`).
 
+> **Retired 2026-10-19.** The `CMS_BODY_POINTER_COLUMNS` flag and the production
+> backfill CLIs named in BW-3/BW-5 were removed from the repository once the
+> cutover completed; the rows below are kept as the historical record.
+
 Status values: **PASS** (verified with execution evidence) · **DEFERRED** (not
 yet due; checkpoint named) · **BLOCKED** (cannot proceed). Nothing here may be
 marked PASS without actual execution evidence. The authenticated CMS editor

@@ -436,6 +436,10 @@ settles it).
 
 ### Tests
 
+> **Retired 2026-10-19.** The production backfill implementation and its CLIs were
+> deleted from the repository; the five files listed below no longer exist. The
+> list is kept as historical evidence of the Phase 13 suite.
+
 - `src/libs/cms/storage/backfillEnvironment.test.ts` — descriptor pinning, the
   shared environment gate, the origin allowlist and both revalidation policies.
 - `src/libs/cms/storage/prodBackfillGates.test.ts` — the journal/endpoint/secret

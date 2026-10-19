@@ -184,6 +184,11 @@ returning `text/markdown`), not merely that the page renders.
 
 ## Production planner (Phase 13, gate C2)
 
+> **Retired 2026-10-19.** `src/libs/cms/storage/prodBackfillPlan.ts`, the
+> production CLI modules and the `storage:content:prod:backfill:*` scripts were
+> removed once the cutover completed. The production-planner description below is
+> historical; the DEV planner remains in use.
+
 `src/libs/cms/storage/prodBackfillPlan.ts` is the production twin of this
 planner — the same classification, ordering, duplicate detection, summary
 arithmetic and manifest digest (shared through `backfillPlan.ts` and
