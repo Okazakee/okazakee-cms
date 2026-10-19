@@ -5,6 +5,7 @@ import type { Root } from 'react-dom/client';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import cmsEn from '@/i18n/messages/cms.en.json';
+import { useCmsStore } from '@/store/cmsStore';
 
 const h = vi.hoisted(() => ({
   action:
@@ -109,23 +110,21 @@ const bodyResponse = (id: number) => ({
   data: { id, body_en: BODIES[id]?.en, body_it: BODIES[id]?.it },
 });
 
-/** Fake server: `GET` carries bodies, `GET_LIST` never does. */
-/** Simulates a batch whose update did not commit. */
+/**
+ * `GET_LIST` never carries a body — only the `GET_BODIES` action resolves one.
+ * `hiddenIds` marks rows the server reports as hidden; `failUpdates` simulates a
+ * batch whose update did not commit.
+ */
 let failUpdates = false;
+let hiddenIds = new Set<number>();
 
 function respond(operation: Operation): unknown {
   switch (operation.type) {
-    case 'GET':
+    case 'GET_LIST':
       return {
         success: true,
-        data: ROWS.map((row) => ({
-          ...row,
-          body_en: BODIES[row.id]?.en,
-          body_it: BODIES[row.id]?.it,
-        })),
+        data: ROWS.map((row) => ({ ...row, hidden: hiddenIds.has(row.id) })),
       };
-    case 'GET_LIST':
-      return { success: true, data: ROWS.map((row) => ({ ...row })) };
     case 'GET_AUTHORS':
       return {
         success: true,
@@ -162,15 +161,17 @@ function respond(operation: Operation): unknown {
   }
 }
 
-function setGate(enabled: boolean): void {
-  vi.stubEnv(
-    'NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED',
-    enabled ? 'true' : 'false'
-  );
-  vi.stubEnv(
-    'NEXT_PUBLIC_SUPABASE_DB_SCHEMA',
-    enabled ? 'dev_staging' : 'public'
-  );
+/**
+ * The PRODUCTION CMS environment, as it actually runs: schema `public`,
+ * `APP_ENV=production`, and `NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED` NOT set.
+ * Every assertion below is therefore a production regression guard: the
+ * metadata-only list plus the authenticated `GET_BODIES` read must not depend on
+ * any flag being configured.
+ */
+function productionEnv(): void {
+  delete process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED;
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+  vi.stubEnv('APP_ENV', 'production');
 }
 
 let root: Root;
@@ -276,6 +277,9 @@ const publish = async () => {
 };
 
 beforeEach(() => {
+  // Production does not set this variable; nothing may depend on it.
+  delete process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED;
+  useCmsStore.setState({ demoMode: false });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal(
     'URL',
@@ -288,6 +292,7 @@ beforeEach(() => {
   h.publish = null;
   h.action.mockImplementation(async (operation) => respond(operation));
   failUpdates = false;
+  hiddenIds = new Set();
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -299,48 +304,13 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-it('loads the full list with GET when the gate is off and keeps the legacy payload', async () => {
-  setGate(false);
-  await mount();
+it('production (public), no lazy flag set: loads the metadata-only list and never reads bodies', async () => {
+  productionEnv();
+  // The regression this guards: production sets neither the lazy-body variable
+  // nor a dev schema, and used to fall back to a full-row `GET`.
+  expect(process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED).toBeUndefined();
+  expect(process.env.NEXT_PUBLIC_SUPABASE_DB_SCHEMA).toBe('public');
 
-  expect(actionTypes()).toContain('GET');
-  expect(actionTypes()).not.toContain('GET_LIST');
-  expect(actionTypes()).not.toContain('GET_BODIES');
-  expect(container.textContent).toContain('Alpha');
-
-  // The editor opens on the bodies the list read already carried.
-  await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
-  expect(actionTypes()).not.toContain('GET_BODIES');
-  expect(bodyText()).toBe(BODIES[1]?.en);
-  expect(findInputWithValue('Alpha')).toBeTruthy();
-
-  await clickByText(cmsEn.common.cancel);
-  await clickByLabel(rowFor('Alpha'), cmsEn.common.hide);
-  await publish();
-
-  const update = lastUpdate();
-  expect(update?.id).toBe(1);
-  expect(update?.data.hidden).toBe(true);
-  expect(Object.keys(update?.data ?? {}).sort()).toEqual([
-    'author_id',
-    'body_en',
-    'body_it',
-    'buttons',
-    'created_at',
-    'description_en',
-    'description_it',
-    'hidden',
-    'post_tags',
-    'title_en',
-    'title_it',
-  ]);
-  expect(update?.data.body_en).toBe(BODIES[1]?.en);
-  expect(update?.data.body_it).toBe(BODIES[1]?.it);
-  expect(update?.bodyFiles).toEqual([]);
-});
-
-it('loads the metadata-only list and never reads bodies when the gate is on', async () => {
-  setGate(true);
   await mount();
 
   expect(actionTypes()[0]).toBe('GET_LIST');
@@ -351,8 +321,8 @@ it('loads the metadata-only list and never reads bodies when the gate is on', as
   expect(container.textContent).toContain('Beta');
 });
 
-it('opens an existing post by loading its bodies exactly once', async () => {
-  setGate(true);
+it('production (public): opens an existing post from Storage, loading its bodies exactly once', async () => {
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -366,8 +336,18 @@ it('opens an existing post by loading its bodies exactly once', async () => {
   expect(findInputWithValue('https://source.example.com')).toBeTruthy();
 });
 
+it('production (public): a hidden post is listed and its Markdown still resolves', async () => {
+  productionEnv();
+  hiddenIds = new Set([2]);
+  await mount();
+
+  expect(rowFor('Beta')).toBeTruthy();
+  await clickByLabel(rowFor('Beta'), cmsEn.common.edit);
+  expect(bodyText()).toBe(BODIES[2]?.en);
+});
+
 it('keeps a staged new post local and never reads bodies for it', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByText(cmsEn.portfolio.addPortfolioPost);
@@ -398,7 +378,7 @@ it('keeps a staged new post local and never reads bodies for it', async () => {
 });
 
 it('surfaces a failed body read, keeps the editor closed, and retries', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   h.action.mockImplementation(async (operation) =>
@@ -422,8 +402,37 @@ it('surfaces a failed body read, keeps the editor closed, and retries', async ()
   expect(actionTypes().filter((type) => type === 'GET_BODIES')).toHaveLength(2);
 });
 
+it('production (public): a failed body read forbids overwriting the committed Markdown', async () => {
+  productionEnv();
+  await mount();
+
+  h.action.mockImplementation(async (operation) =>
+    operation.type === 'GET_BODIES'
+      ? { success: false, error: 'Storage read failed' }
+      : respond(operation)
+  );
+  await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
+  expect(container.textContent).toContain('Storage read failed');
+  expect(container.querySelector('#portfolio-body')).toBeNull();
+  expect(batchCalls()).toEqual([]);
+
+  // The only edit still available is a metadata-level one. A locale whose read
+  // failed has no loaded value and no baseline, so the publish must omit BOTH
+  // body fields: sending `''` would wipe the real Markdown (and orphan its
+  // object) that this client never saw.
+  await clickByLabel(rowFor('Alpha'), cmsEn.common.hide);
+  await publish();
+
+  const update = lastUpdate();
+  expect(update?.id).toBe(1);
+  expect(update?.data.hidden).toBe(true);
+  expect(update?.data).not.toHaveProperty('body_en');
+  expect(update?.data).not.toHaveProperty('body_it');
+  expect(update?.bodyFiles).toEqual([]);
+});
+
 it('drops a stale body response instead of overwriting the editor', async () => {
-  setGate(true);
+  productionEnv();
   const pending: Array<(value: unknown) => void> = [];
   h.action.mockImplementation(async (operation) => {
     if (operation.type === 'GET_BODIES') {
@@ -456,7 +465,7 @@ it('drops a stale body response instead of overwriting the editor', async () => 
 });
 
 it('sends no body field for a visibility-only update', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.hide);
@@ -480,7 +489,7 @@ it('sends no body field for a visibility-only update', async () => {
 });
 
 it('sends no body field for a metadata-only update', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -496,7 +505,7 @@ it('sends no body field for a metadata-only update', async () => {
 });
 
 it('sends only the locale that changed, and both when both changed', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -523,7 +532,7 @@ it('sends only the locale that changed, and both when both changed', async () =>
 });
 
 it('sends neither body field when the edit is reverted to the baseline', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -539,7 +548,7 @@ it('sends neither body field when the edit is reverted to the baseline', async (
 });
 
 it('keeps an unresolved body draft across a reopen and rebases its baseline', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -561,7 +570,7 @@ it('keeps an unresolved body draft across a reopen and rebases its baseline', as
 });
 
 it('sends no body field for a buttons-only change and keeps buttons intact', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -593,7 +602,7 @@ it('sends no body field for a buttons-only change and keeps buttons intact', asy
 });
 
 it('keeps an unresolvable draft body edit for the next publish', async () => {
-  setGate(true);
+  productionEnv();
   await mount();
 
   await clickByLabel(rowFor('Alpha'), cmsEn.common.edit);
@@ -616,4 +625,22 @@ it('keeps an unresolvable draft body edit for the next publish', async () => {
   const update = lastUpdate();
   expect(update?.data.body_en).toBe('Alpha EDITED EN');
   expect(update?.data).not.toHaveProperty('body_it');
+});
+
+/**
+ * Demo mode owns its data: it must keep rendering its fixtures and never issue
+ * a server action, in particular never a `GET_BODIES` for a fixture post whose
+ * id looks like a real one. The editor must still open on fixture Markdown.
+ */
+it('demo mode: renders its fixtures, calls no action, and keeps the fixture Markdown', async () => {
+  productionEnv();
+  useCmsStore.setState({ demoMode: true });
+  await mount();
+
+  expect(h.action).not.toHaveBeenCalled();
+  expect(rowFor('Demo project')).toBeTruthy();
+
+  await clickByLabel(rowFor('Demo project'), cmsEn.common.edit);
+  expect(actionTypes()).toEqual([]);
+  expect(bodyText()).toContain('Project demo');
 });

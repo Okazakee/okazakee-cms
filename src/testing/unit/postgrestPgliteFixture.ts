@@ -119,7 +119,9 @@ export type ContentSchemaShape =
 /**
  * The CMS-facing content tables on the pre-contraction shape: every column the
  * admin actions read or write, plus the legacy body columns exactly as
- * production declares them (`body_en NOT NULL`, `body_it` nullable). Pointer
+ * production declares them (`body_en NOT NULL`, `body_it` nullable). `views` is
+ * included because the metadata-only list projection (`GET_LIST`) selects it, so
+ * the editor path can be exercised against the real column set. Pointer
  * columns, CHECK constraints and the nullability relaxation are NOT here — they
  * come from the reviewed artifacts, so the rehearsal exercises the real DDL.
  */
@@ -139,6 +141,7 @@ const PRE_CONTRACTION_SCHEMA_SQL = `
     post_tags text not null default '',
     author_id text not null default '',
     hidden boolean not null default false,
+    views integer not null default 0,
     created_at timestamptz not null default now(),
     body_en text not null,
     body_it text
@@ -155,6 +158,7 @@ const PRE_CONTRACTION_SCHEMA_SQL = `
     post_tags text not null default '',
     author_id text not null default '',
     hidden boolean not null default false,
+    views integer not null default 0,
     created_at timestamptz not null default now(),
     buttons jsonb,
     website text,

@@ -36,9 +36,6 @@ import {
   readBatchEvidence,
   reconcileDrafts,
 } from '@/hooks/cms/batchDrafts';
-import { useBodyImages } from '@/hooks/cms/useBodyImages';
-import { useFileUpload } from '@/hooks/cms/useFileUpload';
-import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import {
   bodyColumnFields,
   type LoadedBodies,
@@ -48,11 +45,13 @@ import {
   reconcileListBodies,
   rowBodies,
 } from '@/hooks/cms/postBodyState';
+import { useBodyImages } from '@/hooks/cms/useBodyImages';
+import { useFileUpload } from '@/hooks/cms/useFileUpload';
+import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { usePostBodies } from '@/hooks/cms/usePostBodies';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { bodyLazyLoadEnabled } from '@/libs/cms/postList';
 import { demoBlogPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { BlogListPost } from '@/types/fetchedData.types';
@@ -171,9 +170,10 @@ export default function BlogSection() {
       if (useCmsStore.getState().demoMode) {
         if (!current()) return;
         setPosts(
-          JSON.parse(JSON.stringify(demoBlogPosts)).map(
-            (p: EditablePost) => ({ ...p, image_file: null })
-          )
+          JSON.parse(JSON.stringify(demoBlogPosts)).map((p: EditablePost) => ({
+            ...p,
+            image_file: null,
+          }))
         );
         setAuthors([
           {
@@ -187,10 +187,11 @@ export default function BlogSection() {
         return;
       }
       try {
-        // Phase 9B: metadata-only rows when the lazy path is on. `GET` keeps
-        // pulling the full rows (bodies included) otherwise.
-        const lazyBodies = bodyLazyLoadEnabled();
-        const r = await blogActions({ type: lazyBodies ? 'GET_LIST' : 'GET' });
+        // Metadata-only rows: no list read carries a Markdown body. An existing
+        // post's Markdown is read by `GET_BODIES` when its editor opens, and
+        // never by this call — the list projection names no body column and no
+        // body pointer.
+        const r = await blogActions({ type: 'GET_LIST' });
         if (!current()) return;
         if (r.success) {
           const server: EditablePost[] = (r.data as BlogListPost[]).map(
@@ -203,7 +204,6 @@ export default function BlogSection() {
             const merged = drafts
               ? mergeServerWithDrafts(server, drafts)
               : server;
-            if (!lazyBodies) return merged;
             // List rows carry no bodies: an inherited body is removed and only
             // an unresolved local edit may put its locales back. A pending
             // create keeps both authored languages.
@@ -214,12 +214,10 @@ export default function BlogSection() {
               isModified: (id) => modifiedRef.current.has(id),
             });
           });
-          if (lazyBodies) {
-            // An unmodified post has no draft left, so its baseline is stale:
-            // the next open must re-read the committed text.
-            for (const id of [...baselines.current.keys()]) {
-              if (!modifiedRef.current.has(id)) baselines.current.delete(id);
-            }
+          // An unmodified post has no draft left, so its baseline is stale:
+          // the next open must re-read the committed text.
+          for (const id of [...baselines.current.keys()]) {
+            if (!modifiedRef.current.has(id)) baselines.current.delete(id);
           }
         }
       } catch (err) {
@@ -267,13 +265,21 @@ export default function BlogSection() {
     setMode('edit');
   };
   /**
-   * Phase 9B: an existing server post has no Markdown on its list row, so the
-   * editor only opens once the reader answered. A failed (or superseded) read
-   * surfaces its error and leaves the list alone — an empty editor over
-   * committed text is exactly the save that must never happen.
+   * An existing server post has no Markdown on its list row, so the editor only
+   * opens once the authenticated Storage read has answered.
+   *
+   * This is a hard rule, not a nicety. If the read fails (or is superseded by a
+   * newer open), the editor stays CLOSED and the failure is surfaced in the
+   * banner. Opening an empty editor and pressing Apply would otherwise rewrite
+   * committed Markdown with `''`; the locale would then also lose its baseline,
+   * so the pointer commit for it could never be proven and the real body would
+   * be orphaned. Hence a failed read must not open the form at all.
+   *
+   * Demo mode renders its own fixtures and never talks to the server, and a
+   * pending create (negative id) is local-only: both open synchronously.
    */
   const openEdit = async (post: EditablePost) => {
-    if (!bodyLazyLoadEnabled() || post.id <= 0) {
+    if (post.id <= 0 || useCmsStore.getState().demoMode) {
       openEditor(post);
       return;
     }
@@ -357,7 +363,9 @@ export default function BlogSection() {
   // Publish commits it through the normal evidence flow.
   const toggleHidden = (id: number) => {
     setPosts((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p))
+      prev.map((p) =>
+        p.id === id ? { ...p, hidden: !(p.hidden ?? false) } : p
+      )
     );
     setModifiedIds((prev) => new Set(prev).add(id));
   };
@@ -401,10 +409,7 @@ export default function BlogSection() {
           tempId: String(item.post.id),
           file,
           blurhashURL: post.blurhashURL,
-          bodyFiles: bodyImages.referencedPayload([
-            post.body_en,
-            post.body_it,
-          ]),
+          bodyFiles: bodyImages.referencedPayload([post.body_en, post.body_it]),
           data: {
             title_en: post.title_en,
             title_it: post.title_it,
@@ -425,21 +430,18 @@ export default function BlogSection() {
     });
     // Negative ids are pending creates, not updates.
     const updateIds = Array.from(modifiedIds).filter((id) => id > 0);
-    const lazyBodies = bodyLazyLoadEnabled();
     const updates = updateIds.flatMap((id) => {
       const post = posts.find((p) => p.id === id);
       if (!post) return [];
       const current = rowBodies(post);
       const baseline = baselines.current.get(id);
-      // Phase 9B: an update carries only the Markdown locales that are loaded
-      // AND dirty, so a visibility- or metadata-only edit never rewrites a
-      // committed body (nor uploads an image only a clean body references).
-      const bodyFiles = lazyBodies
-        ? publishedBodies(current, baseline)
-        : [post.body_en, post.body_it];
-      const bodyFields = lazyBodies
-        ? bodyColumnFields(publishBodyFields(current, baseline))
-        : { body_en: post.body_en, body_it: post.body_it };
+      // An update carries only the Markdown locales that are loaded AND dirty,
+      // so a visibility- or metadata-only edit never rewrites a committed body
+      // (nor uploads an image only a clean body references). A locale whose read
+      // never succeeded has no loaded value and no baseline, so it can never be
+      // published as an empty body.
+      const bodyFiles = publishedBodies(current, baseline);
+      const bodyFields = bodyColumnFields(publishBodyFields(current, baseline));
       return [
         {
           id,
@@ -579,9 +581,10 @@ export default function BlogSection() {
     // Offline showcase: restore the fixture snapshot locally.
     if (useCmsStore.getState().demoMode) {
       setPosts(
-        JSON.parse(JSON.stringify(demoBlogPosts)).map(
-          (p: EditablePost) => ({ ...p, image_file: null })
-        )
+        JSON.parse(JSON.stringify(demoBlogPosts)).map((p: EditablePost) => ({
+          ...p,
+          image_file: null,
+        }))
       );
     } else {
       fetchData();
@@ -671,14 +674,15 @@ export default function BlogSection() {
         </EditorGroup>
 
         <EditorGroup title={t('editor.groups.content')}>
-
           <PostBodyField
             id="blog-body"
             label={t('editor.fields.content')}
             value={formLocale === 'en' ? formData.body_en : formData.body_it}
             onChange={(v) =>
               setFormData((p) =>
-                formLocale === 'en' ? { ...p, body_en: v } : { ...p, body_it: v }
+                formLocale === 'en'
+                  ? { ...p, body_en: v }
+                  : { ...p, body_it: v }
               )
             }
             placeholder={

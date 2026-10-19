@@ -1,21 +1,27 @@
 /**
  * Phase 9B: CMS list reads and the lazy Markdown load gate.
  *
- * Client-safe on purpose (no server or Node imports): client components resolve
- * the gate, and `process.env.NEXT_PUBLIC_*` is inlined by the bundler only when
- * read as a literal — the reason the two variables below are spelled out rather
- * than looked up through a computed key.
+ * Client-safe on purpose (no server or Node imports).
  *
- * The lazy path is opt-in and only for the dev clone:
- *   NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED=true
- *   NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging
+ * The metadata-only list read (`GET_LIST`) plus the authenticated per-post
+ * `GET_BODIES` read is the ONLY supported CMS editor path, in EVERY real
+ * deployment — production (`public`) and the dev clone (`dev_staging`) alike.
+ * It is not opt-in, no environment variable gates it, and no variable has to be
+ * set for it to be active.
+ *
+ * The previous gate ANDed `NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED` with
+ * `dev_staging`, which left production on the legacy `select('*')` list read.
+ * That read returned the retired `body_en`/`body_it` columns, which Storage-only
+ * writes never populate (they stay NULL), so the production editor opened on an
+ * EMPTY Markdown body — while the real Markdown sat in Storage. Opening that
+ * editor and saving would therefore have destroyed committed content. The gate
+ * is gone; the variable is no longer read.
  *
  * A list read resolves no bodies at all (its projection names none of the body
- * or pointer columns), so this gate stays independent of the per-post Storage
- * read that `GET_BODIES` performs.
+ * or pointer columns), so this predicate stays independent of the per-post
+ * Storage read that `GET_BODIES` performs. Demo mode never reaches either path:
+ * it renders its own fixtures and is guarded explicitly at each call site.
  */
-
-export const BODY_LAZY_LOAD_FLAG = 'NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED';
 
 /**
  * The explicit metadata projections the CMS list actions select.
@@ -36,20 +42,15 @@ export const BLOG_LIST_COLUMNS =
 export const PORTFOLIO_LIST_COLUMNS =
   'id, created_at, title_en, title_it, image, source_link, demo_link, description_en, description_it, blurhashURL, post_tags, store_link, fdroid_link, website, ios_store_link, buttons, views, hidden, author_id';
 
-export type BodyLazyLoadEnv = {
-  /** Raw flag value — active only when exactly `'true'`. */
-  enabled: boolean;
-  schema: string;
-};
-
-/** Pure gate: metadata-only lists require the flag AND the dev clone. */
-export function resolveBodyLazyLoad(env: BodyLazyLoadEnv): boolean {
-  return env.enabled && env.schema === 'dev_staging';
-}
-
+/**
+ * Always `true`, in production and in the dev clone alike.
+ *
+ * The editors call it to document that they take the metadata-only list path
+ * and hydrate Markdown through `GET_BODIES`. It deliberately reads no
+ * environment: production sets neither `NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED`
+ * nor a dev schema, and must still hydrate its bodies. The regression test in
+ * `postList.test.ts` pins that under `public` with the variable unset.
+ */
 export function bodyLazyLoadEnabled(): boolean {
-  return resolveBodyLazyLoad({
-    enabled: process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED === 'true',
-    schema: process.env.NEXT_PUBLIC_SUPABASE_DB_SCHEMA ?? 'public',
-  });
+  return true;
 }

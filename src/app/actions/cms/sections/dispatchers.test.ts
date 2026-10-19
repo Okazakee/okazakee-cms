@@ -998,12 +998,12 @@ describe('draft visibility and author picker', () => {
       ],
       portfolio_posts: [{ id: 7, title_en: 'Draft work', hidden: true }],
     });
-    const blog = await blogActions({ type: 'GET' });
+    const blog = await blogActions({ type: 'GET_LIST' });
     expect(blog.success).toBe(true);
     expect(
       (blog.data as Array<{ title_en: string }>).map((row) => row.title_en)
     ).toEqual(expect.arrayContaining(['Draft', 'Live']));
-    const portfolio = await portfolioActions({ type: 'GET' });
+    const portfolio = await portfolioActions({ type: 'GET_LIST' });
     expect(portfolio.success).toBe(true);
     expect(
       (portfolio.data as Array<{ title_en: string }>).map((row) => row.title_en)
@@ -1016,8 +1016,8 @@ describe('draft visibility and author picker', () => {
       blog_posts: [{ id: 1, title_en: 'Draft', hidden: true }],
       portfolio_posts: [{ id: 7, title_en: 'Draft work', hidden: true }],
     });
-    expect((await blogActions({ type: 'GET' })).success).toBe(false);
-    expect((await portfolioActions({ type: 'GET' })).success).toBe(false);
+    expect((await blogActions({ type: 'GET_LIST' })).success).toBe(false);
+    expect((await portfolioActions({ type: 'GET_LIST' })).success).toBe(false);
     expect(
       h.fake.state.log.filter(
         (entry) =>

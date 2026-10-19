@@ -31,12 +31,9 @@ vi.mock('blurkit/node', () => ({
 
 import { blogActions } from '@/app/actions/cms/sections/blogActions';
 import { portfolioActions } from '@/app/actions/cms/sections/portfolioActions';
-import {
-  BLOG_LIST_COLUMNS,
-  PORTFOLIO_LIST_COLUMNS,
-} from '@/libs/cms/postList';
-import { deriveButtonsFromPost } from '@/utils/cms/postButtons';
 import type { MutationResult } from '@/libs/cms/mutationResult';
+import { BLOG_LIST_COLUMNS, PORTFOLIO_LIST_COLUMNS } from '@/libs/cms/postList';
+import { deriveButtonsFromPost } from '@/utils/cms/postButtons';
 
 const EDITOR = [{ email: 'admin@example.com', role: 'editor' }];
 
@@ -46,15 +43,18 @@ const ENTITIES = [
     table: 'blog_posts',
     columns: BLOG_LIST_COLUMNS,
     run: (): Promise<MutationResult> => blogActions({ type: 'GET_LIST' }),
-    legacyGet: (): Promise<MutationResult> => blogActions({ type: 'GET' }),
+    /** The removed `GET` dispatcher value, reached by a stale caller. */
+    retiredGet: (): Promise<MutationResult> =>
+      blogActions({ type: 'GET' } as never),
   },
   {
     name: 'portfolio',
     table: 'portfolio_posts',
     columns: PORTFOLIO_LIST_COLUMNS,
-    run: (): Promise<MutationResult> =>
-      portfolioActions({ type: 'GET_LIST' }),
-    legacyGet: (): Promise<MutationResult> => portfolioActions({ type: 'GET' }),
+    run: (): Promise<MutationResult> => portfolioActions({ type: 'GET_LIST' }),
+    /** The removed `GET` dispatcher value, reached by a stale caller. */
+    retiredGet: (): Promise<MutationResult> =>
+      portfolioActions({ type: 'GET' } as never),
   },
 ];
 
@@ -209,8 +209,16 @@ describe.each(ENTITIES)('GET_LIST ($name)', (entity) => {
   });
 
   it('keeps an explicit created_at-descending order', async () => {
-    const older = { ...rowFor(entity.name), id: 1, created_at: '2024-01-01T00:00:00.000Z' };
-    const newer = { ...rowFor(entity.name), id: 2, created_at: '2025-06-01T00:00:00.000Z' };
+    const older = {
+      ...rowFor(entity.name),
+      id: 1,
+      created_at: '2024-01-01T00:00:00.000Z',
+    };
+    const newer = {
+      ...rowFor(entity.name),
+      id: 2,
+      created_at: '2025-06-01T00:00:00.000Z',
+    };
     h.fake = fake({ [entity.table]: [older, newer] });
     const { orders } = instrument(h.fake);
 
@@ -218,9 +226,7 @@ describe.each(ENTITIES)('GET_LIST ($name)', (entity) => {
 
     const rows = result.data as Array<{ id: number }>;
     expect(rows.map((r) => r.id)).toEqual([2, 1]);
-    expect(
-      orders.filter((o) => o.table === entity.table)
-    ).toEqual([
+    expect(orders.filter((o) => o.table === entity.table)).toEqual([
       { table: entity.table, column: 'created_at', ascending: false },
     ]);
   });
@@ -246,9 +252,12 @@ describe.each(ENTITIES)('GET_LIST ($name)', (entity) => {
   });
 
   it('rejects a caller who is not allowlisted (existing authorization model)', async () => {
-    h.fake = fake({ [entity.table]: [rowFor(entity.name)] }, {
-      user: { id: 'intruder', email: 'intruder@example.com' },
-    });
+    h.fake = fake(
+      { [entity.table]: [rowFor(entity.name)] },
+      {
+        user: { id: 'intruder', email: 'intruder@example.com' },
+      }
+    );
 
     const result = await entity.run();
 
@@ -258,19 +267,18 @@ describe.each(ENTITIES)('GET_LIST ($name)', (entity) => {
     expect(String(result.error)).toContain('Unauthorized');
   });
 
-  it('leaves the legacy GET contract unchanged', async () => {
+  it('has retired the legacy full-row read, so no editor can select a body column', async () => {
     h.fake = fake({ [entity.table]: [rowFor(entity.name)] });
     const { selects } = instrument(h.fake);
 
-    const result = await entity.legacyGet();
+    // The `GET` operation was removed from the action contract; an old caller
+    // (or a stale bundle) reaching it now gets a rejection rather than a
+    // `select('*')` row carrying the retired `body_en`/`body_it` columns.
+    const result = await entity.retiredGet();
 
-    expect(result.success).toBe(true);
-    expect(
-      selects.filter((s) => s.table === entity.table).map((s) => s.columns)
-    ).toEqual(['*']);
-    const rows = result.data as Array<Record<string, unknown>>;
-    expect(rows[0]?.body_en).toBe('# body en');
-    expect(rows[0]?.body_it).toBe('# body it');
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toContain('Invalid operation');
+    expect(selects.filter((s) => s.table === entity.table)).toEqual([]);
   });
 });
 

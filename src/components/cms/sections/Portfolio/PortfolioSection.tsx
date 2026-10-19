@@ -52,7 +52,6 @@ import { usePostBodies } from '@/hooks/cms/usePostBodies';
 import { useSectionCallbacks } from '@/hooks/cms/useSectionCallbacks';
 import { useSectionDirty } from '@/hooks/cms/useSectionDirty';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
-import { bodyLazyLoadEnabled } from '@/libs/cms/postList';
 import { demoPortfolioPosts } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
 import type { PortfolioListPost } from '@/types/fetchedData.types';
@@ -201,17 +200,14 @@ export default function PortfolioSection() {
         return;
       }
       try {
-        // Phase 9B: the metadata-only projection when the lazy gate is on, the
-        // legacy full read otherwise. Either way no body is fetched here — a
-        // list row without Markdown means "not loaded".
-        const lazyBodies = bodyLazyLoadEnabled();
-        const r = await portfolioActions({
-          type: lazyBodies ? 'GET_LIST' : 'GET',
-        });
+        // Metadata-only rows: no list read carries a Markdown body. An existing
+        // post's Markdown is read by `GET_BODIES` when its editor opens, and
+        // never by this call. A row without Markdown therefore means "not
+        // loaded", never "empty".
+        const r = await portfolioActions({ type: 'GET_LIST' });
         if (!current()) return;
         if (r.success) {
-          // `GET` (flag off) carries bodies, `GET_LIST` does not; the declared
-          // list type only ever promises the metadata columns, so a body is
+          // The list type only ever promises the metadata columns; a body is
           // read strictly through the loader.
           const server: EditablePost[] = (r.data as PortfolioListPost[]).map(
             (p) => ({
@@ -222,38 +218,30 @@ export default function PortfolioSection() {
           const merged = drafts
             ? mergeServerWithDrafts(server, drafts)
             : server;
-          if (!lazyBodies) {
-            // Eager path: `GET` rows already carry the Markdown the editor and
-            // the publish payload need, so they are kept exactly as fetched and
-            // no body is ever stripped.
-            setPosts(merged);
-            baselinesRef.current = new Map();
-          } else {
-            // Bodies may only survive for a post that still holds an unresolved
-            // draft; every other row returns to "not loaded" and loses its
-            // baseline.
-            const stillModified: ReadonlySet<number> = drafts
-              ? new Set(drafts.modified.keys())
-              : modifiedRef.current;
-            const baselines = baselinesRef.current;
-            // A baseline survives only while its draft is unresolved.
-            const nextBaselines = new Map<number, LoadedBodies>();
-            for (const [id, baseline] of baselines) {
-              if (stillModified.has(id)) nextBaselines.set(id, baseline);
-            }
-            // List rows carry no bodies: an inherited body is removed and only
-            // an unresolved local edit may put its locales back. A pending
-            // create keeps both authored languages.
-            setPosts(
-              reconcileListBodies({
-                rows: merged,
-                previousRows: postsRef.current,
-                baselineFor: (id) => baselines.get(id),
-                isModified: (id) => stillModified.has(id),
-              })
-            );
-            baselinesRef.current = nextBaselines;
+          // Bodies may only survive for a post that still holds an unresolved
+          // draft; every other row returns to "not loaded" and loses its
+          // baseline.
+          const stillModified: ReadonlySet<number> = drafts
+            ? new Set(drafts.modified.keys())
+            : modifiedRef.current;
+          const baselines = baselinesRef.current;
+          // A baseline survives only while its draft is unresolved.
+          const nextBaselines = new Map<number, LoadedBodies>();
+          for (const [id, baseline] of baselines) {
+            if (stillModified.has(id)) nextBaselines.set(id, baseline);
           }
+          // List rows carry no bodies: an inherited body is removed and only
+          // an unresolved local edit may put its locales back. A pending
+          // create keeps both authored languages.
+          setPosts(
+            reconcileListBodies({
+              rows: merged,
+              previousRows: postsRef.current,
+              baselineFor: (id) => baselines.get(id),
+              isModified: (id) => stillModified.has(id),
+            })
+          );
+          baselinesRef.current = nextBaselines;
         }
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : 'Failed');
@@ -305,18 +293,21 @@ export default function PortfolioSection() {
   };
 
   /**
-   * Phase 9B: with the lazy gate on, an existing post's Markdown is fetched
-   * BEFORE the editor opens, so the form is never populated from bodies the
-   * client never loaded. A failed read surfaces the failure and leaves the
-   * editor closed — an unknown body must never become an empty-body save.
-   * Pending creates (local Markdown) and the flag-off path stay synchronous.
+   * An existing server post has no Markdown on its list row, so the editor only
+   * opens once the authenticated Storage read has answered.
+   *
+   * This is a hard rule, not a nicety. If the read fails (or is superseded by a
+   * newer open), the editor stays CLOSED and the failure is surfaced in the
+   * banner. Opening an empty editor and pressing Apply would otherwise rewrite
+   * committed Markdown with `''`; the locale would then also lose its baseline,
+   * so the real body would be orphaned in Storage with nothing pointing at it.
+   * Hence a failed read must not open the form at all.
+   *
+   * Demo mode renders its own fixtures, and a pending create (negative id) is
+   * local-only: both open synchronously.
    */
   const openEdit = async (post: EditablePost) => {
-    if (
-      post.id > 0 &&
-      bodyLazyLoadEnabled() &&
-      !useCmsStore.getState().demoMode
-    ) {
+    if (post.id > 0 && !useCmsStore.getState().demoMode) {
       clearBodyFailure();
       const fetched = await loadBody(post.id);
       if (!fetched) return;
@@ -438,7 +429,6 @@ export default function PortfolioSection() {
 
   const handlePublish = useCallback(async () => {
     const errors: string[] = [];
-    const lazyBodyLoad = bodyLazyLoadEnabled();
     setIsUpdating(true);
     setError(null);
 
@@ -500,19 +490,15 @@ export default function PortfolioSection() {
     const updates = updateIds.flatMap((id) => {
       const post = posts.find((p) => p.id === id);
       if (!post) return [];
-      // Lazy gate on: only Markdown that is loaded AND differs from its
-      // committed baseline travels, so a metadata-only or visibility-only
-      // change sends no body field and stages no body image — the committed
-      // body and its pointer are left untouched. Gate off: the row still
-      // carries the server bodies, so both fields are sent exactly as before.
+      // Only Markdown that is loaded AND differs from its committed baseline
+      // travels, so a metadata-only or visibility-only change sends no body
+      // field and stages no body image — the committed body and its pointer are
+      // left untouched. A locale whose read never succeeded has no loaded value
+      // and no baseline, so it can never be published as an empty body.
       const body = rowBodies(post);
-      const baseline = lazyBodyLoad ? baselinesRef.current.get(id) : undefined;
-      const bodyFields = lazyBodyLoad
-        ? publishBodyFields(body, baseline)
-        : { en: post.body_en ?? '', it: post.body_it ?? '' };
-      const bodyReferences = lazyBodyLoad
-        ? publishedBodies(body, baseline)
-        : [post.body_en, post.body_it];
+      const baseline = baselinesRef.current.get(id);
+      const bodyFields = publishBodyFields(body, baseline);
+      const bodyReferences = publishedBodies(body, baseline);
       return [
         {
           id,

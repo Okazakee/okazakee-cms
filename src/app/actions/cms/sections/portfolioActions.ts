@@ -78,7 +78,6 @@ import { type PostButton, validatePostButtons } from '@/utils/cms/postButtons';
 import { createClient } from '@/utils/supabase/server';
 
 type PortfolioOperation =
-  | { type: 'GET' }
   | { type: 'GET_LIST' }
   | { type: 'GET_AUTHORS' }
   | { type: 'GET_BODIES'; id: number }
@@ -275,9 +274,6 @@ export async function portfolioActions(
 
   try {
     switch (operation.type) {
-      case 'GET':
-        return await getPortfolioData(supabase);
-
       case 'GET_LIST':
         return await getPortfolioList(supabase);
 
@@ -962,12 +958,14 @@ async function batchPublishPortfolio(
   }
 }
 /**
- * Metadata-only portfolio list (Phase 9B).
+ * Metadata-only portfolio list.
  *
- * Same authorization model and sort order as `GET`, but with an explicit
- * projection that cannot carry a Markdown body or a body pointer. The legacy
- * link columns and `buttons` ARE included: list rendering and
- * `deriveButtonsFromPost()` still need them. `GET` is left untouched.
+ * The ONLY list read the CMS has. Its explicit projection cannot carry a
+ * Markdown body or a body pointer, and `select('*')` is deliberately absent:
+ * the legacy full-row read returned `body_en`/`body_it`, which Storage-only
+ * writes never populate, so a production editor built from it opened on an
+ * EMPTY body. The legacy link columns and `buttons` ARE included: list
+ * rendering and `deriveButtonsFromPost()` still need them.
  */
 async function getPortfolioList(
   _supabase: SupabaseClient
@@ -995,31 +993,6 @@ async function getPortfolioList(
     return {
       success: false,
       error: `Failed to fetch portfolio list: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    };
-  }
-}
-
-async function getPortfolioData(
-  _supabase: SupabaseClient
-): Promise<PortfolioResult> {
-  try {
-    // CMS lists include drafts: published-only RLS hides them from session
-    // reads, so this goes through the admin client after the requireAuth
-    // gate in portfolioActions (service-role-after-check). Authorized CMS
-    // users only; the public site never calls this path.
-    const { data: portfolioPosts, error } = await getAdminClient()
-      .from('portfolio_posts')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    return { success: true, data: portfolioPosts };
-  } catch (error) {
-    console.error('Error fetching portfolio data:', error);
-    return {
-      success: false,
-      error: 'Failed to fetch portfolio data',
     };
   }
 }

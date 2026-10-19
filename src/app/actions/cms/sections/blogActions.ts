@@ -74,7 +74,6 @@ import { hasPendingRefs } from '@/utils/cms/postBody';
 import { createClient } from '@/utils/supabase/server';
 
 type BlogOperation =
-  | { type: 'GET' }
   | { type: 'GET_LIST' }
   | { type: 'GET_AUTHORS' }
   | { type: 'GET_BODIES'; id: number }
@@ -260,9 +259,6 @@ export async function blogActions(
 
   try {
     switch (operation.type) {
-      case 'GET':
-        return await getBlogData(supabase);
-
       case 'GET_LIST':
         return await getBlogList(supabase);
 
@@ -947,11 +943,14 @@ async function batchPublishBlog(
   }
 }
 /**
- * Metadata-only blog list (Phase 9B).
+ * Metadata-only blog list.
  *
- * Same authorization model and sort order as `GET`, but with an explicit
- * projection that cannot carry a Markdown body or a body pointer: rendering a
- * list must never fetch post content. `GET` is left untouched for compatibility.
+ * The ONLY list read the CMS has. Its explicit projection cannot carry a
+ * Markdown body or a body pointer (rendering a list must never fetch post
+ * content), and `select('*')` is deliberately absent: the legacy full-row read
+ * returned `body_en`/`body_it`, which Storage-only writes never populate, so a
+ * production editor built from it opened on an EMPTY body. The per-post
+ * Markdown comes from `GET_BODIES` when an editor opens.
  */
 async function getBlogList(_supabase: SupabaseClient): Promise<BlogResult> {
   try {
@@ -977,35 +976,6 @@ async function getBlogList(_supabase: SupabaseClient): Promise<BlogResult> {
     return {
       success: false,
       error: `Failed to fetch blog list: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    };
-  }
-}
-
-async function getBlogData(_supabase: SupabaseClient): Promise<BlogResult> {
-  try {
-    // CMS lists include drafts: published-only RLS hides them from session
-    // reads, so this goes through the admin client after the requireAuth
-    // gate in blogActions (service-role-after-check). Authorized CMS users
-    // only; the public site never calls this path.
-    const { data: blogPosts, error } = await getAdminClient()
-      .from('blog_posts')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Database error:', error);
-      return {
-        success: false,
-        error: `Database error: ${error.message}`,
-      };
-    }
-
-    return { success: true, data: blogPosts || [] };
-  } catch (error) {
-    console.error('Error fetching blog data:', error);
-    return {
-      success: false,
-      error: `Failed to fetch blog data: ${error instanceof Error ? error.message : 'Unknown error'}`,
     };
   }
 }

@@ -5,6 +5,7 @@ import type { Root } from 'react-dom/client';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import cmsEn from '@/i18n/messages/cms.en.json';
+import { useCmsStore } from '@/store/cmsStore';
 import { markdownToEditorHtml } from '@/utils/cms/bodyBlocks';
 
 /**
@@ -91,20 +92,13 @@ function listRows() {
     blurhashURL: '',
     post_tags: 'tag-one',
     views: 7,
-    hidden: false,
+    hidden: hiddenIds.has(post.id),
     author_id: AUTHOR_ID,
   }));
 }
 
-/** What `GET` returns: the same rows, bodies included. */
-function fullRows() {
-  return listRows().map((row) => {
-    const post = POSTS.find((entry) => entry.id === row.id);
-    return { ...row, body_en: post?.bodyEn ?? '', body_it: post?.bodyIt ?? '' };
-  });
-}
-
 let batches: BlogOperation[] = [];
+let hiddenIds = new Set<number>();
 let bodyResults = new Map<number, BlogResult>();
 let pendingBodies = new Map<number, (result: BlogResult) => void>();
 let deferBodies = false;
@@ -112,8 +106,6 @@ let failUpdates = false;
 
 async function fakeBlogAction(operation: BlogOperation): Promise<BlogResult> {
   switch (operation.type) {
-    case 'GET':
-      return { success: true, data: fullRows() };
     case 'GET_LIST':
       return { success: true, data: listRows() };
     case 'GET_AUTHORS':
@@ -175,12 +167,17 @@ async function fakeBlogAction(operation: BlogOperation): Promise<BlogResult> {
 let root: Root;
 let container: HTMLDivElement;
 
-const lazyFlag = (enabled: boolean) => {
-  vi.stubEnv(
-    'NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED',
-    enabled ? 'true' : 'false'
-  );
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
+/**
+ * The PRODUCTION CMS environment, as it actually runs: schema `public`,
+ * `APP_ENV=production`, and `NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED` NOT set.
+ * Every editor assertion below is therefore a production regression guard — the
+ * metadata-only list plus the authenticated `GET_BODIES` read must not depend on
+ * any flag being configured.
+ */
+const productionEnv = () => {
+  delete process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED;
+  vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+  vi.stubEnv('APP_ENV', 'production');
 };
 
 /** Settles every pending promise chain (actions, effects) inside `act`. */
@@ -280,9 +277,14 @@ const bodyReads = () =>
   h.action.mock.calls
     .map(([operation]) => operation)
     .filter((operation) => operation.type === 'GET_BODIES');
+const actionTypes = () =>
+  h.action.mock.calls.map(([operation]) => operation.type);
 const lastBatch = () => batches.at(-1);
 
 beforeEach(() => {
+  // Production does not set this variable; nothing may depend on it.
+  delete process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED;
+  useCmsStore.setState({ demoMode: false });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal(
     'URL',
@@ -295,6 +297,7 @@ beforeEach(() => {
   h.action.mockReset();
   h.action.mockImplementation(fakeBlogAction);
   batches = [];
+  hiddenIds = new Set();
   bodyResults = new Map();
   pendingBodies = new Map();
   deferBodies = false;
@@ -311,39 +314,13 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-it('flag off: reads full rows with GET and keeps the eager editor and payloads', async () => {
-  lazyFlag(false);
-  await renderSection();
+it('production (public), no lazy flag set: reads metadata-only rows with GET_LIST and never fetches bodies', async () => {
+  productionEnv();
+  // The regression this guards: production sets neither the lazy-body variable
+  // nor a dev schema, and used to fall back to a full-row `GET`.
+  expect(process.env.NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED).toBeUndefined();
+  expect(process.env.NEXT_PUBLIC_SUPABASE_DB_SCHEMA).toBe('public');
 
-  expect(h.action.mock.calls.map(([operation]) => operation.type)).toEqual([
-    'GET',
-    'GET_AUTHORS',
-  ]);
-  expect(container.textContent).toContain(ALPHA.titleEn);
-
-  // Today's behaviour: the editor opens straight off the GET bodies.
-  await click(editRow(ALPHA.titleEn));
-  expect(bodyReads()).toEqual([]);
-  expect(editorMarkdown()).toContain(ALPHA.bodyEn);
-  await clickText(cmsEn.common.italian);
-  expect(editorMarkdown()).toContain(ALPHA.bodyIt);
-  await clickText(cmsEn.common.english);
-
-  await setInputValue(titleInput(), 'Post Alpha v2');
-  await clickText(cmsEn.editor.applyDraft);
-  await publish();
-
-  const update = lastBatch()?.updates?.[0];
-  expect(update?.data).toMatchObject({
-    title_en: 'Post Alpha v2',
-    body_en: ALPHA.bodyEn,
-    body_it: ALPHA.bodyIt,
-  });
-  expect(update?.bodyFiles).toEqual([]);
-});
-
-it('flag on: reads metadata-only rows with GET_LIST and never fetches bodies', async () => {
-  lazyFlag(true);
   await renderSection();
 
   expect(h.action.mock.calls.map(([operation]) => operation.type)).toEqual([
@@ -357,14 +334,17 @@ it('flag on: reads metadata-only rows with GET_LIST and never fetches bodies', a
   expect(bodyReads()).toEqual([]);
 });
 
-it('flag on: opening an existing post reads its bodies once and seeds both locales', async () => {
-  lazyFlag(true);
+it('production (public): opening an existing post reads its Markdown from Storage once and seeds both locales', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
   });
   await renderSection();
 
+  // The row itself carries no Markdown, so the editor can only be populated
+  // from the authenticated per-post read.
+  expect(actionTypes()).not.toContain('GET');
   await click(editRow(ALPHA.titleEn));
 
   expect(bodyReads()).toEqual([{ type: 'GET_BODIES', id: ALPHA.id }]);
@@ -374,8 +354,22 @@ it('flag on: opening an existing post reads its bodies once and seeds both local
   expect(editorMarkdown()).toContain(ALPHA.bodyIt);
 });
 
-it('flag on: a staged new post never reads bodies and keeps its local Markdown', async () => {
-  lazyFlag(true);
+it('production (public): a hidden post is listed and its Markdown still resolves', async () => {
+  productionEnv();
+  bodyResults.set(BETA.id, {
+    success: true,
+    data: { id: BETA.id, body_en: BETA.bodyEn, body_it: BETA.bodyIt },
+  });
+  hiddenIds = new Set([BETA.id]);
+  await renderSection();
+
+  expect(container.textContent).toContain(BETA.titleEn);
+  await click(editRow(BETA.titleEn));
+  expect(editorMarkdown()).toContain(BETA.bodyEn);
+});
+
+it('production (public): a staged new post never reads bodies and keeps its local Markdown', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
@@ -397,8 +391,8 @@ it('flag on: a staged new post never reads bodies and keeps its local Markdown',
   expect(editorMarkdown()).toContain('Draft EN markdown');
 });
 
-it('flag on: a failed body read keeps the row, blocks the editor, and retries', async () => {
-  lazyFlag(true);
+it('production (public): a failed body read keeps the row, blocks the editor, and retries', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, { success: false, error: 'Markdown unavailable' });
   await renderSection();
 
@@ -423,8 +417,33 @@ it('flag on: a failed body read keeps the row, blocks the editor, and retries', 
   expect(container.textContent).not.toContain('Markdown unavailable');
 });
 
-it('flag on: a superseded body read never overwrites the open editor', async () => {
-  lazyFlag(true);
+it('production (public): a failed body read forbids overwriting the committed Markdown', async () => {
+  productionEnv();
+  bodyResults.set(ALPHA.id, { success: false, error: 'Storage read failed' });
+  await renderSection();
+
+  await click(editRow(ALPHA.titleEn));
+  // The read failed, so the editor never opened: the only thing the user can
+  // still do to this row is a metadata-level change.
+  expect(container.textContent).toContain('Storage read failed');
+  expect(editorBody()).toBeNull();
+
+  await click(rowButton(ALPHA.titleEn, cmsEn.common.hide));
+  await publish();
+
+  // A locale with no successful read has no loaded value and no baseline, so
+  // the publish must omit BOTH body fields: sending `''` here would wipe the
+  // real Markdown (and orphan its object) that the client never saw.
+  const update = lastBatch()?.updates?.[0];
+  expect(update?.id).toBe(ALPHA.id);
+  expect(update?.data.hidden).toBe(true);
+  expect(update?.data).not.toHaveProperty('body_en');
+  expect(update?.data).not.toHaveProperty('body_it');
+  expect(update?.bodyFiles).toEqual([]);
+});
+
+it('production (public): a superseded body read never overwrites the open editor', async () => {
+  productionEnv();
   deferBodies = true;
   await renderSection();
 
@@ -457,8 +476,8 @@ it('flag on: a superseded body read never overwrites the open editor', async () 
   expect(container.textContent).not.toContain('Unexpected markdown response');
 });
 
-it('flag on: a visibility-only update sends no body field', async () => {
-  lazyFlag(true);
+it('production (public): a visibility-only update sends no body field', async () => {
+  productionEnv();
   await renderSection();
 
   await click(rowButton(ALPHA.titleEn, cmsEn.common.hide));
@@ -473,8 +492,8 @@ it('flag on: a visibility-only update sends no body field', async () => {
   expect(bodyReads()).toEqual([]);
 });
 
-it('flag on: a metadata-only update of a loaded post sends no body field', async () => {
-  lazyFlag(true);
+it('production (public): a metadata-only update of a loaded post sends no body field', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
@@ -493,8 +512,8 @@ it('flag on: a metadata-only update of a loaded post sends no body field', async
   expect(update?.bodyFiles).toEqual([]);
 });
 
-it('flag on: an EN-only edit sends only body_en', async () => {
-  lazyFlag(true);
+it('production (public): an EN-only edit sends only body_en', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
@@ -511,8 +530,8 @@ it('flag on: an EN-only edit sends only body_en', async () => {
   expect(update?.data).not.toHaveProperty('body_it');
 });
 
-it('flag on: editing both locales sends both body fields', async () => {
-  lazyFlag(true);
+it('production (public): editing both locales sends both body fields', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
@@ -531,8 +550,8 @@ it('flag on: editing both locales sends both body fields', async () => {
   expect(update?.data.body_it).toBe('Alpha IT edited');
 });
 
-it('flag on: an edit reverted to the baseline sends neither body field', async () => {
-  lazyFlag(true);
+it('production (public): an edit reverted to the baseline sends neither body field', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
@@ -552,8 +571,8 @@ it('flag on: an edit reverted to the baseline sends neither body field', async (
   expect(update?.bodyFiles).toEqual([]);
 });
 
-it('flag on: an unresolvable draft keeps its body edit for the next publish', async () => {
-  lazyFlag(true);
+it('production (public): an unresolvable draft keeps its body edit for the next publish', async () => {
+  productionEnv();
   bodyResults.set(ALPHA.id, {
     success: true,
     data: { id: ALPHA.id, body_en: ALPHA.bodyEn, body_it: ALPHA.bodyIt },
@@ -579,4 +598,22 @@ it('flag on: an unresolvable draft keeps its body edit for the next publish', as
   expect(update?.id).toBe(ALPHA.id);
   expect(update?.data.body_en).toBe('Alpha EN edited');
   expect(update?.data).not.toHaveProperty('body_it');
+});
+
+/**
+ * Demo mode owns its data: it must keep rendering its fixtures and never issue
+ * a server action, in particular never a `GET_BODIES` for a fixture post whose
+ * id looks like a real one. The editor must still open on fixture Markdown.
+ */
+it('demo mode: renders its fixtures, calls no action, and keeps the fixture Markdown', async () => {
+  productionEnv();
+  useCmsStore.setState({ demoMode: true });
+  await renderSection();
+
+  expect(h.action).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Demo post one');
+
+  await click(editRow('Demo post one'));
+  expect(bodyReads()).toEqual([]);
+  expect(editorMarkdown()).toContain('Hello demo');
 });
