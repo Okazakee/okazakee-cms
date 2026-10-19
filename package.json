@@ -15,6 +15,8 @@
     "db:dev:check": "bun src/utils/cms/devMigrations.ts check",
     "storage:content:dev:setup": "bun src/utils/cms/storageSetup.ts",
     "storage:content:prod:setup": "bun src/utils/cms/prodStorageSetup.ts",
+    "storage:content:prod:gc": "bun src/utils/cms/prodStorageGc.ts",
+    "storage:content:prod:backup": "bun src/utils/cms/prodLegacyBodyBackup.ts",
     "storage:content:dev:backfill:plan": "bun src/utils/cms/backfillPlan.ts",
     "storage:content:dev:backfill:exec": "bun src/utils/cms/backfillExec.ts",
     "storage:content:dev:backfill:rollback": "bun src/utils/cms/backfillRollback.ts",
