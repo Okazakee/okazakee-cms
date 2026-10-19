@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createFakeSupabase,
   type FakeSupabase,
@@ -36,6 +36,7 @@ vi.mock('blurkit/node', () => ({
 
 import { blogActions } from '@/app/actions/cms/sections/blogActions';
 import type { BatchCommitEvidence } from '@/libs/cms/batchEvidence';
+import { LEGACY_BODY_EN_SHIM_FLAG } from '@/libs/cms/legacyBodyEnShim';
 import { sha256Hex } from '@/libs/cms/storage/bodyContent';
 
 const EDITOR = [{ email: 'admin@example.com', role: 'editor' }];
@@ -714,5 +715,69 @@ describe('blog delete', () => {
     // The write path never deletes content-bucket Markdown: the GC owns it.
     expect(h.fake.state.objects[objectKey]).toBeDefined();
     expect(h.fake.state.removed).not.toContain(pathFor('# old en'));
+  });
+});
+
+/**
+ * Shim-off is the state the contraction runs in: `body_en` is nullable (the
+ * preliminary step) and the write path must name no legacy column at all, so it
+ * is already agnostic to the column being dropped. The value of these tests is
+ * the NEGATIVE assertion — the committed statements are inspected key by key —
+ * because the fake cannot enforce a NOT NULL constraint the way Postgres does.
+ */
+describe('legacy shim OFF (nullable body_en)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('creates a post without naming body_en or body_it anywhere', async () => {
+    vi.stubEnv(LEGACY_BODY_EN_SHIM_FLAG, 'false');
+    h.fake = fake({ blog_posts: [] });
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [blogCreate('# en final', '# it final')],
+      updates: [],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const writes = h.fake.state.log.filter(
+      (entry) => entry.table === 'blog_posts'
+    );
+    expect(writes.length).toBeGreaterThanOrEqual(2);
+    for (const write of writes) {
+      expect(Object.hasOwn(write.payload as Row, 'body_en')).toBe(false);
+      expect(Object.hasOwn(write.payload as Row, 'body_it')).toBe(false);
+    }
+    const row = h.fake.state.tables.blog_posts[0] as Row;
+    expect(Object.hasOwn(row, 'body_en')).toBe(false);
+    const id = row.id as number;
+    expect(row.body_en_path).toBe(pathFor('# en final', 'en', id));
+    expect(row.body_it_path).toBe(pathFor('# it final', 'it', id));
+    expect(row.hidden).toBe(false);
+  });
+
+  it('saves an EN body without naming body_en in the guarded UPDATE', async () => {
+    vi.stubEnv(LEGACY_BODY_EN_SHIM_FLAG, 'false');
+    h.fake = fake(seeded());
+
+    const result = await blogActions({
+      type: 'BATCH_PUBLISH',
+      creates: [],
+      updates: [blogUpdate({ body_en: '# new en' })],
+      deletes: [],
+    });
+
+    expect(result.success).toBe(true);
+    const update = h.fake.state.log
+      .filter((entry) => entry.table === 'blog_posts')
+      .at(-1)?.payload as Row;
+    expect(update.body_en_path).toBe(pathFor('# new en'));
+    expect(Object.hasOwn(update, 'body_en')).toBe(false);
+    expect(Object.hasOwn(update, 'body_it')).toBe(false);
+    // A pre-existing legacy value is left exactly as it was; the pointer is the
+    // committed body state.
+    expect(h.fake.state.tables.blog_posts[0]?.body_en).toBe('# old en');
   });
 });

@@ -477,7 +477,7 @@ defaults on):
 | Flag | App | Meaning |
 |---|---|---|
 | `CMS_BODY_POINTER_COLUMNS` | CMS | the pointer columns exist in this schema (backfill-tooling assertion; the CMS write path no longer reads it) |
-| `CMS_LEGACY_BODY_EN_SHIM` | CMS | **default ON** — while `body_en` is still `NOT NULL`, a write keeps the non-Markdown placeholder in it. Set `false` only once the columns are dropped; the shim file (`src/libs/cms/legacyBodyEnShim.ts`) is deleted together with them |
+| `CMS_LEGACY_BODY_EN_SHIM` | CMS | **default ON** — while `body_en` is still `NOT NULL`, a write keeps the non-Markdown placeholder in it. Set `false` only AFTER the column has been made nullable and BEFORE the contraction drops it (never while it is still `NOT NULL`, and never by dropping the column first); the shim file (`src/libs/cms/legacyBodyEnShim.ts`) is deleted together with the columns. See `docs/PRODUCTION_LEGACY_RETIREMENT.md` for the ordering |
 
 > **Retired write flag.** `CMS_BODY_DUAL_WRITE_ENABLED` no longer exists: a body
 > is written ONLY to the content bucket, and the row's pointer is committed
@@ -567,7 +567,10 @@ column, which stays authoritative until Storage reads are verified.
 Dual-write mode (pointer populated everywhere + `CMS_BODY_DUAL_WRITE_ENABLED=true`)
 was a **post-cutover** activation and is now the ONLY write mode: the flag is
 retired, the legacy columns are never written with Markdown (only the `body_en`
-NOT NULL placeholder), and the shim is removed together with the columns.
+placeholder while that column is still `NOT NULL`), and the shim is switched off
+after the column has been made nullable and before the contraction drops it — the
+file is deleted together with the columns. See
+`docs/PRODUCTION_LEGACY_RETIREMENT.md` for the ordering.
 
 ---
 

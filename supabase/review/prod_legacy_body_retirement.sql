@@ -12,16 +12,44 @@
 --   * Database-side dependency on the legacy columns: exactly the two
 --     `prod_backfill_*` CAS functions, 0 views, 0 triggers.
 --   * Application-side dependency must be zero before this file is applied:
---     the deployed CMS and WS must already run Storage-only reads and writes.
+--     the deployed CMS and WS must already run Storage-only reads and writes,
+--     the shim must already be OFF (`CMS_LEGACY_BODY_EN_SHIM=false`, step 5) and
+--     `body_en` must already be nullable (step 4). Re-check the shim-off state
+--     immediately before applying this file: a revision that still writes
+--     `body_en` would start failing the moment the column disappears.
 --
--- ORDERING (code first, schema last):
---   1. Deploy CMS and WS revisions that never select `body_en` / `body_it`.
---   2. Verify the deployed revisions serve every page and the CMS editor
---      without those columns (Storage-only path).
---   3. Capture a FRESH full-body backup, because after this file runs the
---      CP-2 CAS rollback plan can no longer restore body contents.
---   4. Apply this file in ONE transaction.
---   5. Verify with the queries below and run production smoke tests.
+-- REQUIRED ORDERING (code and schema move together; see the release plan in
+-- docs/PRODUCTION_LEGACY_RETIREMENT.md). Applying this file in any other order
+-- breaks a live deployment:
+--   1. Deploy the CMS and WS revisions that never select `body_en` / `body_it`,
+--      with the legacy write shim ON (its default). `body_en` is still NOT NULL
+--      and the shim still fills it, so every write satisfies the live schema.
+--   2. Verify those revisions serve every page and the CMS editor without the
+--      legacy columns (Storage-only path).
+--   3. Capture a FRESH full-body backup, because after this file runs the CP-2
+--      CAS rollback plan can no longer restore body contents.
+--   4. Apply `supabase/review/prod_legacy_body_en_drop_not_null.sql`, the
+--      preliminary, NON-DESTRUCTIVE step: it only relaxes `body_en` to nullable
+--      on both tables (no drop, no data change, individually reversible). BEFORE
+--      this file, and only then, the shim can be turned off without hitting the
+--      NOT NULL constraint.
+--   5. Deploy the SAME revisions with `CMS_LEGACY_BODY_EN_SHIM=false`. The app
+--      then names `body_en` in no statement at all, so it is already
+--      column-agnostic and needs neither the nullability nor the column.
+--   6. Verify: create and save a post in the CMS, confirm the new rows leave
+--      `body_en` NULL, every page still renders from Storage and no write error
+--      names the legacy column.
+--   7. Apply THIS file in ONE transaction (the contraction).
+--   8. Verify with the queries below and run production smoke tests.
+--   9. Delete the shim (`legacyBodyEnShim.ts` + `CMS_LEGACY_BODY_EN_SHIM`) in a
+--      follow-up revision — pure code cleanup once nothing writes the column.
+--
+-- WHY THIS ORDER: at every point the running code satisfies the live schema and
+-- never names a column that is gone. Applying this file while a revision that
+-- still writes `body_en` is live breaks every post write; turning the shim off
+-- while `body_en` is still NOT NULL breaks every post creation and EN body save.
+-- Step 4 is what makes step 5 safe, and step 4 is reversible by redeploying the
+-- shim-on revisions while the column is still present.
 --
 -- WHY THE CAS FUNCTIONS GO FIRST: they are the only database objects that read
 -- the legacy columns (they hash `body_en` / `body_it` for the pointer CAS). Once
@@ -40,7 +68,10 @@
 --
 -- RECOVERY: this is destructive and is NOT covered by the CAS rollback plan.
 -- Restoring the legacy columns requires restoring their values from the fresh
--- backup taken in step 3; there is no in-database recovery path.
+-- backup taken in step 3; there is no in-database recovery path. Reverting only
+-- the preliminary nullability step (step 4, a different file) needs no backup at
+-- all — `alter table ... alter column body_en set not null` — and must be done
+-- before a shim-off revision has created a row with `body_en` NULL.
 
 begin;
 

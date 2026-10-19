@@ -1,0 +1,118 @@
+-- REVIEW-ONLY — DO NOT AUTO-APPLY. Preliminary legacy-body step (production,
+-- project mtvwynyikouqzmhqespl). This file lives in supabase/review/, so no
+-- `supabase db push` / `db reset` / CI path picks it up; it must be reviewed and
+-- deliberately promoted before it can ever run.
+-- IT HAS NOT BEEN APPLIED.
+--
+-- THIS IS NOT THE CONTRACTION.
+--   * It drops NO column and NO function. `body_en`, `body_it`,
+--     `body_en_path`, `body_it_path`, the four pointer CHECK constraints and the
+--     two `prod_backfill_*` CAS functions are all still there afterwards.
+--   * It changes NO data: `ALTER COLUMN ... DROP NOT NULL` is a catalog-only
+--     change (no row is read, rewritten, updated, inserted or deleted).
+--   * It is NOT covered by `prod_legacy_body_retirement.sql`; that file remains
+--     the contraction (functions + columns) and comes later. This file only
+--     relaxes the nullability of `body_en` on the two content tables.
+--
+-- WHY IT EXISTS (the shim window it removes)
+--   The Storage-only write path stops writing the legacy column through
+--   `CMS_LEGACY_BODY_EN_SHIM=false` (`src/libs/cms/legacyBodyEnShim.ts`). While
+--   `body_en` is still `NOT NULL` that deployment would break every post
+--   creation and every EN body save (the constraint would be unmet), so the only
+--   way to stop writing was to drop the column first — and then a revision that
+--   still wrote `body_en` (a lagging or missed shim-removal deployment) broke
+--   every post write against a column that no longer exists. Neither window is
+--   acceptable.
+--
+--   Relaxing the constraint FIRST separates "the column may be empty" from "the
+--   column is gone":
+--     both revisions satisfy the live schema
+--       shim ON  + body_en NOT NULL      -> the placeholder fills the column
+--       shim ON  + body_en nullable      -> still fills it; nothing regresses
+--       shim OFF + body_en nullable      -> writes name no legacy column at all
+--       shim OFF + body_en dropped       -> (contraction, later file)
+--   and it makes the shim-off deployment individually reversible: if it goes
+--   wrong the previous shim-on revision can be redeployed against a schema that
+--   still has the column.
+--
+-- PRECONDITIONS (all read-only checks)
+--   1. The Storage-only CMS and WS revisions are deployed and verified with the
+--      shim ON (its default). Reads come from Storage; no runtime projection
+--      selects `body_en`/`body_it`.
+--   2. `body_en` is still `NOT NULL` on both tables (`information_schema.columns`
+--      `is_nullable = 'NO'`). Nothing else about the column is asserted.
+--   3. A fresh full-body backup has been taken and verified if the contraction
+--      is to follow in the same session (see the release plan).
+--
+-- SCOPE AND EFFECT
+--   * Exactly two catalog changes: `body_en` becomes nullable on
+--     `public.blog_posts` and `public.portfolio_posts`. `body_it` is already
+--     nullable and is deliberately left alone.
+--   * No table rewrite; a brief ACCESS EXCLUSIVE lock per table while the
+--     catalog flag flips. Existing values are untouched, and every row keeps the
+--     value it already had (the constraint guaranteed a non-NULL one).
+--   * Idempotent: re-running it on an already-nullable column is a no-op.
+--   * It never touches pointers, CHECK constraints, the CAS functions, RLS
+--     policies, grants, Storage or any other `public` object.
+--
+-- REVERSAL (individually reversible, but only while no NULL exists)
+--   alter table public.blog_posts      alter column body_en set not null;
+--   alter table public.portfolio_posts alter column body_en set not null;
+--   `SET NOT NULL` succeeds only while every row holds a value. Apply the
+--   reversal BEFORE a shim-off revision has created a row (a shim-off INSERT
+--   leaves `body_en` NULL) or the constraint cannot be re-added without
+--   backfilling placeholders first. Rehearse the reversal on a scratch database
+--   (see the release plan) before the shim-off deployment.
+--
+-- ORDERING (this file is step 4 of the release plan)
+--   1. Deploy Storage-only revisions, shim ON (column still NOT NULL).
+--   2. Verify Storage-only reads and writes in production.
+--   3. Take and verify the fresh full-body backup.
+--   4. APPLY THIS FILE.                     <- no data, no drops, reversible
+--   5. Deploy the same code with `CMS_LEGACY_BODY_EN_SHIM=false`.
+--   6. Verify no write names `body_en` and every page still renders.
+--   7. Apply `prod_legacy_body_retirement.sql` (the contraction).
+--   8. Verify with the queries below and run production smoke tests.
+--   Never invert 4 and 5, and never let 7 run before 5 is verified.
+--
+-- PUBLIC READ AVAILABILITY: unaffected at every step. No read path (WS public
+-- site, CMS projections, the `website_content_body_read` Storage RLS predicate)
+-- names `body_en`/`body_it`; only the pointer columns and the Storage objects
+-- are read.
+
+begin;
+
+-- 1. `body_en` becomes nullable on both content tables. No data is touched.
+alter table public.blog_posts alter column body_en drop not null;
+alter table public.portfolio_posts alter column body_en drop not null;
+
+commit;
+
+-- ── POST-APPLY VERIFICATION ───────────────────────────────────────────────
+-- a) `body_en` is nullable on both tables, `body_it` unchanged:
+--      select table_name, column_name, is_nullable
+--        from information_schema.columns
+--       where table_schema = 'public'
+--         and table_name in ('blog_posts', 'portfolio_posts')
+--         and column_name in ('body_en', 'body_it')
+--       order by table_name, column_name;
+--    expect body_en -> YES on both tables, body_it -> YES on both tables.
+--    (Run BEFORE applying it too: both were NO for body_en, YES for body_it.)
+-- b) the columns still exist and no value changed:
+--      select table_name, count(*) as row_count,
+--             count(*) filter (where body_en is null) as body_en_nulls
+--        from (select 'blog_posts' as table_name, body_en from public.blog_posts
+--              union all
+--              select 'portfolio_posts', body_en from public.portfolio_posts) t
+--       group by table_name order by table_name;
+--    expect the same row counts as before the step and 0 NULLs (the NOT NULL
+--    constraint just removed guaranteed every existing row had a value).
+-- c) pointers + constraints intact (unchanged by this file):
+--      select conname from pg_constraint
+--       where conname like '%body_%_path_check';             -- expect the same 4
+--      select count(*) from information_schema.columns
+--       where table_schema = 'public'
+--         and column_name in ('body_en_path', 'body_it_path'); -- expect 4
+-- d) the CAS functions and the Storage RLS policy are untouched: this file does
+--    not name them; re-check them with the queries in
+--    `prod_legacy_body_retirement.sql` before applying that file.
