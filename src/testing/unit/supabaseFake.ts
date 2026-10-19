@@ -70,6 +70,9 @@ function matchesFilter(
     return actual === value;
   }
   if (op === 'neq') return actual !== value;
+  // PostgREST `is`: identity comparison against NULL/boolean, which is how the
+  // write path pins a pointer column that is expected to be unset.
+  if (op === 'is') return actual == null ? value === null : actual === value;
   return true;
 }
 
@@ -127,6 +130,11 @@ class QueryBuilder implements PromiseLike<{ data: unknown; error: unknown }> {
 
   in(column: string, values: unknown[]): this {
     this.filters.push((row) => values.includes(row[column]));
+    return this;
+  }
+
+  is(column: string, value: null | boolean): this {
+    this.filters.push((row) => matchesFilter(row, column, 'is', value));
     return this;
   }
 

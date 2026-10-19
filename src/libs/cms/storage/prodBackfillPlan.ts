@@ -31,7 +31,7 @@
  * Nothing here uploads, downloads, deletes, updates or invalidates anything,
  * and production always reads its OWN rows — the DEV manifest is never reused.
  */
-import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyDualWrite';
+import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyWriteGate';
 import { manifestDigest } from '@/libs/cms/storage/backfillApply';
 import {
   assertBackfillEnvironment,

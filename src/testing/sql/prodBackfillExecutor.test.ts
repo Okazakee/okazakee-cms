@@ -28,7 +28,7 @@ import type {
   BodyContentLocale,
 } from '@/libs/cms/storage/bodyContent';
 import { sha256Hex } from '@/libs/cms/storage/bodyContent';
-import { readPostBodies } from '@/libs/cms/storage/postBodyObjects';
+import { readPostBodies } from '@/libs/cms/storage/postBodyRead';
 import { runProdBackfillPlan } from '@/libs/cms/storage/prodBackfillPlan';
 import {
   applyProdCasSql,
@@ -428,22 +428,29 @@ describe('production backfill execution', () => {
     expect(unresolvedIntents(all)).toEqual([]);
   });
 
-  it('detects a body edit after a successful switch through the CMS read path', async () => {
+  it('serves the committed object through the CMS read path after a legacy-only body edit', async () => {
     await migrateFully();
 
     const path = (await readPointer(db, 'blog', 1, 'en')) as string;
+    const committed = objects.get(path);
+    expect(committed).toBeDefined();
     await db.query(`update public.blog_posts set body_en = $2 where id = $1`, [
       1,
       '# Blog 1 EN rewritten by a legacy-only write\n',
     ]);
 
-    // The pointer is untouched by the edit, so the read path refuses to serve
-    // content that disagrees with the committed legacy body.
-    await expect(
-      readPostBodies(createRecordingStorage(objects, storageCalls), 'blog', 1, {
-        en: { legacy: '# Blog 1 EN rewritten by a legacy-only write\n', path },
-      })
-    ).rejects.toThrow(/disagreement/);
+    // The pointer is the only body source a reader consults, so a legacy
+    // column edit neither changes nor breaks what the read path serves.
+    const bodies = await readPostBodies(
+      createRecordingStorage(objects, storageCalls),
+      'blog',
+      1,
+      { en: path, it: null }
+    );
+    expect(bodies).toEqual({ en: committed?.toString('utf8'), it: '' });
+    expect(bodies.en).not.toBe(
+      '# Blog 1 EN rewritten by a legacy-only write\n'
+    );
     expect(await readPointer(db, 'blog', 1, 'en')).toBe(path);
   });
 
