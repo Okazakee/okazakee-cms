@@ -362,7 +362,8 @@ async function rehearsal(): Promise<Rehearsal> {
 
   const exported = await runLegacyBodyBackupCli({
     ...deps,
-    argv: [`--out-dir=${root}`, '--apply'],
+    // The post-shim recovery artifact: the kind a restore requires by default.
+    argv: [`--out-dir=${root}`, '--apply', '--storage-authoritative'],
   });
   expect(exported.exitCode).toBe(0);
   const report = exported.report;
