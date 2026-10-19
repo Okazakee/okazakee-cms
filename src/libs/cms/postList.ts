@@ -10,9 +10,9 @@
  *   NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED=true
  *   NEXT_PUBLIC_SUPABASE_DB_SCHEMA=dev_staging
  *
- * It deliberately does NOT depend on `CMS_BODY_STORAGE_READ_ENABLED`: a
- * metadata-only list and the per-post legacy fallback must work with Storage
- * reads off, and read/write activation stays independently controllable.
+ * A list read resolves no bodies at all (its projection names none of the body
+ * or pointer columns), so this gate stays independent of the per-post Storage
+ * read that `GET_BODIES` performs.
  */
 
 export const BODY_LAZY_LOAD_FLAG = 'NEXT_PUBLIC_CMS_BODY_LAZY_LOAD_ENABLED';

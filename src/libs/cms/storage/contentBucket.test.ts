@@ -1,14 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  assertContentBucketSetupAllowed,
   CONTENT_BUCKET_DEV,
   CONTENT_BUCKET_PROD,
-  assertContentBucketSetupAllowed,
+  type ContentBucketSetupEnv,
+  currentContentBucket,
   resolveContentBucket,
   runContentBucketSetup,
-  setupContentBucket,
   type StorageBucketApi,
   type StorageBucketRow,
-  type ContentBucketSetupEnv,
+  setupContentBucket,
 } from '@/libs/cms/storage/contentBucket';
 
 /**
@@ -205,7 +206,10 @@ describe('content bucket environment gate', () => {
       runContentBucketSetup({ ...devEnv, schema: '' }, fakeStorage(null).api)
     ).rejects.toThrow(/must be 'dev_staging'/);
     await expect(
-      runContentBucketSetup({ ...devEnv, supabaseUrl: '' }, fakeStorage(null).api)
+      runContentBucketSetup(
+        { ...devEnv, supabaseUrl: '' },
+        fakeStorage(null).api
+      )
     ).rejects.toThrow(/missing NEXT_PUBLIC_SUPABASE_URL/);
     await expect(
       runContentBucketSetup(
@@ -218,15 +222,15 @@ describe('content bucket environment gate', () => {
 
 describe('content bucket resolution', () => {
   it('maps the two consistent environment pairs', () => {
-    expect(resolveContentBucket({ appEnv: 'production', schema: 'public' })).toBe(
-      CONTENT_BUCKET_PROD
-    );
+    expect(
+      resolveContentBucket({ appEnv: 'production', schema: 'public' })
+    ).toBe(CONTENT_BUCKET_PROD);
     expect(
       resolveContentBucket({ appEnv: 'development', schema: 'dev_staging' })
     ).toBe(CONTENT_BUCKET_DEV);
-    expect(resolveContentBucket({ appEnv: 'staging', schema: 'dev_staging' })).toBe(
-      CONTENT_BUCKET_DEV
-    );
+    expect(
+      resolveContentBucket({ appEnv: 'staging', schema: 'dev_staging' })
+    ).toBe(CONTENT_BUCKET_DEV);
   });
 
   it('fails closed on mismatched or unknown pairs', () => {
@@ -241,5 +245,39 @@ describe('content bucket resolution', () => {
         /refusing to resolve a content bucket/
       );
     }
+  });
+});
+
+describe('currentContentBucket', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.APP_ENV;
+  });
+
+  it('resolves the dev bucket for the dev clone', () => {
+    vi.stubEnv('APP_ENV', 'development');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
+    expect(currentContentBucket()).toEqual({
+      ok: true,
+      bucket: CONTENT_BUCKET_DEV,
+    });
+  });
+
+  it('derives production semantics from NODE_ENV when APP_ENV is unset', () => {
+    delete process.env.APP_ENV;
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
+    expect(currentContentBucket()).toEqual({
+      ok: true,
+      bucket: CONTENT_BUCKET_PROD,
+    });
+  });
+
+  it('fails closed when the schema is missing outside production', () => {
+    vi.stubEnv('APP_ENV', 'development');
+    delete process.env.NEXT_PUBLIC_SUPABASE_DB_SCHEMA;
+    // The default schema is `public`, which a non-production process must not
+    // read or write content against.
+    expect(currentContentBucket().ok).toBe(false);
   });
 });

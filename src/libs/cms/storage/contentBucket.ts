@@ -1,12 +1,15 @@
 /**
- * Private dev content bucket: the Storage destination for long-form Markdown
- * post bodies (Phase 5B foundation).
+ * Private content buckets: the Storage destination for long-form Markdown post
+ * bodies (Phase 5B foundation) and the single place that maps an environment to
+ * the bucket that belongs to it.
  *
  * The bucket metadata is API-managed (per current Supabase Storage guidance),
  * NOT inserted into `storage.buckets` by SQL, so provisioning lives in a
  * server-side maintenance command (`bun run storage:content:dev:setup`) built on
  * this module. Everything here is pure/injectable so the command's decision
- * logic is unit-testable without touching a real project.
+ * logic is unit-testable without touching a real project, and every read/write
+ * path resolves its bucket through `resolveContentBucket` /
+ * `currentContentBucket` rather than naming one.
  *
  * This module is server-only: it is imported by the setup command, never by
  * client components.
@@ -67,8 +70,27 @@ export function tryResolveContentBucket(env: {
   try {
     return { ok: true, bucket: resolveContentBucket(env) };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
+}
+
+/**
+ * The content bucket of the CURRENT process, read lazily per call so tests (and
+ * a process that changes env) resolve at invocation time rather than at module
+ * import. Result-typed so a caller fails closed with its own message instead of
+ * guessing a bucket; the env semantics match `src/config/shared.ts`: `APP_ENV`
+ * falls back to `NODE_ENV` and the schema falls back to `public` (which is
+ * therefore refused outside production).
+ */
+export function currentContentBucket(): ContentBucketResolution {
+  const appEnv =
+    process.env.APP_ENV ??
+    (process.env.NODE_ENV === 'production' ? 'production' : 'development');
+  const schema = process.env.NEXT_PUBLIC_SUPABASE_DB_SCHEMA ?? 'public';
+  return tryResolveContentBucket({ appEnv, schema });
 }
 
 export type StorageBucketRow = {
@@ -207,7 +229,11 @@ export async function setupContentBucket(
   storage: StorageBucketApi
 ): Promise<BucketSetupResult> {
   const existing = await storage.getBucket(CONTENT_BUCKET_DEV);
-  if (existing.error && !existing.data && !/not found/i.test(existing.error.message)) {
+  if (
+    existing.error &&
+    !existing.data &&
+    !/not found/i.test(existing.error.message)
+  ) {
     throw new Error(
       `[content-bucket] getBucket(${CONTENT_BUCKET_DEV}) failed: ${existing.error.message}`
     );
@@ -226,7 +252,12 @@ export async function setupContentBucket(
         `[content-bucket] createBucket(${CONTENT_BUCKET_DEV}) failed: ${created.error.message}`
       );
     }
-    return { status: 'created', bucket: CONTENT_BUCKET_DEV, changes: [], config: desired };
+    return {
+      status: 'created',
+      bucket: CONTENT_BUCKET_DEV,
+      changes: [],
+      config: desired,
+    };
   }
 
   const drift = bucketDrift(existing.data);
