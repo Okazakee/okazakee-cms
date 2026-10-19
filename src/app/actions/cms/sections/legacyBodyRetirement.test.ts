@@ -256,9 +256,6 @@ beforeEach(() => {
   vi.stubEnv('APP_ENV', 'development');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'dev_staging');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', STORAGE_ORIGIN);
-  // The shim exists only while `body_en` is still NOT NULL; the contraction
-  // requires it off, which is what these scenarios run.
-  vi.stubEnv('CMS_LEGACY_BODY_EN_SHIM', 'false');
 });
 
 afterAll(async () => {
@@ -649,41 +646,14 @@ describe('fixture enforcement (so a pass is not vacuous)', () => {
 });
 
 /**
- * The two unsafe orderings the release plan forbids, rehearsed as evidence that
- * the plan's step 4 (relax `body_en` to nullable) has to sit between the shim-on
- * deployment and the contraction:
- *   - shim ON  + column gone      -> the INSERT names a column that no longer
- *                                    exists, so every post write fails;
- *   - shim OFF + `body_en` NOT NULL -> the INSERT leaves the column unmet, so
- *                                    every post write fails the other way.
- * Both are exercised here because the same save succeeds in the negative-control
- * shape (step 5: nullable column, shim off), which is why that step exists.
+ * Historical ordering evidence. While `body_en` was still `NOT NULL`, a save
+ * that named no legacy column failed the constraint (`23502`). That is why the
+ * release plan relaxed the column before the contraction; the shim that bridged
+ * the gap has since been removed and the columns dropped, so the failure is
+ * purely a schema-shape rehearsal.
  */
-describe('shim flag vs. schema shape (ordering control)', () => {
-  it('a save that still writes body_en fails on the contracted schema', async () => {
-    const { db, fixture } = await prepare('contracted');
-    vi.stubEnv('CMS_LEGACY_BODY_EN_SHIM', 'true');
-
-    const result = await publish({
-      creates: [{ data: blogCreateData(), file: webpFile(), tempId: 'c1' }],
-      updates: [],
-      deletes: [],
-    });
-
-    expect(result.success).toBe(false);
-    const evidence = result.data as BatchCommitEvidence;
-    expect(evidence.createdIds).toEqual({});
-    expect(evidence.failed[0]?.error).toContain('body_en');
-    const insert = fixture.state.statements.find(
-      (statement) => statement.mode === 'insert'
-    );
-    expect(insert?.payloadColumns).toContain('body_en');
-    expect(insert?.errorCode).toBe('PGRST204');
-    expect(await tableRows(db, 'blog_posts')).toEqual([]);
-    expect(objectsInBucket(fixture.state, CONTENT)).toEqual([]);
-  });
-
-  it('the same save also fails while body_en is still NOT NULL', async () => {
+describe('retired column vs. schema shape (historical ordering)', () => {
+  it('a save that names no legacy column fails while body_en is still NOT NULL', async () => {
     const { db, fixture } = await prepare('legacy-not-null');
 
     const result = await publish({

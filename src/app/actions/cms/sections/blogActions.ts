@@ -36,7 +36,6 @@ import {
   normalizeTempId,
 } from '@/libs/cms/batchEvidence';
 import { currentBodyWrite } from '@/libs/cms/bodyWriteGate';
-import { legacyBodyEnShimFields } from '@/libs/cms/legacyBodyEnShim';
 import {
   errorMessage,
   type MutationResult,
@@ -460,12 +459,10 @@ async function batchPublishBlog(
         author_id: item.data.author_id || context.user.id,
         image: upload.publicUrl,
         blurhashURL: prepared.image.blurhash,
-        // Provisional insert: hidden, unpointed, and carrying only the legacy
-        // `body_en` shim value (the only field the retired column still needs
-        // while it is NOT NULL). The row can therefore never be publicly
-        // readable before its objects and pointers commit together below.
+        // Provisional insert: hidden and unpointed, so the row can never be
+        // publicly readable before its objects and pointers commit together
+        // below.
         hidden: true,
-        ...legacyBodyEnShimFields(),
       };
 
       const { data, error } = await admin
@@ -739,10 +736,6 @@ async function batchPublishBlog(
             priorPointers
           );
           Object.assign(dbUpdate, pointerCommitFields(staged.pointers));
-          if (Object.hasOwn(staged.pointers, 'en')) {
-            // Legacy NOT NULL placeholder only — never the real Markdown.
-            Object.assign(dbUpdate, legacyBodyEnShimFields());
-          }
           guards.push(...pointerGuards(staged.pointers, priorPointers));
           previousBodies = await replacedBodyMarkdown(
             bodyStorage,
@@ -1040,12 +1033,10 @@ async function createBlog(
       ...stripRetiredBodyColumns({ ...data }),
       blurhashURL: data.blurhashURL ?? '',
       author_id: data.author_id || userId,
-      // Provisional insert: hidden, unpointed, and carrying only the legacy
-      // `body_en` shim value. The intended visibility commits together with
-      // the pointers below, so the post can never be publicly readable before
-      // its objects exist.
+      // Provisional insert: hidden and unpointed. The intended visibility
+      // commits together with the pointers below, so the post can never be
+      // publicly readable before its objects exist.
       hidden: true,
-      ...legacyBodyEnShimFields(),
     };
 
     const admin = getAdminClient();
@@ -1188,10 +1179,6 @@ async function updateBlog(
         priorPointers
       );
       Object.assign(dbUpdate, pointerCommitFields(staged.pointers));
-      if (Object.hasOwn(staged.pointers, 'en')) {
-        // Legacy NOT NULL placeholder only — never the real Markdown.
-        Object.assign(dbUpdate, legacyBodyEnShimFields());
-      }
       // Guards name only the locales this save writes, so an EN-only edit can
       // never be rejected because of a concurrent IT edit (and vice versa).
       guards.push(...pointerGuards(staged.pointers, priorPointers));

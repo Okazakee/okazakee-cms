@@ -883,7 +883,10 @@ describe('export artifact', () => {
     });
     expect(verified.problems).toEqual([]);
     expect(verified.ok).toBe(true);
-    expect(verified.counts.bodies).toBe(6);
+    expect(verified.counts.bodies).toBe(4);
+    // Two of the six locale entries are pointer-only (legacy column NULL),
+    // so they carry no legacy text yet must still be verified per locale.
+    expect(verified.counts.bodyLocales).toBe(6);
     expect(verified.counts.objects).toBe(4);
   });
 

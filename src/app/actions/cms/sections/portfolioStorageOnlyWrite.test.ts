@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createFakeSupabase,
   type FakeSupabase,
@@ -33,12 +33,10 @@ vi.mock('blurkit/node', () => ({
 
 import { portfolioActions } from '@/app/actions/cms/sections/portfolioActions';
 import type { BatchCommitEvidence } from '@/libs/cms/batchEvidence';
-import { LEGACY_BODY_EN_SHIM_FLAG } from '@/libs/cms/legacyBodyEnShim';
 import { sha256Hex } from '@/libs/cms/storage/bodyContent';
 
 const EDITOR = [{ email: 'admin@example.com', role: 'editor' }];
 const CONTENT = 'website-content-dev/';
-const SHIM_PLACEHOLDER = '[content moved to object storage]';
 
 function pathFor(
   markdown: string,
@@ -193,8 +191,8 @@ describe('portfolio create: unknown id', () => {
     expect(row?.body_en_path).toBe(pathFor('# en final', 'en', id));
     expect(row?.body_it_path).toBe(pathFor('# it final', 'it', id));
     expect(row?.hidden).toBe(false);
-    expect(row?.body_en).toBe(SHIM_PLACEHOLDER);
-    expect(row?.body_it).toBeUndefined();
+    expect(Object.hasOwn(row ?? {}, 'body_en')).toBe(false);
+    expect(Object.hasOwn(row ?? {}, 'body_it')).toBe(false);
     const enKey = `${CONTENT}${row?.body_en_path as string}`;
     expect((h.fake.state.objects[enKey] as Buffer).toString('utf8')).toBe(
       '# en final'
@@ -259,13 +257,17 @@ describe('portfolio edit', () => {
     const row = h.fake.state.tables.portfolio_posts[0];
     expect(row?.body_en_path).toBe(pathFor('# new en'));
     expect(row?.body_it_path).toBe(pathFor('# old it', 'it'));
-    expect(row?.body_en).toBe(SHIM_PLACEHOLDER);
+    // A pre-existing legacy value is left exactly as it was: the save writes no
+    // legacy body column.
+    expect(row?.body_en).toBe('# old en');
     expect(row?.body_it).toBe('# old it');
     // The committed statement names ONLY the EN pointer.
     const update = h.fake.state.log
       .filter((entry) => entry.table === 'portfolio_posts')
       .at(-1)?.payload as Row;
     expect(update.body_en_path).toBe(pathFor('# new en'));
+    expect(Object.hasOwn(update, 'body_en')).toBe(false);
+    expect(Object.hasOwn(update, 'body_it')).toBe(false);
     expect(Object.hasOwn(update, 'body_it_path')).toBe(false);
   });
 
@@ -407,19 +409,13 @@ describe('portfolio delete', () => {
 });
 
 /**
- * Shim-off is the state the contraction runs in: `body_en` is nullable (the
- * preliminary step) and the write path must name no legacy column at all, so it
- * is already agnostic to the column being dropped. The value of these tests is
- * the NEGATIVE assertion — the committed statements are inspected key by key —
- * because the fake cannot enforce a NOT NULL constraint the way Postgres does.
+ * The contraction has run: `body_en`/`body_it` no longer exist, so the write
+ * path must name no legacy column at all. The value of these tests is the
+ * NEGATIVE assertion — the committed statements are inspected key by key —
+ * because the fake cannot enforce a schema the way Postgres does.
  */
-describe('legacy shim OFF (nullable body_en)', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
+describe('no legacy body column in any committed statement', () => {
   it('creates a post without naming body_en or body_it anywhere', async () => {
-    vi.stubEnv(LEGACY_BODY_EN_SHIM_FLAG, 'false');
     h.fake = fake({ portfolio_posts: [] });
 
     const result = await portfolioActions({
@@ -447,7 +443,6 @@ describe('legacy shim OFF (nullable body_en)', () => {
   });
 
   it('saves an EN body without naming body_en in the guarded UPDATE', async () => {
-    vi.stubEnv(LEGACY_BODY_EN_SHIM_FLAG, 'false');
     h.fake = fake(seeded());
 
     const result = await portfolioActions({

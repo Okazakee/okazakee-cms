@@ -3,11 +3,9 @@
  *
  * There is no "dual write" any more: the CMS writes a post body ONLY to the
  * private content bucket and keeps a content-addressed pointer in the row
- * (`body_<locale>_path`). The legacy `body_en`/`body_it` columns are retired
- * (see src/libs/cms/legacyBodyEnShim.ts for the last temporary value written
- * into `body_en` while production still declares it NOT NULL), so the
- * `CMS_BODY_DUAL_WRITE_ENABLED` opt-in — which existed to choose between the
- * legacy column write and the Storage write — has nothing left to choose.
+ * (`body_<locale>_path`). The legacy `body_en`/`body_it` columns have been
+ * dropped, so no opt-in remains to choose between the legacy column write and
+ * the Storage write.
  *
  * What remains is the fail-closed environment pairing check: the write must
  * resolve to the content bucket that belongs to this environment

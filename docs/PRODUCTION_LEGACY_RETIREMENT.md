@@ -41,7 +41,7 @@ the code stops writing, and the column is dropped only *after* nothing writes it
    nullable on `blog_posts` and `portfolio_posts`. It drops nothing, changes no data
    and is individually reversible. This is what makes step 5 possible: it is the only
    change that lets the code stop writing `body_en` while the column still exists.
-5. **Deploy the same revisions again with `CMS_LEGACY_BODY_EN_SHIM=false`.** With the
+5. **Deploy the same revisions again with the compatibility shim off.** With the
    shim off, the application names `body_en` in no projection, filter, insert or
    update any more — it is already column-agnostic — so a nullable column is simply
    never written and the write path is unchanged (see the shim-off guarantee below).
@@ -50,9 +50,9 @@ the code stops writing, and the column is dropped only *after* nothing writes it
 7. **Apply the contraction** (`prod_legacy_body_retirement.sql`, below) in one
    transaction.
 8. **Verify** and run the production smoke tests.
-9. **Delete the shim** in a follow-up revision (`legacyBodyEnShim.ts` +
-   `CMS_LEGACY_BODY_EN_SHIM`) — pure code cleanup now that nothing writes the column
-   and the column is gone — then apply the GC for the two known leftovers.
+9. **Delete the shim** in a follow-up revision — pure code cleanup now that nothing
+   writes the column and the column is gone (done) — then apply the GC for the two
+   known leftovers.
 
 Why not the obvious shorter order (drop the column, remove the shim afterwards)? It
 leaves a window in which a live revision still writes `body_en` against a table that
@@ -76,32 +76,30 @@ pointers only. Step 4 changes no read (it is catalog-only); step 7 removes only
 columns no read names and needs, as before, one brief ACCESS EXCLUSIVE lock per table
 with no table rewrite.
 
-## The compatibility shim (step 1 → step 5 only)
+## The compatibility shim (step 1 → step 5 only — now deleted)
 
-`body_en` is still `NOT NULL` on both production tables, so creation and updates would
-fail if nothing wrote it. `src/libs/cms/legacyBodyEnShim.ts`, gated by
-`CMS_LEGACY_BODY_EN_SHIM` (default **on**, off only when exactly `false`), writes the
+While `body_en` was still `NOT NULL` on both production tables, creation and updates
+would have failed if nothing wrote it. A temporary compatibility shim, gated by a
+dedicated environment flag (default **on**, off only when exactly `false`), wrote the
 placeholder `[content moved to object storage]` into `body_en` only — never Markdown,
-never `body_it`. The flag is flipped to `false` at step 5, *after* step 4 made the
-column nullable and *before* step 7 drops it; the file and the flag are deleted at
+never `body_it`. The flag was flipped off at step 5, *after* step 4 made the column
+nullable and *before* step 7 dropped it; the shim module and its flag were deleted at
 step 9, together with the columns.
 
-**Shim-off guarantee.** With `CMS_LEGACY_BODY_EN_SHIM=false`, `legacyBodyEnShimFields()`
-returns `{}`, so no INSERT and no UPDATE carries a `body_en` field at all — the app is
-agnostic to the column being nullable, and equally agnostic to it being gone. That is
-what makes step 7 a pure schema contraction with no coordinated deployment, and it is
-pinned by tests: `src/libs/cms/legacyBodyEnShim.test.ts` (the switch itself) plus the
-shim-off cases in `src/app/actions/cms/sections/storageOnlyWrite.test.ts` and
-`src/app/actions/cms/sections/portfolioStorageOnlyWrite.test.ts`, which drive the real
-create and EN-edit paths with the flag off and assert that the committed statements
-name neither `body_en` nor `body_it`.
+**Shim-off guarantee.** With the shim off, the helper returned `{}`, so no INSERT and
+no UPDATE carried a `body_en` field at all — the app is agnostic to the column being
+nullable, and equally agnostic to it being gone. That is what made step 7 a pure
+schema contraction with no coordinated deployment, and it is still pinned by tests:
+the create and EN-edit cases in `src/app/actions/cms/sections/storageOnlyWrite.test.ts`
+and `src/app/actions/cms/sections/portfolioStorageOnlyWrite.test.ts`, which drive the
+real create and EN-edit paths and assert that the committed statements name neither
+`body_en` nor `body_it`.
 
-`legacyBodyEnShim.ts` is the only place in the application that names `body_en` on a
-write; `body_en` also appears as the CMS editor's request-payload key for the English
-body, which is a form field name (consumed before the row payload is built, and
-stripped from it by `stripRetiredBodyColumns`), not a database column reference. Do
-not "fix" those field names to remove the column dependency — the dependency is
-already zero.
+The shim was the only place in the application that named `body_en` on a write;
+`body_en` also appears as the CMS editor's request-payload key for the English body,
+which is a form field name (consumed before the row payload is built, and stripped from
+it by `stripRetiredBodyColumns`), not a database column reference. Do not "fix" those
+field names to remove the column dependency — the dependency is already zero.
 
 ## Fresh backup (step 3, required before the contraction)
 
@@ -193,10 +191,10 @@ alter table public.portfolio_posts drop column if exists body_en, drop column if
 ```
 
 Apply this only after step 6 has been verified: `body_en` is nullable (step 4) and the
-live revision has `CMS_LEGACY_BODY_EN_SHIM=false` (step 5), so no statement the
-deployed code issues names `body_en`. A revision that still writes it would start
-failing every post write the moment the column disappears; re-check the running
-revision before applying this file.
+live revision has the shim off (step 5), so no statement the deployed code issues
+names `body_en`. A revision that still writes it would start failing every post write
+the moment the column disappears; re-check the running revision before applying this
+file.
 
 The CAS functions go first because they are the only database objects that read the
 legacy columns, and no operational path calls them any more. Preserved: the four
@@ -207,6 +205,42 @@ bucket and the `website_content_body_read` RLS policy. The pointer columns stay
 Impact: a brief ACCESS EXCLUSIVE lock on the two content tables while the columns
 are dropped; no table rewrite for `DROP COLUMN`. The public read path is unaffected
 because it never selects the dropped columns.
+
+## Execution record — 2026-10-19 (completed)
+
+The retirement above was executed in production in this order, each step gated on
+the previous one:
+
+1. **Code first** — CMS PR #3 (`d0034c80`) and WS PR #30 (`4e21064`) deployed; both
+   apps verified Storage-only (`24/24` visible pages 200, `10/10` hidden 404).
+   Hotfix `922fcc2` (`dpl_4M2epCxWBt9tYyRgHLoAUoAQznCJ`) fixed the CMS editor
+   hydration regression (the DEV-only lazy-body gate made production open empty
+   editors after the legacy columns stopped being written).
+2. **Fresh snapshot** — `prod-legacy-bodies-2026-10-19T08-44-45-546Z-c91ac37ee228`,
+   kind `storage-authoritative`: 18 rows, 36 pointers, 36 objects captured, 0
+   missing, `complete=true`; sums `a30a1dfc…`; restoration rehearsed against this
+   artifact in scratch Postgres.
+3. **Preliminary nullability** — `prod_legacy_body_en_drop_not_null.sql`
+   (`adddf76e…`), catalog-only, 0 NULL rows afterwards.
+4. **Shim off** — `CMS_LEGACY_BODY_EN_SHIM=false`, CMS redeployed; the authenticated
+   CMS validation (post 20: create, EN/IT reload, EN-only edit producing a new
+   immutable object while the IT pointer stayed unchanged, metadata edits, both
+   legacy columns NULL) confirmed the contract.
+5. **Contraction** — `prod_legacy_body_retirement.sql` (`d0822c5b…`) applied
+   atomically: the two obsolete CAS functions and the four legacy columns dropped.
+6. **Post-contraction** — 0 legacy columns, 4 pointer columns, 4 CHECKs, 0 CAS
+   functions, 18 posts, 36 pointers, 0 missing referenced objects, bucket private
+   with its RLS policy, `24/24` visible pages clean, `12/12` hidden routes 404
+   (including post 20), DEV untouched at 34/34.
+7. **Shim removed** — `legacyBodyEnShim.ts`, its flag and the now-dead
+   `CMS_BODY_DUAL_WRITE_ENABLED` / `CMS_BODY_STORAGE_READ_ENABLED` /
+   `WS_BODY_STORAGE_READ_ENABLED` configuration are being retired in the follow-up
+   revision; `CMS_BODY_POINTER_COLUMNS` remains only for the obsolete backfill CLIs.
+
+**Unreferenced objects at completion: 3** — the two `portfolio/27` orphans and the
+EN object superseded by the post-20 edit. Their 14-day retention has not elapsed;
+GC must not run before it. Post 20 itself remains, hidden, for the operator to
+delete through the CMS once satisfied.
 
 ## Recovery
 

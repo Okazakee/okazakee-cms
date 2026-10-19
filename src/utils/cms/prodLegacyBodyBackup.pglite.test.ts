@@ -775,6 +775,10 @@ describe.skipIf(REHEARSAL_DIR === '')(
       expect(verified.ok).toBe(true);
       expect(verified.problems).toEqual([]);
       expect(verified.counts.bodies).toBe(manifest.counts.bodies);
+      // Every committed pointer has a verified locale entry, including the
+      // post-shim rows whose legacy column is NULL (they contribute no legacy
+      // text, hence the separate counter).
+      expect(verified.counts.bodyLocales).toBe(manifest.counts.pointers);
     });
   }
 );

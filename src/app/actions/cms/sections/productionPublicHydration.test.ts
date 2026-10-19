@@ -251,7 +251,6 @@ beforeEach(() => {
   vi.stubEnv('APP_ENV', 'production');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_DB_SCHEMA', 'public');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', STORAGE_ORIGIN);
-  vi.stubEnv('CMS_LEGACY_BODY_EN_SHIM', 'false');
 });
 
 afterAll(async () => {

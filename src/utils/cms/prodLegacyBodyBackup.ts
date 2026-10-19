@@ -46,11 +46,11 @@
  *     project, and refuses any live production content table.
  *
  * TWO ARTIFACT KINDS — THE MANIFEST SAYS WHICH ONE IT IS
- *   `src/libs/cms/legacyBodyEnShim.ts` keeps `body_en` NOT NULL until the
- *   contraction by writing the placeholder `[content moved to object storage]`
- *   into it on every create/update. That splits this command into two modes,
- *   and every artifact records its own `kind` so the operator can tell them
- *   apart from `manifest.json` alone:
+ *   A now-removed shim kept `body_en` NOT NULL until the contraction by writing
+ *   the placeholder `[content moved to object storage]` into it on every
+ *   create/update. That splits this command into two modes, and every artifact
+ *   records its own `kind` so the operator can tell them apart from
+ *   `manifest.json` alone:
  *
  *   - `legacy-baseline` (the default, `--storage-authoritative` absent): the
  *     PRE-shim snapshot. It must be taken before the shim reaches production,
@@ -210,10 +210,10 @@ export const RUN_DIRECTORY_MODE = 0o700;
 export const ARTIFACT_FILE_MODE = 0o600;
 
 /**
- * The value `legacyBodyEnShim.ts` writes into `body_en` while the NOT NULL
- * column still exists. Kept as a literal rather than an import because the shim
- * is deleted with the columns, while this baseline artifact stays readable
- * afterwards; `prodLegacyBodyBackup.test.ts` pins the two to each other.
+ * The placeholder written into `body_en` while the NOT NULL column still
+ * existed. Kept as a literal rather than an import because the shim that wrote
+ * it is gone with the columns, while this baseline artifact stays readable
+ * afterwards.
  */
 export const LEGACY_BODY_EN_PLACEHOLDER = '[content moved to object storage]';
 
@@ -1576,6 +1576,7 @@ export type VerifyReport = {
     filesUnexpected: number;
     rows: number;
     bodies: number;
+    bodyLocales: number;
     bodiesMismatched: number;
     objects: number;
     objectsMismatched: number;
@@ -2074,7 +2075,12 @@ export async function verifyBackupArtifact(
     filesUnexpected: files.filter((file) => file.status === 'unexpected')
       .length,
     rows: rowCount,
-    bodies: bodies.length,
+    // `bodies` counts the legacy text values actually captured (matching the
+    // manifest's `counts.bodies`); `bodyLocales` counts every locale entry,
+    // including a locale whose legacy column is NULL while a pointer is
+    // committed (post-shim rows), which has no legacy text to verify.
+    bodies: bodies.filter((body) => body.expectedSha256 !== null).length,
+    bodyLocales: bodies.length,
     bodiesMismatched: bodies.filter((body) => body.status !== 'ok').length,
     objects: manifest
       ? manifest.objects.filter((object) => object.captured).length

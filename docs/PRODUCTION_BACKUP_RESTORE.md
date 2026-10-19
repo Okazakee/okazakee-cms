@@ -97,13 +97,13 @@ re-reading production.
 
 ## Timing: take the baseline BEFORE the shim-enabled CMS deploys
 
-`src/libs/cms/legacyBodyEnShim.ts` keeps `body_en` `NOT NULL` until the
-contraction by writing the placeholder `[content moved to object storage]` into
-it on every create and update. **Any post saved by that revision has already
-lost its legacy English body as a column value** — no backup taken afterwards can
-recover the pre-shim *text* from Postgres, only the Storage object the shim
-points at (which is why the post-shim snapshot is `storage-authoritative`: the
-object bytes are what the CMS renders, and they survive the contraction).
+A now-removed compatibility shim kept `body_en` `NOT NULL` until the contraction
+by writing the placeholder `[content moved to object storage]` into it on every
+create and update. **Any post saved by that revision has already lost its legacy
+English body as a column value** — no backup taken afterwards can recover the
+pre-shim *text* from Postgres, only the Storage object the shim points at (which is
+why the post-shim snapshot is `storage-authoritative`: the object bytes are what
+the CMS renders, and they survive the contraction).
 
 Therefore:
 

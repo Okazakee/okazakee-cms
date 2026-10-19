@@ -471,13 +471,20 @@ bare prefix listing is not authorized (`allow_any_operation` gate), and
 
 ## D2. Application compatibility, deployment order and flags
 
-Flags (deployment **assertions**, never proof; only the legacy-column shim
-defaults on):
+Flags (deployment **assertions**, never proof):
 
 | Flag | App | Meaning |
 |---|---|---|
 | `CMS_BODY_POINTER_COLUMNS` | CMS | the pointer columns exist in this schema (backfill-tooling assertion; the CMS write path no longer reads it) |
-| `CMS_LEGACY_BODY_EN_SHIM` | CMS | **default ON** — while `body_en` is still `NOT NULL`, a write keeps the non-Markdown placeholder in it. Set `false` only AFTER the column has been made nullable and BEFORE the contraction drops it (never while it is still `NOT NULL`, and never by dropping the column first); the shim file (`src/libs/cms/legacyBodyEnShim.ts`) is deleted together with the columns. See `docs/PRODUCTION_LEGACY_RETIREMENT.md` for the ordering |
+
+> **Retired compatibility flag.** The legacy-column write shim no longer exists:
+> while `body_en` was still `NOT NULL`, a write kept the non-Markdown placeholder
+> in it so every save satisfied the constraint. Its flag was set `false` only
+> AFTER the column had been made nullable and BEFORE the contraction dropped it
+> (never while it was still `NOT NULL`, and never by dropping the column first),
+> and the shim module plus its flag were deleted together with the columns.
+> Setting the former variable now has no effect. See
+> `docs/PRODUCTION_LEGACY_RETIREMENT.md` for the ordering.
 
 > **Retired write flag.** `CMS_BODY_DUAL_WRITE_ENABLED` no longer exists: a body
 > is written ONLY to the content bucket, and the row's pointer is committed

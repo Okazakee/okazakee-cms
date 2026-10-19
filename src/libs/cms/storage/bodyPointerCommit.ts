@@ -61,9 +61,7 @@ const BODY_POINTER_FIELDS = ['body_en_path', 'body_it_path'] as const;
 /**
  * Legacy Markdown columns retired by this migration. A save never writes body
  * content into them: Markdown lives in the content bucket, and a second copy in
- * the row could silently disagree with the committed pointer. (The temporary
- * NOT NULL shim writes a non-Markdown placeholder into `body_en` and is the only
- * exception — see src/libs/cms/legacyBodyEnShim.ts.)
+ * the row could silently disagree with the committed pointer.
  */
 const RETIRED_BODY_COLUMNS = ['body_en', 'body_it'] as const;
 
