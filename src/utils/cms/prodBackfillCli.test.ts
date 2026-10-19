@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyDualWrite';
+import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyWriteGate';
 import { manifestDigest } from '@/libs/cms/storage/backfillApply';
 import {
   CAS_PROBE_ENTITY,

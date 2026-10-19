@@ -34,7 +34,7 @@ import {
   supabaseServerSecret,
   supabaseUrl,
 } from '@/config/shared';
-import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyDualWrite';
+import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyWriteGate';
 import {
   assertBackfillEnvironment,
   type BackfillObservedEnvironment,

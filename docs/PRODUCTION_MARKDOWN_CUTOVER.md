@@ -471,14 +471,35 @@ bare prefix listing is not authorized (`allow_any_operation` gate), and
 
 ## D2. Application compatibility, deployment order and flags
 
-Flags (all default **off** and are deployment **assertions**, never proof):
+Flags (deployment **assertions**, never proof; only the legacy-column shim
+defaults on):
 
 | Flag | App | Meaning |
 |---|---|---|
-| `CMS_BODY_POINTER_COLUMNS` | CMS | the pointer columns exist in this schema |
-| `CMS_BODY_DUAL_WRITE_ENABLED` | CMS | CMS writes bodies to Storage as well as the DB |
-| `CMS_BODY_STORAGE_READ_ENABLED` | CMS | CMS reads bodies from Storage first |
-| `WS_BODY_STORAGE_READ_ENABLED` | WS | public site reads bodies from Storage first |
+| `CMS_BODY_POINTER_COLUMNS` | CMS | the pointer columns exist in this schema (backfill-tooling assertion; the CMS write path no longer reads it) |
+| `CMS_LEGACY_BODY_EN_SHIM` | CMS | **default ON** — while `body_en` is still `NOT NULL`, a write keeps the non-Markdown placeholder in it. Set `false` only AFTER the column has been made nullable and BEFORE the contraction drops it (never while it is still `NOT NULL`, and never by dropping the column first); the shim file (`src/libs/cms/legacyBodyEnShim.ts`) is deleted together with the columns. See `docs/PRODUCTION_LEGACY_RETIREMENT.md` for the ordering |
+
+> **Retired write flag.** `CMS_BODY_DUAL_WRITE_ENABLED` no longer exists: a body
+> is written ONLY to the content bucket, and the row's pointer is committed
+> afterwards by ONE `UPDATE` guarded on the pointer this save observed
+> (`body_<locale>_path`, NULL included). The retired
+> `prod_backfill_body_pointer_cas` function is not used. Order of operations is
+> objects first (immutable upload, bytes re-hashed against the key) and then the
+> pointer, so a failed upload can never leave a pointer set and a failed commit
+> can never publish bytes that were not proven stored. PostgreSQL and Storage
+> share **no transaction**: an object uploaded by a save whose commit failed (or
+> was lost to a concurrent edit) stays unreferenced and is reclaimed by the
+> Storage GC. Setting the variable has no effect.
+
+> **Retired read flags.** `CMS_BODY_STORAGE_READ_ENABLED` and
+> `WS_BODY_STORAGE_READ_ENABLED` no longer exist: the reader retirement made both
+> applications read Markdown from Storage **unconditionally** — the detail
+> projections name `body_en_path` / `body_it_path` and never `body_en` /
+> `body_it`, with no fallback and no Storage/legacy comparison. There is nothing
+> to enable, disable or roll back on the read path, and setting either variable
+> has no effect. Any later step below that names one of them describes the
+> executed CP-1B/CP-3 sequence; the rollback for a read failure is now a
+> deployment rollback (see D-rollback row 7).
 
 Only two pairings resolve a bucket: `APP_ENV=production` + schema `public`
 → `website-content`, and non-production + `dev_staging` → `website-content-dev`.
@@ -500,6 +521,9 @@ Anything else fails closed before any DB or Storage call.
 5. Keep **`CMS_BODY_STORAGE_READ_ENABLED`** and **`WS_BODY_STORAGE_READ_ENABLED`**
    OFF until the content migration is complete **and verified** (D3 → D4).
 6. Keep **`CMS_BODY_DUAL_WRITE_ENABLED`** OFF during the backfill (see below).
+   *Historical:* the flag is retired (see "Retired write flag"), so the write
+   activation is now simply the deployment of the write-path revision — there is
+   no longer a write flag to hold off.
 7. Read activation happens in D4 under **CP-3**.
 
 ### Ordering constraints (hard)
@@ -541,7 +565,12 @@ expected and handled by pointer clearing; the fallback is always the legacy
 column, which stays authoritative until Storage reads are verified.
 
 Dual-write mode (pointer populated everywhere + `CMS_BODY_DUAL_WRITE_ENABLED=true`)
-is a **post-cutover** option, not part of this runbook's migration window.
+was a **post-cutover** activation and is now the ONLY write mode: the flag is
+retired, the legacy columns are never written with Markdown (only the `body_en`
+placeholder while that column is still `NOT NULL`), and the shim is switched off
+after the column has been made nullable and before the contraction drops it — the
+file is deleted together with the columns. See
+`docs/PRODUCTION_LEGACY_RETIREMENT.md` for the ordering.
 
 ---
 
@@ -772,6 +801,12 @@ committed pointer.
 Prerequisite: D3 step 10 fully verified. All activations are gated by **CP-3**.
 Verify with the **production runtime**, not with the CLI, and capture evidence.
 
+> **Executed (CP-3).** Steps 1–2 below are the historical activation record. The
+> read flags are retired: both applications now resolve bodies from Storage
+> unconditionally, so there is nothing to set to activate a read path (see
+> "Retired read flags" in D2). Steps 3+ (write activation and the write-path
+> checks) are unaffected.
+
 ### Controlled activation order
 
 1. **CMS Storage-first reads** — set `CMS_BODY_STORAGE_READ_ENABLED=true` on
@@ -788,10 +823,14 @@ Verify with the **production runtime**, not with the CLI, and capture evidence.
    evidence: the same `object/website-content/...` GET returning
    `text/markdown`), not merely that the page renders. Test visible and hidden
    posts, EN and IT.
-3. **CMS dual-write** — only after reads are verified, set
-   `CMS_BODY_DUAL_WRITE_ENABLED=true` and redeploy.
-   Verify a create/edit writes the immutable object and the pointer, and that a
-   metadata-only edit leaves pointers intact.
+3. **CMS Storage-only writes** — the write path is unconditional now
+   (`CMS_BODY_DUAL_WRITE_ENABLED` is retired; see "Retired write flag"), so this
+   activation is the deployment of the write-path revision itself.
+   Verify a create/edit uploads the immutable object, re-hashes the stored bytes
+   against the key, and only then commits the pointer; that a metadata-only edit
+   makes **no** Storage call and touches neither pointer; that an unchanged body
+   uploads nothing; and that a concurrent edit is reported as a conflict instead
+   of being overwritten.
 
 Each step is verified before the next is enabled; enabling the next step does not
 imply the previous one passed.
@@ -824,12 +863,12 @@ For each operational checkpoint: preconditions, expected state, exact command,
 verification, safe stop, recovery, and whether a **new** authorization is
 required. Failure classes are distinguished per row.
 
-Guiding rules for every class: **preserve the ability to disable Storage reads
-and serve valid legacy Markdown immediately** (turn the read flags back off and
-redeploy — the legacy `body_en` / `body_it` columns are never modified by any
-step here). During emergency recovery **do not** remove pointer columns, objects
-or the production bucket. Actual pointer rollback requires **CP-4** and verified
-conflict-free candidates.
+Guiding rules for every class: **preserve the ability to roll the applications
+back to a known-good revision and keep serving valid Markdown from Storage** —
+both readers are Storage-only, so the legacy `body_en` / `body_it` columns are no
+longer a fallback and no read flag can be switched off. During emergency recovery
+**do not** remove pointer columns, objects or the production bucket. Actual
+pointer rollback requires **CP-4** and verified conflict-free candidates.
 
 | # | Checkpoint / failure class | Preconditions | Expected state | Exact command | Verification | Safe stop | Recovery | New auth? |
 |---|---|---|---|---|---|---|---|---|
@@ -839,8 +878,8 @@ conflict-free candidates.
 | 4 | **Partial Markdown backfill** (D3 step 8) | CP-2 held; manifest digest recorded | Some `UPLOADED_AND_POINTED`, run stopped | Stop at first error (executor halts itself) | D3 step 10 per-entry pointer/object verify | Read flags stay off throughout; legacy serves | Fix the cause, then `storage:content:prod:backfill:exec --apply --resume --confirm-digest=<recorded>` | No (within CP-2) |
 | 5 | **Unexpected CMS edit** (during or after backfill) | — | Edited locale's pointer cleared by legacy-write pointer clearing | none (automatic) | Plan shows that locale pending/`BLOCKED` | Do not force a stale pointer | Re-migrate the edited locale via `--resume` or a fresh authorized run | New CP-2 if a new run/digest is required |
 | 6 | **Cache invalidation failure** (D3 step 8 / D4) | Pointer switched | Entry `REVALIDATION_FAILED`, post in pending list | `storage:content:prod:backfill:exec --apply --resume …` (retries pending invalidations) | Object/pointer unchanged; event returns `sent` | Reads still safe (pointers correct) | Retry invalidations without touching pointers/objects | No (retry of recorded work) |
-| 7 | **Storage-read failure** (D4) | Read flag enabled | Reads failing in one app | Disable the read flag and redeploy (`CMS_BODY_STORAGE_READ_ENABLED` / `WS_BODY_STORAGE_READ_ENABLED` unset) | Legacy body renders; no error | Immediate legacy fallback | Investigate (bucket/RLS/object), re-verify, re-enable | New CP-3 to re-enable |
-| 8 | **Failed application deployment** (D2/D4) | Prior revision known-good | New revision unhealthy | Roll back the app revision; keep flags off | Legacy path healthy | Reads off, legacy serves | Fix and redeploy; re-verify with reads disabled before re-enabling | New CP-3 to re-enable flags |
+| 7 | **Storage-read failure** (D4) | Prior revision known-good | Reads failing in one app | Roll the app revision back to its previous deployment — the read path is unconditional, so there is no read flag to disable and no legacy fallback to fall into | Previous revision serves its bodies from Storage | Recovery is a redeploy of the previous revision | Investigate (bucket/RLS/object), re-verify, then redeploy the fixed revision | New deployment authorization |
+| 8 | **Failed application deployment** (D2/D4) | Prior revision known-good | New revision unhealthy | Roll back the app revision | Previous revision healthy | Recovery is a redeploy of the previous revision | Fix and redeploy; re-verify the read path before any further activation | New deployment authorization |
 | 9 | **Pointer rollback** (explicit) | CP-4 held; rollback plan shows zero conflicts | `ROLLED_BACK` pointers | `CMS_PROD_BACKFILL_ROLLBACK_ACK=yes-rollback-to-production-backfill PROD_BACKFILL_JOURNAL_PATH=/var/lib/cms-backfill/prod/backfill-run.jsonl bun run storage:content:prod:backfill:rollback --apply --run-id=<id> --expect-project-ref=mtvwynyikouqzmhqespl` | Per-entry restored pointer; no `BODY_CHANGED`/`POINTER_DRIFTED` | Stop on first conflict; restored entries stay | Re-invoke to resume; per-post invalidation after all locales restored | **Yes — CP-4** |
 
 Rollback never modifies legacy Markdown, never performs Storage cleanup, and
@@ -870,19 +909,19 @@ each signal, capture the evidence and apply the declared condition.
 ### Declaring production healthy
 
 All of the following hold for the observation window: 0 Storage download
-errors, 0 SHA-256 integrity failures, 0 legacy/Storage disagreements, 0 missing
+errors, 0 SHA-256 integrity failures, 0 missing
 pointers or objects, 0 cache invalidation failures, hidden-body and listing
 access tests deny as expected, no service-role key exposure, and no new CMS
 write-failure class. Only then is D4 closed.
 
 ### Stopping and reverting
 
-On any stop-and-revert condition: disable Storage reads
-(`CMS_BODY_STORAGE_READ_ENABLED=false`, `WS_BODY_STORAGE_READ_ENABLED=false`),
-redeploy, and confirm the legacy `body_en` / `body_it` path serves immediately.
+On any stop-and-revert condition: roll both applications back to the previous
+deployment — the read path is unconditional, so there is no read flag to switch
+off and no legacy `body_en` / `body_it` path to fall into.
 Do **not** delete objects, pointers or the bucket. Investigate, then re-verify
-before re-enabling under **CP-3**. Pointer rollback, if needed, requires **CP-4**
-and conflict-free candidates.
+before redeploying the fixed revision. Pointer rollback, if needed, requires
+**CP-4** and conflict-free candidates.
 
 ---
 

@@ -35,12 +35,8 @@ import {
   markUpdated,
   normalizeTempId,
 } from '@/libs/cms/batchEvidence';
-import { currentBodyDualWrite } from '@/libs/cms/bodyDualWrite';
-import {
-  bodyPointerColumnsReadable,
-  currentBodyStorageRead,
-  type BodyStorageReadDecision,
-} from '@/libs/cms/bodyRead';
+import { currentBodyWrite } from '@/libs/cms/bodyWriteGate';
+import { legacyBodyEnShimFields } from '@/libs/cms/legacyBodyEnShim';
 import {
   errorMessage,
   type MutationResult,
@@ -48,15 +44,30 @@ import {
 } from '@/libs/cms/mutationResult';
 import { BLOG_LIST_COLUMNS } from '@/libs/cms/postList';
 import type { BodyContentStorageApi } from '@/libs/cms/storage/bodyContent';
-import { getCmsStorageBucket, getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
+import {
+  clientBodyPointerRejection,
+  commitGuardedRow,
+  modifiedLocales,
+  POINTER_CONFLICT_MESSAGE,
+  type PointerGuard,
+  type PriorBodyPointers,
+  pointerCommitFields,
+  pointerGuards,
+  replacedBodyMarkdown,
+  stagePostBodies,
+  stripRetiredBodyColumns,
+} from '@/libs/cms/storage/bodyPointerCommit';
+import {
+  getCmsStorageBucket,
+  getCmsStorageOrigin,
+} from '@/libs/cms/storage/bucket';
+import { currentContentBucket } from '@/libs/cms/storage/contentBucket';
 import { BLOG_STAGING_PREFIX, blogPostPrefix } from '@/libs/cms/storage/paths';
 import {
-  bodyPointerUpdates,
-  clientBodyPointerRejection,
-  modifiedLocales,
+  POST_BODY_POINTER_COLUMNS,
+  type PostBodyPointerRow,
   readPostBodies,
-  storePostBodies,
-} from '@/libs/cms/storage/postBodyObjects';
+} from '@/libs/cms/storage/postBodyRead';
 import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import type { BodyImageUpload } from '@/utils/cms/postBody';
 import { hasPendingRefs } from '@/utils/cms/postBody';
@@ -131,17 +142,15 @@ type CreateBlogData = {
 type UpdateBlogData = Partial<CreateBlogData>;
 
 /**
- * Superset shape for the trusted prior-state read. The projection is chosen at
- * runtime because production must never reference the pointer columns; rows read
- * in production simply have no pointer fields.
+ * Trusted prior state for a write. Only the cover and the committed pointers
+ * are read: the retired `body_en`/`body_it` columns are never consulted by the
+ * write path (the pointer is the body state).
  */
 type PriorBlogBodyRow = {
   id: number;
   image: string | null;
-  body_en: string | null;
-  body_it: string | null;
-  body_en_path?: string | null;
-  body_it_path?: string | null;
+  body_en_path: string | null;
+  body_it_path: string | null;
 };
 
 type BlogResult = MutationResult;
@@ -311,38 +320,25 @@ function readStorageOrigin(): string | null {
 }
 
 /**
- * Runtime projection for a per-post body read. Only the dev clone with Storage
- * reads enabled may name the pointer columns; production has none, so it stays
- * on the legacy columns (never `body_en_path` / `body_it_path` against `public`).
- */
-const BLOG_LEGACY_BODY_COLUMNS = 'id, body_en, body_it';
-const BLOG_POINTER_BODY_COLUMNS = 'id, body_en, body_it, body_en_path, body_it_path';
-
-function blogBodyColumns(read: BodyStorageReadDecision): string {
-  return bodyPointerColumnsReadable(read)
-    ? BLOG_POINTER_BODY_COLUMNS
-    : BLOG_LEGACY_BODY_COLUMNS;
-}
-
-/**
- * Authenticated EN/IT Markdown for ONE post (Phase 9A).
+ * Authenticated EN/IT Markdown for ONE post.
  *
  * Authorization is the canonical post-writer check, and the service-role admin
  * client is used only after it — so hidden drafts resolve for authorized CMS
  * users and never for anyone else. The result carries the Markdown only: no
  * pointer paths, hashes, sizes, signed URLs or object metadata.
  *
- * A referenced object that is missing, unreadable, hash-mismatched or in
- * disagreement with the committed legacy body fails the action; it is never
+ * Storage is the only body store: the row read names the canonical pointers and
+ * never the retired `body_en` / `body_it` columns. The environment's content
+ * bucket is resolved BEFORE any DB or Storage call, so an unknown or crossed
+ * environment fails closed. A referenced object that is missing, unreadable,
+ * hash-mismatched or named by a malformed pointer fails the action; it is never
  * reported as an empty body.
  */
 async function getBlogBodies(id: number): Promise<BlogResult> {
   try {
-    // Misconfiguration fails before any DB or Storage call: an explicitly
-    // enabled but incompatible environment must never half-read a body.
-    const read = currentBodyStorageRead();
-    if (read.mode === 'invalid') {
-      return { success: false, error: read.error };
+    const bucket = currentContentBucket();
+    if (!bucket.ok) {
+      return { success: false, error: bucket.error };
     }
 
     await getCmsActionContext('post-writer');
@@ -354,7 +350,7 @@ async function getBlogBodies(id: number): Promise<BlogResult> {
     const admin = getAdminClient();
     const { data, error } = await admin
       .from('blog_posts')
-      .select(blogBodyColumns(read))
+      .select(POST_BODY_POINTER_COLUMNS)
       .eq('id', id)
       .single();
 
@@ -362,18 +358,16 @@ async function getBlogBodies(id: number): Promise<BlogResult> {
       return { success: false, error: 'Blog post not found' };
     }
 
-    // The projection is a runtime string, so the client cannot infer the row
-    // shape; the superset row is asserted once here.
-    const row = data as unknown as PriorBlogBodyRow;
+    // The projection is a column list the generated client types cannot follow,
+    // so the read-path row is asserted once here.
+    const row = data as unknown as PostBodyPointerRow;
     const bodies = await readPostBodies(
-      read.mode === 'enabled'
-        ? (admin.storage.from(read.bucket) as unknown as BodyContentStorageApi)
-        : null,
+      admin.storage.from(bucket.bucket) as unknown as BodyContentStorageApi,
       'blog',
       id,
       {
-        en: { legacy: row.body_en ?? null, path: row.body_en_path ?? null },
-        it: { legacy: row.body_it ?? null, path: row.body_it_path ?? null },
+        en: row.body_en_path ?? null,
+        it: row.body_it_path ?? null,
       }
     );
 
@@ -381,8 +375,8 @@ async function getBlogBodies(id: number): Promise<BlogResult> {
       success: true,
       data: {
         id,
-        body_en: bodies.bodies.en,
-        body_it: bodies.bodies.it,
+        body_en: bodies.en,
+        body_it: bodies.it,
       },
     };
   } catch (error) {
@@ -399,11 +393,12 @@ async function batchPublishBlog(
 ): Promise<BlogResult> {
   const evidence = emptyBatchEvidence();
   try {
-    // Dual-write is opt-in and dev-only. An explicitly enabled but incompatible
-    // environment is rejected before any DB or Storage mutation happens.
-    const dualWrite = currentBodyDualWrite();
-    if (dualWrite.mode === 'invalid') {
-      return { success: false, error: dualWrite.error };
+    // The content bucket (and therefore the environment pairing) is resolved
+    // before any DB or Storage mutation: an incompatible environment must
+    // never half-write a body.
+    const write = currentBodyWrite();
+    if (write.mode === 'invalid') {
+      return { success: false, error: write.error };
     }
 
     const context = await getCmsActionContext('post-writer');
@@ -465,13 +460,16 @@ async function batchPublishBlog(
       );
 
       const insertData = {
-        ...item.data,
+        ...stripRetiredBodyColumns(item.data),
         author_id: item.data.author_id || context.user.id,
         image: upload.publicUrl,
         blurhashURL: prepared.image.blurhash,
-        // Dual-write inserts provisionally hidden so the row can never become
-        // publicly visible before its bodies and pointers commit together.
-        ...(dualWrite.mode === 'enabled' ? { hidden: true } : {}),
+        // Provisional insert: hidden, unpointed, and carrying only the legacy
+        // `body_en` shim value (the only field the retired column still needs
+        // while it is NOT NULL). The row can therefore never be publicly
+        // readable before its objects and pointers commit together below.
+        hidden: true,
+        ...legacyBodyEnShimFields(),
       };
 
       const { data, error } = await admin
@@ -511,55 +509,40 @@ async function batchPublishBlog(
           { body_en: item.data.body_en, body_it: item.data.body_it },
           bodyRewrites
         );
-        if (dualWrite.mode === 'enabled') {
-          // One commit for the final legacy bodies, the immutable pointers and
-          // the intended visibility. Objects are uploaded first; any failure
-          // rolls the provisional row back in the catch below.
-          const bodyStorage = admin.storage.from(
-            dualWrite.bucket
-          ) as unknown as BodyContentStorageApi;
-          const storedBodies = await storePostBodies(
-            bodyStorage,
-            'blog',
-            data.id as number,
-            [
-              { locale: 'en', body: rewrittenBodies.body_en },
-              { locale: 'it', body: rewrittenBodies.body_it },
-            ]
-          );
-          const commit: Record<string, unknown> = {
-            ...bodyPointerUpdates(storedBodies),
+        // Objects are uploaded and their bytes verified BEFORE the pointer
+        // commit; a failure rolls the provisional row back in the catch below.
+        // The guard requires the pointers this INSERT just wrote (NULL) to be
+        // untouched, so a concurrent write to the same provisional row loses
+        // instead of being overwritten.
+        const bodyStorage = admin.storage.from(
+          write.bucket
+        ) as unknown as BodyContentStorageApi;
+        const staged = await stagePostBodies(
+          bodyStorage,
+          'blog',
+          data.id as number,
+          [
+            { locale: 'en', body: rewrittenBodies.body_en },
+            { locale: 'it', body: rewrittenBodies.body_it },
+          ]
+        );
+        const committed = await commitGuardedRow(
+          admin,
+          'blog_posts',
+          data.id as number,
+          {
+            ...pointerCommitFields(staged.pointers),
             hidden: item.data.hidden ?? false,
-          };
-          if (rewrittenBodies.body_en !== undefined) {
-            commit.body_en = rewrittenBodies.body_en;
-          }
-          if (rewrittenBodies.body_it !== undefined) {
-            commit.body_it = rewrittenBodies.body_it;
-          }
-          const { data: committedRows, error: bodyError } = await admin
-            .from('blog_posts')
-            .update(commit)
-            .eq('id', data.id)
-            .select('id');
-          if (bodyError) throw bodyError;
-          if (committedRows?.length !== 1) {
-            throw new Error(
-              `Final body commit matched ${committedRows?.length ?? 0} rows; expected exactly 1`
-            );
-          }
-        } else if (
-          rewrittenBodies.body_en !== item.data.body_en ||
-          rewrittenBodies.body_it !== item.data.body_it
-        ) {
-          const { error: bodyError } = await admin
-            .from('blog_posts')
-            .update({
-              body_en: rewrittenBodies.body_en,
-              body_it: rewrittenBodies.body_it,
-            })
-            .eq('id', data.id);
-          if (bodyError) throw bodyError;
+          },
+          pointerGuards(staged.pointers, {})
+        );
+        if (committed.status === 'failed') {
+          throw new Error(
+            errorMessage(committed.error, 'Final body commit failed')
+          );
+        }
+        if (committed.status === 'conflict') {
+          throw new Error(POINTER_CONFLICT_MESSAGE);
         }
       } catch (error) {
         const { error: rollbackError } = await admin
@@ -577,15 +560,11 @@ async function batchPublishBlog(
         }
         const baseError =
           error instanceof Error ? error.message : 'Body publish failed';
-        const rowState =
-          dualWrite.mode === 'enabled'
-            ? 'row left hidden'
-            : 'row left as inserted';
         markFailed(evidence, {
           kind: 'create',
           tempId,
           error: rollbackError
-            ? `${baseError} (rollback failed for provisional row ${data.id as number}: ${rollbackError.message}; assets retained because the surviving row may reference them; manual reconciliation may be needed; ${rowState})`
+            ? `${baseError} (rollback failed for provisional row ${data.id as number}: ${rollbackError.message}; the row stays hidden and unpointed, assets retained because the surviving row may reference them; manual reconciliation may be needed)`
             : baseError,
         });
         continue;
@@ -652,28 +631,16 @@ async function batchPublishBlog(
         blurhash: string;
       } | null = null;
       const updateData: UpdateBlogData = { ...item.data };
-      // Trusted replacement source: the previous row (cover + bodies) is
-      // read from the DB, never trusted from the client payload, so a
-      // forged `currentImageUrl` cannot delete an unrelated object and the
-      // orphan diff below compares against committed state.
+      // Trusted replacement source: the previous row (cover + committed
+      // pointers) is read from the DB, never trusted from a client payload, so
+      // a forged `currentImageUrl` cannot delete an unrelated object and the
+      // orphan diff below compares against committed state. The retired
+      // Markdown columns are not read at all.
       let previousImage: string | null = null;
-      let oldBodies: Array<string | undefined> = [];
       let bodyStaged: string[] = [];
-
-      // Pointer columns exist in the dev clone and in production once the
-      // capability is declared; before that migration production must never
-      // reference them, so the projection depends on the resolved mode.
-      const pointerColumnsAvailable =
-        dualWrite.mode === 'enabled' ||
-        (dualWrite.mode === 'disabled' && dualWrite.pointerColumns);
-      // Runtime-chosen projection: production must never reference the pointer
-      // columns, so the superset row shape is asserted once below.
-      const priorSelect: string = pointerColumnsAvailable
-        ? 'image, body_en, body_it, body_en_path, body_it_path'
-        : 'image, body_en, body_it';
       const { data: currentRowRaw, error: fetchError } = await admin
         .from('blog_posts')
-        .select(priorSelect)
+        .select('image, body_en_path, body_it_path')
         .eq('id', item.id)
         .single();
       const currentRow = currentRowRaw as PriorBlogBodyRow | null;
@@ -686,11 +653,11 @@ async function batchPublishBlog(
         });
         continue;
       }
-      previousImage = (currentRow.image as string | null) ?? null;
-      oldBodies = [
-        currentRow.body_en as string | undefined,
-        currentRow.body_it as string | undefined,
-      ];
+      previousImage = currentRow.image ?? null;
+      const priorPointers: PriorBodyPointers = {
+        en: currentRow.body_en_path,
+        it: currentRow.body_it_path,
+      };
 
       if (item.bodyFiles && item.bodyFiles.length > 0) {
         try {
@@ -753,75 +720,71 @@ async function batchPublishBlog(
         updateData.blurhashURL = prepared.image.blurhash;
       }
 
-      // Markdown objects are uploaded before the DB write; a failure leaves the
-      // previously committed body + pointer authoritative. A metadata-only
-      // update issues no Storage call at all.
-      const dbUpdate: Record<string, unknown> = { ...updateData };
-      if (dualWrite.mode === 'enabled') {
-        const requests = modifiedLocales(updateData);
-        if (requests.length > 0) {
-          try {
-            const bodyStorage = admin.storage.from(
-              dualWrite.bucket
-            ) as unknown as BodyContentStorageApi;
-            const storedBodies = await storePostBodies(
-              bodyStorage,
-              'blog',
-              item.id,
-              requests,
-              {
-                en: {
-                  body: currentRow.body_en as string | null,
-                  path: (currentRow.body_en_path as string | null) ?? null,
-                },
-                it: {
-                  body: currentRow.body_it as string | null,
-                  path: (currentRow.body_it_path as string | null) ?? null,
-                },
-              }
-            );
-            Object.assign(dbUpdate, bodyPointerUpdates(storedBodies));
-          } catch (error) {
-            // The replacement cover was uploaded before this failure; remove
-            // it too. The previously committed cover is untouched.
-            if (uploaded) {
-              await removeStorageObjectBestEffort(
-                admin,
-                bucket,
-                uploaded.path
-              );
-            }
-            await removeBodyUploads(admin, bucket, bodyStaged);
-            markFailed(evidence, {
-              kind: 'update',
-              id: item.id,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Markdown body upload failed',
-            });
-            continue;
+      // Markdown objects are uploaded (and their bytes verified) BEFORE the
+      // guarded pointer commit; a failure leaves the previously committed
+      // pointer authoritative. A metadata-only update issues no Storage call
+      // at all, because only the locales present in the payload are staged.
+      const dbUpdate: Record<string, unknown> = stripRetiredBodyColumns({
+        ...updateData,
+      });
+      const requests = modifiedLocales(updateData);
+      const guards: PointerGuard[] = [];
+      let previousBodies: Array<string | undefined> = [];
+      if (requests.length > 0) {
+        try {
+          const bodyStorage = admin.storage.from(
+            write.bucket
+          ) as unknown as BodyContentStorageApi;
+          const staged = await stagePostBodies(
+            bodyStorage,
+            'blog',
+            item.id,
+            requests,
+            priorPointers
+          );
+          Object.assign(dbUpdate, pointerCommitFields(staged.pointers));
+          if (Object.hasOwn(staged.pointers, 'en')) {
+            // Legacy NOT NULL placeholder only — never the real Markdown.
+            Object.assign(dbUpdate, legacyBodyEnShimFields());
           }
-        }
-      } else if (dualWrite.mode === 'disabled' && dualWrite.pointerColumns) {
-        // Stale-pointer safeguard: with dual-write off but the pointer
-        // columns present, a legacy body edit must not leave a pointer to the
-        // previous Markdown (a later Storage-first read would then disagree
-        // with the committed body). Applies to the dev clone and to production
-        // once CMS_BODY_POINTER_COLUMNS declares the columns.
-        for (const request of modifiedLocales(updateData)) {
-          dbUpdate[`body_${request.locale}_path`] = null;
+          guards.push(...pointerGuards(staged.pointers, priorPointers));
+          previousBodies = await replacedBodyMarkdown(
+            bodyStorage,
+            requests,
+            priorPointers,
+            staged.pointers
+          );
+        } catch (error) {
+          // The replacement cover may already be uploaded: remove it too. The
+          // previously committed cover and pointers are untouched.
+          if (uploaded) {
+            await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
+          }
+          await removeBodyUploads(admin, bucket, bodyStaged);
+          markFailed(evidence, {
+            kind: 'update',
+            id: item.id,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Markdown body upload failed',
+          });
+          continue;
         }
       }
 
-      const { data, error } = await admin
-        .from('blog_posts')
-        .update(dbUpdate)
-        .eq('id', item.id)
-        .select()
-        .single();
+      // ONE guarded UPDATE: metadata, pointers and visibility together. Zero
+      // matched rows means the observed pointer no longer holds, so this save
+      // loses cleanly instead of overwriting a concurrent edit.
+      const committed = await commitGuardedRow(
+        admin,
+        'blog_posts',
+        item.id,
+        dbUpdate,
+        guards
+      );
 
-      if (error) {
+      if (committed.status !== 'committed') {
         if (uploaded) {
           await removeStorageObjectBestEffort(admin, bucket, uploaded.path);
         }
@@ -829,7 +792,10 @@ async function batchPublishBlog(
         markFailed(evidence, {
           kind: 'update',
           id: item.id,
-          error: error.message,
+          error:
+            committed.status === 'conflict'
+              ? POINTER_CONFLICT_MESSAGE
+              : errorMessage(committed.error, 'Blog post update failed'),
         });
         continue;
       }
@@ -844,8 +810,10 @@ async function batchPublishBlog(
         );
       }
 
-      // Body objects the new markdown dropped (same-prefix only, covers
-      // always kept). Best-effort, never fails the publish.
+      // Body-image assets the new markdown dropped (same-prefix only, covers
+      // always kept). The previous markdown comes from the object the replaced
+      // pointer named, never from the retired columns. Best-effort: it never
+      // fails the publish, and content-bucket objects belong to the GC.
       const storageOrigin = readStorageOrigin();
       if (storageOrigin) {
         await cleanupOrphanedBodyImages(
@@ -853,13 +821,13 @@ async function batchPublishBlog(
           bucket,
           storageOrigin,
           blogPostPrefix(item.id),
-          oldBodies,
+          previousBodies,
           [updateData.body_en, updateData.body_it],
           [previousImage, uploaded?.publicUrl]
         );
       }
 
-      markUpdated(evidence, data.id);
+      markUpdated(evidence, item.id);
     }
 
     if (operation.deletes.length > 0) {
@@ -909,6 +877,10 @@ async function batchPublishBlog(
                 });
               }
             }
+            // Asset-bucket cleanup only (cover + body images). The
+            // content-bucket Markdown objects of the deleted rows become
+            // unreferenced and are reclaimed by the Storage garbage collector;
+            // the write path must never delete them itself.
             for (const row of existingRows || []) {
               if (deletedIds.has(row.id as number)) {
                 await removePublicFileIfPresent(
@@ -1089,18 +1061,21 @@ async function createBlog(
       };
     }
 
-    const dualWrite = currentBodyDualWrite();
-    if (dualWrite.mode === 'invalid') {
-      return { success: false, error: dualWrite.error };
+    const write = currentBodyWrite();
+    if (write.mode === 'invalid') {
+      return { success: false, error: write.error };
     }
 
     const insertData = {
-      ...data,
+      ...stripRetiredBodyColumns({ ...data }),
       blurhashURL: data.blurhashURL ?? '',
       author_id: data.author_id || userId,
-      // Dual-write inserts provisionally hidden; the final visibility commits
-      // together with the bodies and pointers below.
-      ...(dualWrite.mode === 'enabled' ? { hidden: true } : {}),
+      // Provisional insert: hidden, unpointed, and carrying only the legacy
+      // `body_en` shim value. The intended visibility commits together with
+      // the pointers below, so the post can never be publicly readable before
+      // its objects exist.
+      hidden: true,
+      ...legacyBodyEnShimFields(),
     };
 
     const admin = getAdminClient();
@@ -1113,48 +1088,50 @@ async function createBlog(
     if (error) throw error;
 
     let committed = newBlog;
-    if (dualWrite.mode === 'enabled') {
-      const postId = newBlog.id as number;
-      try {
-        const bodyStorage = admin.storage.from(
-          dualWrite.bucket
-        ) as unknown as BodyContentStorageApi;
-        const storedBodies = await storePostBodies(
-          bodyStorage,
-          'blog',
-          postId,
-          [
-            { locale: 'en', body: data.body_en },
-            { locale: 'it', body: data.body_it },
-          ]
-        );
-        const commit: Record<string, unknown> = {
-          body_en: data.body_en,
-          ...bodyPointerUpdates(storedBodies),
+    const postId = newBlog.id as number;
+    try {
+      // The row id exists only now, so the objects (and their read-back hash
+      // proof) are written after the INSERT and before the pointer commit.
+      const bodyStorage = admin.storage.from(
+        write.bucket
+      ) as unknown as BodyContentStorageApi;
+      const staged = await stagePostBodies(bodyStorage, 'blog', postId, [
+        { locale: 'en', body: data.body_en },
+        { locale: 'it', body: data.body_it },
+      ]);
+      const result = await commitGuardedRow(
+        admin,
+        'blog_posts',
+        postId,
+        {
+          ...pointerCommitFields(staged.pointers),
           hidden: data.hidden ?? false,
-        };
-        if (data.body_it !== undefined) commit.body_it = data.body_it;
-        const { data: updatedBlog, error: commitError } = await admin
-          .from('blog_posts')
-          .update(commit)
-          .eq('id', postId)
-          .select()
-          .single();
-        if (commitError) throw commitError;
-        committed = updatedBlog;
-      } catch (error) {
-        const { error: rollbackError } = await admin
-          .from('blog_posts')
-          .delete()
-          .eq('id', postId);
-        const baseError =
-          error instanceof Error ? error.message : 'Body dual-write failed';
+        },
+        // The provisional row is unpointed, so the commit only applies while
+        // that is still true.
+        pointerGuards(staged.pointers, {})
+      );
+      if (result.status === 'failed') {
         throw new Error(
-          rollbackError
-            ? `${baseError} (rollback failed for provisional row ${postId}: ${rollbackError.message}; row left hidden)`
-            : baseError
+          errorMessage(result.error, 'Body pointer commit failed')
         );
       }
+      if (result.status === 'conflict') {
+        throw new Error(POINTER_CONFLICT_MESSAGE);
+      }
+      committed = result.row ?? newBlog;
+    } catch (error) {
+      const { error: rollbackError } = await admin
+        .from('blog_posts')
+        .delete()
+        .eq('id', postId);
+      const baseError =
+        error instanceof Error ? error.message : 'Body write failed';
+      throw new Error(
+        rollbackError
+          ? `${baseError} (rollback failed for provisional row ${postId}: ${rollbackError.message}; the row stays hidden and unpointed)`
+          : baseError
+      );
     }
 
     const revalidation = await invalidatePublicContent({
@@ -1199,21 +1176,15 @@ async function updateBlog(
       };
     }
 
-    const dualWrite = currentBodyDualWrite();
-    if (dualWrite.mode === 'invalid') {
-      return { success: false, error: dualWrite.error };
+    const write = currentBodyWrite();
+    if (write.mode === 'invalid') {
+      return { success: false, error: write.error };
     }
 
     const admin = getAdminClient();
-    const pointerColumnsAvailable =
-      dualWrite.mode === 'enabled' ||
-      (dualWrite.mode === 'disabled' && dualWrite.pointerColumns);
-    const priorSelect: string = pointerColumnsAvailable
-      ? 'id, body_en, body_it, body_en_path, body_it_path'
-      : 'id';
     const { data: existingBlogRaw, error: fetchError } = await admin
       .from('blog_posts')
-      .select(priorSelect)
+      .select('id, body_en_path, body_it_path')
       .eq('id', id)
       .single();
     const existingBlog = existingBlogRaw as PriorBlogBodyRow | null;
@@ -1222,56 +1193,64 @@ async function updateBlog(
       return { success: false, error: 'Blog post not found' };
     }
 
-    // Uploads happen before the DB write; a failure leaves the committed body
-    // and pointer authoritative. A metadata-only update issues no Storage call.
-    const dbUpdate: Record<string, unknown> = { ...data };
-    if (dualWrite.mode === 'enabled') {
-      const requests = modifiedLocales(data);
-      if (requests.length > 0) {
-        const bodyStorage = admin.storage.from(
-          dualWrite.bucket
-        ) as unknown as BodyContentStorageApi;
-        const storedBodies = await storePostBodies(
-          bodyStorage,
-          'blog',
-          id,
-          requests,
-          {
-            en: {
-              body: existingBlog.body_en as string | null,
-              path: (existingBlog.body_en_path as string | null) ?? null,
-            },
-            it: {
-              body: existingBlog.body_it as string | null,
-              path: (existingBlog.body_it_path as string | null) ?? null,
-            },
-          }
-        );
-        Object.assign(dbUpdate, bodyPointerUpdates(storedBodies));
+    const priorPointers: PriorBodyPointers = {
+      en: existingBlog.body_en_path,
+      it: existingBlog.body_it_path,
+    };
+
+    // Objects are uploaded (and their bytes verified) before the guarded
+    // pointer commit; a failure leaves the committed pointer authoritative. A
+    // metadata-only update issues no Storage call and touches no pointer.
+    const dbUpdate: Record<string, unknown> = stripRetiredBodyColumns({
+      ...data,
+    });
+    const requests = modifiedLocales(data);
+    const guards: PointerGuard[] = [];
+    if (requests.length > 0) {
+      const bodyStorage = admin.storage.from(
+        write.bucket
+      ) as unknown as BodyContentStorageApi;
+      const staged = await stagePostBodies(
+        bodyStorage,
+        'blog',
+        id,
+        requests,
+        priorPointers
+      );
+      Object.assign(dbUpdate, pointerCommitFields(staged.pointers));
+      if (Object.hasOwn(staged.pointers, 'en')) {
+        // Legacy NOT NULL placeholder only — never the real Markdown.
+        Object.assign(dbUpdate, legacyBodyEnShimFields());
       }
-    } else if (dualWrite.mode === 'disabled' && dualWrite.pointerColumns) {
-      // Stale-pointer safeguard in the dev clone only; production never
-      // references the pointer columns.
-      for (const request of modifiedLocales(data)) {
-        dbUpdate[`body_${request.locale}_path`] = null;
-      }
+      // Guards name only the locales this save writes, so an EN-only edit can
+      // never be rejected because of a concurrent IT edit (and vice versa).
+      guards.push(...pointerGuards(staged.pointers, priorPointers));
     }
 
-    const { data: updatedBlog, error } = await admin
-      .from('blog_posts')
-      .update(dbUpdate)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    const committed = await commitGuardedRow(
+      admin,
+      'blog_posts',
+      id,
+      dbUpdate,
+      guards
+    );
+    if (committed.status === 'failed') {
+      throw new Error(
+        errorMessage(committed.error, 'Failed to update blog post')
+      );
+    }
+    if (committed.status === 'conflict') {
+      // No retry, no invalidation: nothing was written, so the public cache
+      // still matches the row.
+      return { success: false, error: POINTER_CONFLICT_MESSAGE };
+    }
 
     const revalidation = await invalidatePublicContent({
       entity: 'blog',
       operation: 'update',
       id,
     });
-    return { success: true, data: updatedBlog, revalidation };
+    return { success: true, data: committed.row, revalidation };
   } catch (error) {
     console.error('Error updating blog post:', error);
     return {
@@ -1303,9 +1282,13 @@ async function deleteBlog(
       return { success: false, error: 'Blog post not found' };
     }
 
-    // Commit the DB delete FIRST; only then remove the Storage object
-    // (best-effort). Deleting the object before the row is gone would leave
-    // the row pointing at a deleted image if the DB delete failed.
+    // Commit the DB delete FIRST; only then remove the ASSET objects
+    // (best-effort). Deleting them before the row is gone would leave the row
+    // pointing at a deleted image if the DB delete failed.
+    //
+    // Content-bucket Markdown is deliberately NOT touched: the removed row's
+    // `<kind>/<id>/<locale>/<sha>.md` objects become unreferenced and are
+    // reclaimed by the Storage garbage collector.
     const { error } = await admin.from('blog_posts').delete().eq('id', id);
 
     if (error) throw error;

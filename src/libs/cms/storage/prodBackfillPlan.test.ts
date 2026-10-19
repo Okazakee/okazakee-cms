@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyDualWrite';
+import { POINTER_COLUMNS_FLAG } from '@/libs/cms/bodyWriteGate';
 import { manifestDigest } from '@/libs/cms/storage/backfillApply';
 import {
   BACKFILL_BODY_COLUMNS,
