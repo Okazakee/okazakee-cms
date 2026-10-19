@@ -105,25 +105,35 @@ already zero.
 
 ## Fresh backup (step 3, required before the contraction)
 
-```sql
-copy (
-  select 'blog' as kind, id, hidden, json_build_object(
-           'body_en', body_en, 'body_it', body_it,
-           'body_en_path', body_en_path, 'body_it_path', body_it_path) as payload
-    from public.blog_posts
-  union all
-  select 'portfolio', id, hidden, json_build_object(
-           'body_en', body_en, 'body_it', body_it,
-           'body_en_path', body_en_path, 'body_it_path', body_it_path)
-    from public.portfolio_posts
-) to '/tmp/prod-bodies-before-contraction.jsonl';
+Use the client-side backup tool. A server-side `COPY ... TO '/tmp/...'` is **not** an
+operator recovery artifact and must not be used (full procedure, scratch-restore
+rehearsal and retention rules: `docs/PRODUCTION_BACKUP_RESTORE.md`):
+
+```bash
+# read-only dry run: reads production via PostgREST + Storage, writes nothing
+bun run storage:content:prod:backup --out-dir=<dir outside both repos>
+
+# the export (writes the artifact; needs APP_ENV=production and the ack)
+CMS_PROD_BACKUP_APPLY_ACK=yes-export-production-bodies \
+  bun run storage:content:prod:backup --out-dir=<dir> --apply
+
+# offline integrity check: no credentials, no network
+bun run storage:content:prod:backup --verify --backup-dir=<run dir>
 ```
 
-Store it outside both repositories with `0600` permissions, record its SHA-256 and
-the per-body hashes, and verify it restores into a scratch table before proceeding.
-Expected: 17 rows, 34 non-empty bodies, 275 670 bytes. Step 4 does not invalidate it
-(nothing but the nullability flag changes), so a backup taken here is still current
-for step 7.
+It captures the legacy `body_en`/`body_it` values, the canonical pointers **and the
+authoritative Storage bytes**, with a per-body SHA-256 and byte length, into a new
+`0700` run directory written exclusively (`0600` files, never merged with an existing
+run) alongside `manifest.json` and `SHA256SUMS`; record the `SHA256SUMS` hash out of band.
+
+A fresh **pre-contraction** snapshot must capture Storage's authoritative bytes and the
+pointers, not the legacy text alone: legitimate edits between step 3 and step 7 change the
+objects and pointers, so a legacy-only backup would restore stale content. Do **not** treat
+the historical `275 670`-byte legacy total as a requirement — compare against the artifact's
+own manifest and the live pointers and report any drift rather than forcing the old number.
+
+Run the scratch-restore rehearsal in `docs/PRODUCTION_BACKUP_RESTORE.md` before the
+contraction; it is the proof that the artifact is actually restorable.
 
 ## Preliminary step: `body_en` becomes nullable (step 4)
 
@@ -188,14 +198,17 @@ because it never selects the dropped columns.
 |---|---|
 | Problem found **before** step 4 | Redeploy the previous (shim-on) revision. Nothing destructive has happened and the schema is unchanged. |
 | Problem found **in steps 4–6** (column nullable; shim off from step 5) | Redeploy the shim-on revision — the column is still there and still writable — and, if the original constraint must return, `alter table … alter column body_en set not null` while no row holds NULL. No backup needed: these steps change no data. |
-| Problem found **after** step 7 | The dropped columns are gone permanently; restore their values from the fresh backup into re-added nullable columns (`alter table … add column body_en text`), then restore the shim behaviour or roll the revision back. Storage objects and pointers are the authoritative content and are untouched by the contraction. |
+| Problem found **after** step 7 | The dropped columns are gone permanently. A legacy-code rollback is **NOT safe on its own**: the old revision reads and writes `body_en`/`body_it`, which no longer exist, so every post read and write fails. Recovery needs BOTH halves, in this order: re-add nullable columns (`alter table … add column body_en text, add column body_it text`), restore their values from the verified backup artifact, and only then deploy the legacy revision. Storage objects and pointers are the authoritative content and are untouched by the contraction. |
 | Bad Storage object suspected | Do **not** delete objects. Reconstruct from the objects themselves; the pointers and objects are consistent by construction (the backfill verified every object byte-for-byte). |
 | Orphan cleanup went wrong | The GC only ever deletes unreferenced canonical `.md` objects after a retention window and a re-check; restore from the pre-GC backup if needed. |
 
-Rollback limitation to state plainly: **after step 7 a code rollback is safe, but a
-data rollback is only possible from the backup.** The CP-2 CAS rollback plan
-restores *pointers*, never dropped column contents. Steps 4–6 carry no such
-limitation: they change no data, and the constraint can be restored.
+Rollback limitation to state plainly: **after step 7, reverting to a legacy application
+revision requires reconstructing the dropped schema and restoring coherent body values from
+the backup first.** A code rollback alone leaves a revision naming columns that no longer
+exist; a data rollback alone leaves no code that needs them — neither half is sufficient.
+The CP-2 CAS rollback plan restores *pointers* and can never restore dropped column contents.
+Steps 4–6 carry no such limitation: they change no data, and the constraint can be restored
+while no row holds NULL.
 
 ## Garbage collection (after step 8)
 
