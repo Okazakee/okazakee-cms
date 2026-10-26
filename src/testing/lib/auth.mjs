@@ -1,10 +1,11 @@
 /**
  * Isolated fixture — real local GoTrue sessions.
  *
- * Creates the allowlisted admin/editor (and one non-allowlisted outsider)
- * inside the throwaway GoTrue instance, signs in with the password grant, and
- * serialises the resulting session into the exact @supabase/ssr cookie format
- * so a browser can start authenticated without going through GitHub OAuth.
+ * Creates the allowlisted superadmin/admin/editor (and one non-allowlisted
+ * outsider) inside the throwaway GoTrue instance, signs in with the password
+ * grant, and serialises the resulting session into the exact @supabase/ssr
+ * cookie format so a browser can start authenticated without going through
+ * GitHub OAuth.
  *
  * Token values are never logged. Cookie files are written with mode 0o600.
  */

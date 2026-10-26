@@ -22,6 +22,7 @@ import AccountSection from '@/components/common/cms/AccountSection';
 import { CmsHeader } from '@/components/common/cms/CmsHeader';
 import SidePanel from '@/components/common/cms/SidePanel';
 import { useCmsStore } from '@/store/cmsStore';
+import { isCmsAdminRole } from '@/utils/cms/roles';
 
 // Page order: the sidebar reads top-to-bottom like the public page does.
 const pageSections = [
@@ -118,8 +119,9 @@ export default function CMSPage() {
           router.replace('/login');
           return;
         }
-        const sections =
-          boot.user.role === 'admin' ? adminSections : editorSections;
+        const sections = isCmsAdminRole(boot.user.role)
+          ? adminSections
+          : editorSections;
         const store = useCmsStore.getState();
         store.setUser(boot.user);
         // Remember the identity for the login screen ("Welcome back" +

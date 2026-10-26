@@ -343,6 +343,11 @@ so a new section cannot drift into a private look:
   source of truth for how a role reads. The prop is `cmsRole`, **not** `role`:
   `role` is a reserved ARIA attribute, and a literal `role="admin"` on a component
   fails `useValidAriaRole` and is invalid ARIA if it ever reaches a DOM node.
+  Display covers all three values (`editor`, `admin`, `superadmin`), but
+  `RoleSelect` only ever emits `editor`/`admin`: `superadmin` is bootstrap-only
+  and renders as a static chip. A target the actor may not manage (an admin
+  peer for an admin, any superadmin) shows the chip and disabled controls
+  rather than a select — the server still rejects it.
 - Read-only values are rendered with the field classes on a `<span>` inside a
   bordered `bg-surface-base` panel, so a value and its editable twin read as the
   same object.
@@ -355,7 +360,10 @@ so a new section cannot drift into a private look:
   creation and inline editing. Requests exposes compact summaries and native
   expandable details while keeping archive/delete actions reachable. Account
   separates Profile, read-only Identity/access, Passkeys and the final Danger
-  zone; Users keeps identity/access separate from role/actions.
+  zone. Users keeps identity/access separate from role/actions, shows the
+  invitation outcome (`sent`, existing account, failed) with an explicit
+  resend for email rows, and renders protected targets without role/remove
+  controls.
 - **Localization** — one EN/IT switch per localized editor context; field
   labels remain neutral and the selected language is shown separately. Both
   locale drafts survive switches. Collection summaries use the UI locale
@@ -368,9 +376,12 @@ so a new section cannot drift into a private look:
 - **Assets** — `FileDropzone` owns preview and Replace/Open/Copy/Download/Remove
   controls. Pending/current status comes from the explicit selected-file flag,
   not from the presence of a preview URL (committed assets also have previews).
-  PDF previews, technical URLs and formatting help use native disclosure
-  controls. Layout groups matching dark/light header-image panels and footer
-  VAT. Resume has matching EN/IT PDF panels, both visible and stacked on mobile.
+  Rejected uploads surface the shared byte/container validator's reason and
+  never reach Storage; SVG/HTML spoofs and MIME mismatches are errors, not
+  conversions. PDF previews, technical URLs and formatting help use native
+  disclosure controls. Layout groups matching dark/light header-image panels
+  and footer VAT. Resume has matching EN/IT PDF panels, both visible and
+  stacked on mobile.
 - **Content ownership** — Hero edits the name, ordered roles, about paragraph
   and portrait/shape; Privacy edits policy bodies. Structural headings and
   vocabulary remain website-local. Layout owns header images and textual VAT;
@@ -485,7 +496,7 @@ the array — every reader (the site, the roles editor) skips
 blank/`null` slots, so the hole is invisible. The singular `hero-section.top.role`
 is deliberately left in place as the fallback for content that predates the list.
 
-**Project-request inbox** (`RequestsSection`, admin-only, no Publish All callback):
+**Project-request inbox** (`RequestsSection`, admin-level: admin/superadmin, no Publish All callback):
 
 - **Archive is a boolean, not a status column.** `archived` plus `archived_at` is
   the whole model: the inbox has exactly two slices (active / archived) and one

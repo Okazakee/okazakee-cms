@@ -360,6 +360,15 @@ describe('findAllowedCmsUser', () => {
     const supabase = mockSupabase([{ email: 'x@y.com', role: 'viewer' }]);
     expect(await findAllowedCmsUser(supabase, { email: 'x@y.com' })).toBeNull();
   });
+
+  it('accepts the superadmin role from an allowlist row', async () => {
+    const supabase = mockSupabase([
+      { github_user_id: '1', email: 'owner@example.com', role: 'superadmin' },
+    ]);
+    expect(
+      await findAllowedCmsUser(supabase, { email: 'owner@example.com' })
+    ).toEqual({ role: 'superadmin', matchSource: 'email' });
+  });
 });
 
 describe('findAllowedCmsUser hardened order', () => {
@@ -426,30 +435,126 @@ describe('findAllowedCmsUser hardened order', () => {
     expect(result).toEqual({ role: 'editor', matchSource: 'email' });
     expect(seen).not.toContain('github_username');
   });
+
+  it('fails closed when a verified email matches nothing (no legacy fallthrough)', async () => {
+    const seen: string[] = [];
+    const client = {
+      from: () => ({
+        select: () => ({
+          eq: (col: string) => ({
+            maybeSingle: async () => {
+              seen.push(col);
+              // A legacy row would authorize the spoofable handle.
+              if (col === 'github_username') {
+                return { data: { role: 'admin' } };
+              }
+              return { data: null };
+            },
+          }),
+        }),
+      }),
+    } as unknown as Parameters<typeof findAllowedCmsUser>[0];
+
+    const result = await findAllowedCmsUser(client, {
+      email: 'not-allowlisted@example.com',
+      githubUserId: null,
+      githubUsernameLegacy: 'victim-admin',
+    });
+
+    expect(result).toBeNull();
+    expect(seen).toContain('email');
+    expect(seen).not.toContain('github_username');
+  });
 });
 
 describe('lookupAllowedCmsUserViaRpc', () => {
+  type RpcClient = Parameters<typeof lookupAllowedCmsUserViaRpc>[0];
+
   function mockRpc(result: unknown) {
-    return {
-      rpc: vi.fn(async () => ({ data: result })),
-    } as unknown as Parameters<typeof lookupAllowedCmsUserViaRpc>[0];
+    const rpc = vi.fn(async () => ({ data: result, error: null }));
+    return { client: { rpc } as unknown as RpcClient, rpc };
   }
 
-  it('returns role + matchSource from an RPC result', async () => {
-    const supabase = mockRpc({ role: 'admin', match_source: 'email' });
-    expect(await lookupAllowedCmsUserViaRpc(supabase)).toEqual({
+  it('queries the public allowlist by default (deployed no-arg default)', async () => {
+    const { client, rpc } = mockRpc({
+      role: 'admin',
+      match_source: 'email',
+    });
+
+    expect(await lookupAllowedCmsUserViaRpc(client)).toEqual({
       role: 'admin',
       matchSource: 'email',
     });
+    expect(rpc).toHaveBeenCalledWith('cms_lookup_current_user', {
+      p_schema: 'public',
+    });
+  });
+
+  it('passes the dev_staging allowlist explicitly', async () => {
+    const { client, rpc } = mockRpc({
+      role: 'editor',
+      match_source: 'email',
+    });
+
+    expect(await lookupAllowedCmsUserViaRpc(client, 'dev_staging')).toEqual({
+      role: 'editor',
+      matchSource: 'email',
+    });
+    expect(rpc).toHaveBeenCalledWith('cms_lookup_current_user', {
+      p_schema: 'dev_staging',
+    });
+  });
+
+  it('fails closed outside the schema whitelist without an RPC round trip', async () => {
+    const { client, rpc } = mockRpc({
+      role: 'admin',
+      match_source: 'email',
+    });
+    const invalidSchemas = [
+      '',
+      'Public',
+      'dev_staging ',
+      'staging',
+      'pg_catalog',
+    ];
+
+    for (const schema of invalidSchemas) {
+      expect(await lookupAllowedCmsUserViaRpc(client, schema)).toBeNull();
+    }
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the RPC reports an error', async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { code: 'PGRST202', message: 'not found' },
+    }));
+    const client = { rpc } as unknown as RpcClient;
+
+    expect(await lookupAllowedCmsUserViaRpc(client)).toBeNull();
   });
 
   it('returns null for unknown users', async () => {
-    const supabase = mockRpc(null);
-    expect(await lookupAllowedCmsUserViaRpc(supabase)).toBeNull();
+    const { client } = mockRpc(null);
+    expect(await lookupAllowedCmsUserViaRpc(client)).toBeNull();
   });
 
   it('returns null when role is not a valid CMS role', async () => {
-    const supabase = mockRpc({ role: 'viewer', match_source: 'email' });
-    expect(await lookupAllowedCmsUserViaRpc(supabase)).toBeNull();
+    const { client } = mockRpc({ role: 'viewer', match_source: 'email' });
+    expect(await lookupAllowedCmsUserViaRpc(client)).toBeNull();
+  });
+
+  it('accepts superadmin and rejects malformed role tokens', async () => {
+    expect(
+      await lookupAllowedCmsUserViaRpc(
+        mockRpc({ role: 'superadmin', match_source: 'github' }).client
+      )
+    ).toEqual({ role: 'superadmin', matchSource: 'github' });
+
+    expect(
+      await lookupAllowedCmsUserViaRpc(
+        mockRpc({ role: 'owner', match_source: 'email' }).client
+      )
+    ).toBeNull();
   });
 });

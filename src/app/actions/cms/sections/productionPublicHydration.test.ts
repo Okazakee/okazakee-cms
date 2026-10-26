@@ -70,6 +70,7 @@ import {
   rowById,
   tableRows,
 } from '@/testing/unit/postgrestPgliteFixture';
+import { staticWebpFile as webpFile } from '@/testing/unit/fileFixtures';
 
 const EDITOR = { id: 'user-1', email: 'admin@example.com' };
 /** The PRODUCTION content bucket the production read and write paths resolve. */
@@ -94,14 +95,6 @@ function pointerPath(
   markdown: string
 ): string {
   return `${kind}/${id}/${locale}/${sha256Hex(Buffer.from(markdown, 'utf8'))}.md`;
-}
-
-function webpFile(name = 'cover.webp'): File {
-  return new File(
-    [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
-    name,
-    { type: 'image/webp' }
-  );
 }
 
 type LooseBatch = {

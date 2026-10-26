@@ -13,6 +13,7 @@ import {
   isEmptyDelta,
 } from '@/libs/cms/translationDelta';
 import { useCmsStore } from '@/store/cmsStore';
+import { isCmsAdminRole } from '@/utils/cms/roles';
 
 export type FlatTranslations = Record<string, string>;
 export type CmsLocale = 'en' | 'it';
@@ -179,8 +180,8 @@ function deepEqual(a: unknown, b: unknown): boolean {
 export function useSectionTranslations(
   sectionKey: string
 ): UseSectionTranslationsReturn {
-  const canEditTranslations = useCmsStore(
-    (state) => state.user?.role === 'admin'
+  const canEditTranslations = useCmsStore((state) =>
+    isCmsAdminRole(state.user?.role)
   );
   const demoMode = useCmsStore((state) => state.demoMode);
   const [translations, setTranslations] =

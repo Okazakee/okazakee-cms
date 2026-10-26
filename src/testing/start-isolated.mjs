@@ -254,6 +254,7 @@ function printReady(ctx, env) {
     ` Revalidation     ${ctx.revalidationUrl}`,
     '',
     ' Seed a browser session (no tokens are printed):',
+    `   open ${ctx.fixtureUrl}/__fixture/session?user=superadmin`,
     `   open ${ctx.fixtureUrl}/__fixture/session?user=admin`,
     `   open ${ctx.fixtureUrl}/__fixture/session?user=editor`,
     `   open ${ctx.fixtureUrl}/__fixture/session?user=outsider`,

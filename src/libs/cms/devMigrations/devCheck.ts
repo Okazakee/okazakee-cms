@@ -93,6 +93,21 @@ export const PROD_LEGACY_BODY_COLUMNS_QUERY = `select c.relname as table_name, a
 export const RLS_QUERY = `select n.nspname as table_schema, c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' order by c.relname`;
 export const SCHEMA_USAGE_QUERY = `select n.nspname as schema_name, n.nspacl as acl_raw from pg_namespace n where n.nspname = 'dev_staging'`;
 export const SEQ_GRANTS_QUERY = `select c.relname as sequence_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'S' and c.relname in ('site_settings_id_seq', 'project_requests_id_seq', 'cms_allowed_users_id_seq') order by c.relname`;
+
+/**
+ * Dev RBAC mirror contract (migration 20261026125511_cms_superadmin_role).
+ * These reads are dev_staging-ONLY on purpose: the public role CHECK, the
+ * public identity RPC bodies and any auth-side promotion are never read here,
+ * so this check cannot claim them (see the RBAC-scope INFO finding).
+ */
+export const DEV_RBAC_ROLE_CONSTRAINTS_QUERY = `select con.conname as constraint_name, con.contype::text as contype, pg_get_constraintdef(con.oid, true) as definition from pg_constraint con join pg_class c on c.oid = con.conrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relname = 'cms_allowed_users' and con.contype = 'c' order by con.conname`;
+
+export const DEV_RBAC_TRIGGERS_QUERY = `select t.tgname as trigger_name, t.tgenabled::text as enabled, t.tgtype::int as trigger_type, tn.nspname as function_schema, p.proname as function_name from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace join pg_proc p on p.oid = t.tgfoid join pg_namespace tn on tn.oid = p.pronamespace where n.nspname = 'dev_staging' and c.relname = 'cms_allowed_users' and not t.tgisinternal order by t.tgname`;
+
+export const DEV_RBAC_RPC_COPIES_QUERY = `select p.proname as name, coalesce(p.proacl::text, '') as acl_raw from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'dev_staging' and p.proname in ('cms_lookup_current_user', 'is_admin_user') order by p.proname`;
+
+export const DEV_RBAC_ALLOWLIST_ACL_QUERY = `select c.relname as table_name, c.relacl as acl_raw from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'dev_staging' and c.relkind = 'r' and c.relname = 'cms_allowed_users'`;
+
 export const FROZEN_TOP_KEYS = [
   'errors',
   'header',
@@ -639,6 +654,7 @@ export async function runDevCheck(opts?: {
     await checkIndexContract(queryJson, findings);
     await checkRlsPoliciesAcls(queryJson, findings);
     await checkRlsNormalization(queryJson, findings);
+    await checkRbacContract(queryJson, findings);
     await checkAuthorPolicyIsolation(queryJson, findings);
     await checkPostVisibility(queryJson, findings);
     await checkBodyPathChecks(queryJson, findings);
@@ -1146,6 +1162,191 @@ async function checkPostVisibility(
         : `superseded permissive policy ${key(gone.table, gone.name)} absent (replaced by ${POST_VISIBILITY_POLICY})`
     );
   }
+}
+
+/**
+ * RBAC mirror contract for dev_staging (migration
+ * 20261026125511_cms_superadmin_role).
+ *
+ * DEV ONLY: certifies what the migration must leave in `dev_staging` — the
+ * allowlist role CHECK vocabulary (exactly editor/admin/superadmin), the
+ * enabled last-superadmin guard trigger bound to the DEV function (never the
+ * public one), the absence of public-reading RPC copies in dev_staging, and
+ * zero anon/authenticated/PUBLIC table grants on the allowlist. The public
+ * CHECK and the public identity functions are outside this check and are only
+ * ever described as out of scope.
+ */
+export const DEV_ALLOWLIST_TABLE = 'cms_allowed_users';
+export const DEV_ROLE_CONSTRAINT = 'cms_allowed_users_role_check';
+export const DEV_ROLE_VALUES = ['editor', 'admin', 'superadmin'] as const;
+export const DEV_SUPERADMIN_GUARD_TRIGGER =
+  'cms_allowed_users_guard_superadmin';
+export const DEV_SUPERADMIN_GUARD_FUNCTION =
+  'cms_allowed_users_guard_superadmin';
+/** Public-reading RPCs that must NOT be mirrored into dev_staging. */
+export const DEV_FORBIDDEN_RPC_COPIES = [
+  'cms_lookup_current_user',
+  'is_admin_user',
+] as const;
+
+/** pg_trigger.tgtype bits for `BEFORE UPDATE OR DELETE ... FOR EACH ROW`. */
+const DEV_GUARD_TRIGGER_REQUIRED_BITS = 1 | 2 | 8 | 16;
+/** INSERT/TRUNCATE/INSTEAD OF bits: the guard must not fire on a wider surface. */
+const DEV_GUARD_TRIGGER_FORBIDDEN_BITS = 4 | 32 | 64;
+
+async function checkRbacContract(
+  queryJson: (sql: string) => Promise<unknown[]>,
+  findings: CheckFinding[]
+): Promise<void> {
+  finding(
+    findings,
+    'RBAC-scope',
+    'INFO',
+    'certifies the dev_staging RBAC mirror ONLY: allowlist role CHECK vocabulary, the last-superadmin guard trigger + its dev-bound function, and zero anon/authenticated allowlist table grants. The public role CHECK, the public identity RPC bodies (cms_lookup_current_user/is_admin_user) and any auth-side effect are NOT certified by this check'
+  );
+
+  // 1. The role CHECK must allow exactly editor/admin/superadmin.
+  const constraints = ((await queryJson(DEV_RBAC_ROLE_CONSTRAINTS_QUERY)) ??
+    []) as Array<{
+    constraint_name: string;
+    contype: string;
+    definition: string;
+  }>;
+  const roleChecks = constraints.filter((c) =>
+    // Blank the string literals first so only column references can match.
+    /\brole\b/.test(String(c.definition).replace(/'((?:[^']|'')*)'/g, "''"))
+  );
+  const named = constraints.find(
+    (c) => c.constraint_name === DEV_ROLE_CONSTRAINT
+  );
+  const expectedRoles = [...DEV_ROLE_VALUES].sort();
+  const roleDiffs: string[] = [];
+  if (!named) {
+    roleDiffs.push(
+      `constraint ${DEV_ROLE_CONSTRAINT} ABSENT on dev_staging.${DEV_ALLOWLIST_TABLE}`
+    );
+  } else if (!roleChecks.includes(named)) {
+    roleDiffs.push(`${DEV_ROLE_CONSTRAINT} does not constrain the role column`);
+  }
+  if (roleChecks.length === 0) {
+    roleDiffs.push('no CHECK constraint on the role column');
+  }
+  for (const check of roleChecks) {
+    const got = [
+      ...new Set(
+        Array.from(
+          String(check.definition).matchAll(/'((?:[^']|'')*)'/g),
+          (m) => m[1].replace(/''/g, "'")
+        )
+      ),
+    ].sort();
+    if (got.join('|') !== expectedRoles.join('|')) {
+      roleDiffs.push(
+        `${check.constraint_name} allows ${JSON.stringify(got)} exp ${JSON.stringify(expectedRoles)}`
+      );
+    }
+  }
+  finding(
+    findings,
+    'RBAC-dev-role-constraint',
+    roleDiffs.length ? 'FAIL' : 'PASS',
+    roleDiffs.length
+      ? `dev role CHECK diverges: ${roleDiffs.join('; ')}; raw=${JSON.stringify(roleChecks.map((c) => ({ name: c.constraint_name, def: c.definition })))}`
+      : `dev role CHECK allows exactly editor/admin/superadmin; raw=${JSON.stringify(roleChecks.map((c) => ({ name: c.constraint_name, def: c.definition })))}`
+  );
+
+  // 2. The guard trigger must be enabled and bound to the DEV function.
+  const triggers = ((await queryJson(DEV_RBAC_TRIGGERS_QUERY)) ?? []) as Array<{
+    trigger_name: string;
+    enabled: string;
+    trigger_type: number;
+    function_schema: string;
+    function_name: string;
+  }>;
+  const guard = triggers.find(
+    (t) => t.trigger_name === DEV_SUPERADMIN_GUARD_TRIGGER
+  );
+  const guardDiffs: string[] = [];
+  if (!guard) {
+    guardDiffs.push(
+      `trigger ${DEV_SUPERADMIN_GUARD_TRIGGER} ABSENT on dev_staging.${DEV_ALLOWLIST_TABLE}`
+    );
+  } else {
+    if (guard.enabled !== 'O') {
+      guardDiffs.push(`tgenabled got=${guard.enabled} exp=O (enabled)`);
+    }
+    const type = Number(guard.trigger_type);
+    if (
+      (type & DEV_GUARD_TRIGGER_REQUIRED_BITS) !==
+      DEV_GUARD_TRIGGER_REQUIRED_BITS
+    ) {
+      guardDiffs.push(
+        `tgtype=${guard.trigger_type} missing BEFORE/ROW/UPDATE/DELETE bits (${DEV_GUARD_TRIGGER_REQUIRED_BITS})`
+      );
+    }
+    if ((type & DEV_GUARD_TRIGGER_FORBIDDEN_BITS) !== 0) {
+      guardDiffs.push(
+        `tgtype=${guard.trigger_type} also fires INSERT/TRUNCATE/INSTEAD OF`
+      );
+    }
+    if (
+      guard.function_schema !== 'dev_staging' ||
+      guard.function_name !== DEV_SUPERADMIN_GUARD_FUNCTION
+    ) {
+      guardDiffs.push(
+        `binds ${guard.function_schema}.${guard.function_name} exp dev_staging.${DEV_SUPERADMIN_GUARD_FUNCTION} (a public binding is the leak)`
+      );
+    }
+  }
+  finding(
+    findings,
+    'RBAC-dev-guard-trigger',
+    guardDiffs.length ? 'FAIL' : 'PASS',
+    guardDiffs.length
+      ? `dev last-superadmin guard diverges: ${guardDiffs.join('; ')}`
+      : `trigger ${DEV_SUPERADMIN_GUARD_TRIGGER} ENABLED (O), BEFORE UPDATE OR DELETE FOR EACH ROW -> dev_staging.${DEV_SUPERADMIN_GUARD_FUNCTION} (no public binding)`
+  );
+
+  // 3. dev_staging must not grow public-reading RPC copies.
+  const rpcCopies = ((await queryJson(DEV_RBAC_RPC_COPIES_QUERY)) ??
+    []) as Array<{ name: string; acl_raw: string | null }>;
+  const copies = rpcCopies.map((r) => r.name).sort();
+  finding(
+    findings,
+    'RBAC-dev-rpc-copies',
+    copies.length ? 'FAIL' : 'PASS',
+    copies.length
+      ? `dev_staging exposes public-reading RPC copies: ${copies.join(',')} — the dev mirror is CHECK + guard trigger only`
+      : `dev_staging has no ${DEV_FORBIDDEN_RPC_COPIES.join('/')} copies`
+  );
+
+  // 4. Allowlist table stays internal: zero anon/authenticated/PUBLIC grants.
+  const allowlistAcl = ((await queryJson(DEV_RBAC_ALLOWLIST_ACL_QUERY)) ??
+    []) as Array<{ table_name: string; acl_raw: string | null }>;
+  const aclRow = allowlistAcl.find((r) => r.table_name === DEV_ALLOWLIST_TABLE);
+  const aclDiffs: string[] = [];
+  let serviceRole = 'none';
+  if (!aclRow) {
+    aclDiffs.push(
+      `dev_staging.${DEV_ALLOWLIST_TABLE} row ABSENT from the table catalog read`
+    );
+  } else {
+    const acl = aclRow.acl_raw == null ? {} : parseAcl(aclRow.acl_raw);
+    for (const role of ['anon', 'authenticated']) {
+      const privs = acl[role] ?? [];
+      if (privs.length > 0) aclDiffs.push(`${role} holds ${privs.join('')}`);
+    }
+    if (acl.PUBLIC) aclDiffs.push(`PUBLIC holds ${acl.PUBLIC.join('')}`);
+    serviceRole = (acl.service_role ?? []).join('') || 'none';
+  }
+  finding(
+    findings,
+    'RBAC-dev-allowlist-grants',
+    aclDiffs.length ? 'FAIL' : 'PASS',
+    aclDiffs.length
+      ? `dev allowlist grants diverged (must stay zero for anon/authenticated/PUBLIC): ${aclDiffs.join('; ')}; raw=${aclRow?.acl_raw ?? 'null'}`
+      : `dev_staging.${DEV_ALLOWLIST_TABLE} grants nothing to anon/authenticated/PUBLIC (unchanged); service_role=${serviceRole}; raw=${aclRow?.acl_raw ?? 'null (owner-only)'}`
+  );
 }
 
 /**

@@ -76,6 +76,7 @@ import {
   tableColumns,
   tableRows,
 } from '@/testing/unit/postgrestPgliteFixture';
+import { staticWebpFile as webpFile } from '@/testing/unit/fileFixtures';
 
 const EDITOR = { id: 'user-1', email: 'admin@example.com' };
 /** The dev content bucket the write path and the dev read path both resolve. */
@@ -110,16 +111,6 @@ function imagePath(id: number): string {
 /** Public URL shape the fixture's `getPublicUrl` produces for the asset bucket. */
 function imageUrl(id: number): string {
   return `${STORAGE_ORIGIN}/storage/v1/object/public/${ASSET}/${imagePath(id)}`;
-}
-
-function webpFile(name = 'cover.webp'): File {
-  return new File(
-    [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
-    name,
-    {
-      type: 'image/webp',
-    }
-  );
 }
 
 function blogCreateData(

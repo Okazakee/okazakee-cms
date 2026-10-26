@@ -7,6 +7,24 @@
  * existing call sites unchanged.
  */
 
+import {
+  detectRasterFormat,
+  FILE_HEADER_BYTES,
+  FILE_TAIL_BYTES,
+  gifHasTrailer,
+  hasPdfHeader,
+  hasPdfTrailer,
+  hasWebpImageChunkHeader,
+  imageFormatForMime,
+  inspectWebpContainer,
+  jpegHasEoi,
+  PDF_MARKER_SEARCH_BYTES,
+  pngHasIend,
+  type RasterFormat,
+  startsWithMarkup,
+  webpDeclaredPayloadSize,
+} from './fileSignatures';
+
 // Allowed image MIME types (raster formats only - NO SVG for security)
 const ALLOWED_IMAGE_TYPES = [
   'image/jpeg',
@@ -47,6 +65,11 @@ export function sanitizeFilename(str: string): string {
  * Validates an uploaded file for images
  * Rejects SVGs to prevent XSS/script injection attacks
  * Accepts WebP files (expected to be pre-processed client-side)
+ *
+ * This is the cheap, synchronous metadata pre-filter: it trusts the
+ * client-declared MIME/name/size and can run in the browser. It is NOT proof
+ * of content. `validateImageFileContent` / `validateImageBytes` are the
+ * authoritative byte checks and every storage write path calls them.
  */
 export function validateImageFile(file: File): {
   isValid: boolean;
@@ -112,6 +135,10 @@ export function validateImageFile(file: File): {
 
 /**
  * Validates an uploaded PDF file
+ *
+ * Metadata pre-filter only (client-declared MIME/name/size); the
+ * authoritative header/trailer check is `validatePdfFileContent` /
+ * `validatePdfBytes`, enforced by `uploadPdfBuffer` and the hero pre-flight.
  */
 export function validatePdfFile(file: File): {
   isValid: boolean;
@@ -142,6 +169,222 @@ export function validatePdfFile(file: File): {
   }
 
   return { isValid: true };
+}
+
+/**
+ * Minimum bytes that can carry a supported signature plus a chunk/trailer.
+ * Anything shorter is empty or hopelessly truncated, so it is rejected before
+ * any parser sees it.
+ */
+export const MIN_IMAGE_CONTENT_BYTES = 16;
+export const MIN_PDF_CONTENT_BYTES = 32;
+
+export type FileContentValidation = { isValid: boolean; error?: string };
+
+const IMAGE_EMPTY_ERROR = 'Please select a non-empty image file';
+const IMAGE_INCOMPLETE_ERROR =
+  'The image file is incomplete or corrupted. Please select a valid JPG, PNG, WebP, GIF, or AVIF image.';
+const IMAGE_SIGNATURE_ERROR =
+  'File content is not a supported image. Please use JPG, PNG, WebP, GIF, or AVIF.';
+const IMAGE_MISMATCH_ERROR =
+  'The file content does not match its image type. Please re-export the image and try again.';
+const IMAGE_MARKUP_ERROR =
+  'SVG and HTML files are not allowed for security reasons. Please use JPG, PNG, or WebP.';
+const PDF_SIGNATURE_ERROR = 'Please select a valid PDF file';
+const PDF_INCOMPLETE_ERROR =
+  'The PDF file is incomplete or corrupted. Please select a valid PDF file.';
+
+function tailOf(bytes: Uint8Array): Uint8Array {
+  return bytes.length > FILE_TAIL_BYTES
+    ? bytes.subarray(bytes.length - FILE_TAIL_BYTES)
+    : bytes;
+}
+
+/**
+ * Content-level inspection of the leading bytes: rejects markup (SVG/HTML)
+ * regardless of declared MIME/name, requires a supported raster signature and
+ * requires the signature to agree with the declared MIME type (`image/jpg` is
+ * accepted as the legacy JPEG alias; filenames are never trusted).
+ */
+function inspectImageHead(
+  head: Uint8Array,
+  declaredType: string
+): { valid: true; format: RasterFormat } | { valid: false; error: string } {
+  if (startsWithMarkup(head)) {
+    return { valid: false, error: IMAGE_MARKUP_ERROR };
+  }
+  const format = detectRasterFormat(head);
+  if (!format) {
+    return { valid: false, error: IMAGE_SIGNATURE_ERROR };
+  }
+  if (imageFormatForMime(declaredType) !== format) {
+    return { valid: false, error: IMAGE_MISMATCH_ERROR };
+  }
+  return { valid: true, format };
+}
+
+/** Tail-based completeness checks; WebP is handled by the full container walk. */
+function imageTailComplete(format: RasterFormat, tail: Uint8Array): boolean {
+  switch (format) {
+    case 'png':
+      return pngHasIend(tail);
+    case 'jpeg':
+      return jpegHasEoi(tail);
+    case 'gif':
+      return gifHasTrailer(tail);
+    case 'webp':
+      // Callers with the whole buffer use inspectWebpContainer instead.
+      return true;
+    case 'avif':
+      // ISO-BMFF completeness is verified by Sharp's decode before storage.
+      return true;
+  }
+}
+
+function imageBytesComplete(format: RasterFormat, bytes: Uint8Array): boolean {
+  if (format === 'webp') return inspectWebpContainer(bytes);
+  return imageTailComplete(format, tailOf(bytes));
+}
+
+/**
+ * Authoritative in-memory image check: signature + declared-MIME agreement +
+ * container completeness (PNG IEND, JPEG EOI, GIF trailer, WebP RIFF/chunk
+ * walk). Used by `prepareImageUpload` on the buffer it is about to store.
+ *
+ * This proves the bytes are the format they claim to be; it is not malware
+ * scanning. Raster images are still decoded by Sharp before any write.
+ */
+export function validateImageBytes(
+  bytes: Uint8Array,
+  declaredType: string
+): FileContentValidation {
+  if (bytes.length === 0) {
+    return { isValid: false, error: IMAGE_EMPTY_ERROR };
+  }
+  if (bytes.length < MIN_IMAGE_CONTENT_BYTES) {
+    return { isValid: false, error: IMAGE_INCOMPLETE_ERROR };
+  }
+  const inspection = inspectImageHead(
+    bytes.subarray(0, FILE_HEADER_BYTES),
+    declaredType
+  );
+  if (!inspection.valid) {
+    return { isValid: false, error: inspection.error };
+  }
+  if (!imageBytesComplete(inspection.format, bytes)) {
+    return { isValid: false, error: IMAGE_INCOMPLETE_ERROR };
+  }
+  return { isValid: true };
+}
+
+/**
+ * File-shaped image check that reads only the header and the trailer (plus the
+ * declared RIFF size) — cheap enough to run before the full buffer is read.
+ * WebP structure is verified on the full buffer via `validateImageBytes` in
+ * the upload choke point; AVIF completeness is verified by Sharp's decode.
+ */
+export async function validateImageFileContent(
+  file: File
+): Promise<FileContentValidation> {
+  if (file.size === 0) {
+    return { isValid: false, error: IMAGE_EMPTY_ERROR };
+  }
+  if (file.size < MIN_IMAGE_CONTENT_BYTES) {
+    return { isValid: false, error: IMAGE_INCOMPLETE_ERROR };
+  }
+
+  const head = new Uint8Array(
+    await file.slice(0, FILE_HEADER_BYTES).arrayBuffer()
+  );
+  const inspection = inspectImageHead(head, file.type);
+  if (!inspection.valid) {
+    return { isValid: false, error: inspection.error };
+  }
+
+  if (inspection.format === 'webp') {
+    const declared = webpDeclaredPayloadSize(head);
+    if (
+      declared === null ||
+      8 + declared > file.size ||
+      file.size - (8 + declared) > 1 ||
+      !hasWebpImageChunkHeader(head)
+    ) {
+      return { isValid: false, error: IMAGE_INCOMPLETE_ERROR };
+    }
+    return { isValid: true };
+  }
+
+  if (inspection.format === 'avif') {
+    return { isValid: true };
+  }
+
+  const tail = new Uint8Array(
+    await file.slice(Math.max(0, file.size - FILE_TAIL_BYTES)).arrayBuffer()
+  );
+  if (!imageTailComplete(inspection.format, tail)) {
+    return { isValid: false, error: IMAGE_INCOMPLETE_ERROR };
+  }
+  return { isValid: true };
+}
+
+function checkPdfSlices(
+  head: Uint8Array,
+  tail: Uint8Array
+): FileContentValidation {
+  if (!hasPdfHeader(head)) {
+    return { isValid: false, error: PDF_SIGNATURE_ERROR };
+  }
+  if (!hasPdfTrailer(tail)) {
+    return { isValid: false, error: PDF_INCOMPLETE_ERROR };
+  }
+  return { isValid: true };
+}
+
+/**
+ * Authoritative in-memory PDF check: `%PDF-` header (first 1 KiB, where the
+ * spec allows it) and `%%EOF` trailer (last 1 KiB). Used by `uploadPdfBuffer`
+ * so a spoofed or truncated document is never written to Storage.
+ *
+ * This proves the bytes are a complete PDF container, not that their content
+ * is benign; PDFs are served as inert documents from a separate origin.
+ */
+export function validatePdfBytes(bytes: Uint8Array): FileContentValidation {
+  if (bytes.length === 0) {
+    return { isValid: false, error: PDF_SIGNATURE_ERROR };
+  }
+  if (bytes.length < MIN_PDF_CONTENT_BYTES) {
+    return { isValid: false, error: PDF_INCOMPLETE_ERROR };
+  }
+  const head = bytes.subarray(
+    0,
+    Math.min(PDF_MARKER_SEARCH_BYTES, bytes.length)
+  );
+  const tail =
+    bytes.length > PDF_MARKER_SEARCH_BYTES
+      ? bytes.subarray(bytes.length - PDF_MARKER_SEARCH_BYTES)
+      : bytes;
+  return checkPdfSlices(head, tail);
+}
+
+/** File-shaped PDF check used by the hero pre-flight before any staging. */
+export async function validatePdfFileContent(
+  file: File
+): Promise<FileContentValidation> {
+  if (file.size === 0) {
+    return { isValid: false, error: PDF_SIGNATURE_ERROR };
+  }
+  if (file.size < MIN_PDF_CONTENT_BYTES) {
+    return { isValid: false, error: PDF_INCOMPLETE_ERROR };
+  }
+  const head = new Uint8Array(
+    await file.slice(0, PDF_MARKER_SEARCH_BYTES).arrayBuffer()
+  );
+  const tail = new Uint8Array(
+    await file
+      .slice(Math.max(0, file.size - PDF_MARKER_SEARCH_BYTES))
+      .arrayBuffer()
+  );
+  return checkPdfSlices(head, tail);
 }
 
 /**

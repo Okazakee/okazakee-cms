@@ -21,10 +21,17 @@ describe('isCmsPublicPath', () => {
     expect(isCmsPublicPath('/login')).toBe(true);
     expect(isCmsPublicPath('/auth/callback')).toBe(true);
     expect(isCmsPublicPath('/auth/github/start')).toBe(true);
+    expect(isCmsPublicPath('/auth/confirm')).toBe(true);
   });
 
   it('accepts a trailing slash on public routes', () => {
     expect(isCmsPublicPath('/login/')).toBe(true);
+    expect(isCmsPublicPath('/auth/confirm/')).toBe(true);
+  });
+
+  it('keeps the post-invitation setup surface protected', () => {
+    expect(isCmsPublicPath('/auth/setup')).toBe(false);
+    expect(isCmsPublicPath('/auth/setup/')).toBe(false);
   });
 
   it('does NOT match prefix look-alikes', () => {
@@ -32,6 +39,8 @@ describe('isCmsPublicPath', () => {
     expect(isCmsPublicPath('/logins')).toBe(false);
     expect(isCmsPublicPath('/auth/callback-evil')).toBe(false);
     expect(isCmsPublicPath('/auth/github/start/extra')).toBe(false);
+    expect(isCmsPublicPath('/auth/confirmation')).toBe(false);
+    expect(isCmsPublicPath('/auth/confirm/extra')).toBe(false);
     expect(isCmsPublicPath('/english/login')).toBe(false);
   });
 });

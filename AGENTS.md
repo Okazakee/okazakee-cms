@@ -3,9 +3,10 @@
 Next.js 16 standalone CMS for [okazakee.dev](https://okazakee.dev). TypeScript
 throughout, React 19, Supabase for auth/storage/DB, Tailwind CSS 4 for
 styling, Zustand (`cmsStore`, `themeStore`) for client state, and next-intl
-for EN/IT i18n. The app router routes all pages under `/[locale]/...` and the
-CMS serves ROOT paths — there is no `/cms` route prefix. The public website
-lives in a separate repository (`Okazakee/okazakee-ws`, public).
+for EN/IT i18n. Routes are served at the ROOT (`/`, `/login`, `/auth/...`)
+with client-side language switching — there is no `/cms` or locale route
+prefix. The public website lives in a separate repository
+(`Okazakee/okazakee-ws`, public).
 
 > **CMS decoupled (2026-08):** this repo is the standalone content editor.
 > The public repo renders content and owns the signed revalidation endpoint.
@@ -19,21 +20,22 @@ lives in a separate repository (`Okazakee/okazakee-ws`, public).
 ```
 src/
   app/
-    [locale]/
-      (app)/                      # Protected dashboard (session required)
-        page.tsx                  # CMS dashboard shell (section switcher)
-        login/                    # /{locale}/login (public auth route)
-        auth/
-          github/start/           # /{locale}/auth/github/start
-          callback/               # /{locale}/auth/callback
+    (app)/                        # Protected dashboard (session required)
+      page.tsx                    # CMS dashboard shell (section switcher)
+      login/                      # /login (public auth route)
+      auth/
+        github/start/             # /auth/github/start
+        callback/                 # /auth/callback
+        confirm/                  # /auth/confirm (public invite landing)
+        setup/                    # /auth/setup (protected passkey setup)
     actions/
       cms/
-        login.ts                  # Email/password login + durable rate limit
         getUser.ts                # Boot data (user + hero section data)
         deleteAccount.ts          # Self-service account deletion
+        onboardingActions.ts      # Invite confirmation (fragment/token_hash)
         utils/
-          auth.ts                 # Allowlist matching, GitHub helpers
-          fileHelpers.ts          # Auth contexts, image processing, uploads
+          auth.ts                 # Allowlist matching, schema-aware RPC
+          fileHelpers.ts          # Auth contexts, image/PDF uploads
           profileSync.ts          # user_profiles sync after login/OAuth
                                   # skills, career, contacts, i18n, users,
                                   # requests (project-request inbox)
@@ -53,7 +55,7 @@ src/
       invalidation.ts             # Content entity -> remote tags
       localInvalidation.ts        # Content entity -> local 'use cache' tags
       mutationResult.ts           # Shared action result contract (client-safe)
-      loginRateLimit.ts           # Durable per-IP/per-email limiter client
+      onboarding/invite.ts        # Supabase invitation send + outcome
       supabase/admin.ts           # Service-role client (server-only)
     public-site/revalidation.ts   # Signed revalidation event client
   store/
@@ -61,11 +63,14 @@ src/
     themeStore.ts
   types/                          # Shared domain types (fetchedData.types)
   utils/
+    cms/roles.ts                  # CmsRole vocabulary + capability predicates
     cms/validation.ts             # Pure validators (sizes, URLs, storage paths)
+    cms/fileSignatures.ts         # Magic-byte/container checks (images, PDF)
     cmsRouteMatching.ts           # Pure route rules (public paths, /cms compat)
     imageProcessor.ts             # Client-side WebP preprocessing
+    supabase/middleware.ts        # Session + schema-aware allowlist gate
     supabase/server.ts            # SSR session client (publishable key)
-  proxy.ts                        # Proxy (middleware): locale + session guard
+  proxy.ts                        # Proxy (middleware): compat redirects, session
 ```
 
 > **Repo-wide:** New modules go in `src/` under the directory matching their
@@ -75,19 +80,59 @@ src/
 ## 3. Auth
 
 - Allowlist-gated: `cms_allowed_users` (email OR GitHub username) with roles
-  `admin` / `editor`. The hidden navigation is never an authorization
-  mechanism — every Server Action enforces its role server-side via
-  `getCmsActionContext` / `requireAuth` / `requireAdmin` /
-  `requireAllowedPostWriter`.
+  `editor` / `admin` / `superadmin`. `src/utils/cms/roles.ts` is the single
+  client-safe vocabulary (`isCmsRole`, `isCmsAdminRole`, `canManageCmsRole`,
+  `canAssignCmsRole`); server code imports it and also enforces the DB
+  reality. The hidden navigation is never an authorization mechanism — every
+  Server Action enforces its role server-side via `getCmsActionContext` /
+  `requireAuth` / `requireAdmin` / `requireAllowedPostWriter`.
+- Capability policy: all three roles share editorial collaboration (read,
+  create, update, delete, upload and publish every blog/portfolio post, and
+  choose any existing profile as author). `admin` and `superadmin` add global
+  content, the private request inbox and user management; `superadmin` also
+  manages admin targets. No CMS action grants, changes, or removes
+  `superadmin` — bootstrap is one-off SQL by the owner. Admin cannot touch an
+  admin peer or a superadmin, dummy authors are editor-only, and profile
+  mutation requires an allowlist binding. The full matrix lives in
+  README §Roles and permissions.
 - Public (unauthenticated) routes are EXACT segments only:
-  `/login`, `/auth/callback`, `/auth/github/start` (see
-  `src/utils/cmsRouteMatching.ts`). Everything else requires a session.
-- Email/password + GitHub OAuth. Password login owns its success navigation
-  via `redirect()` in the action (see §15). GitHub OAuth: `/auth/github/start`
-  → Supabase → `/auth/callback`, which finalizes the flow in one request
-  boundary (code exchange, allowlist enforcement with sign-out on
-  unauthorized identities, profile sync, canonical `/{locale}` redirect) —
-  there is no `/auth/ready` hop and no legacy `/cms` path used internally.
+  `/login`, `/auth/callback`, `/auth/github/start`, `/auth/confirm` (see
+  `src/utils/cmsRouteMatching.ts`). `/auth/setup` is deliberately protected.
+  Everything else requires a session.
+- Sign-in is GitHub OAuth + WebAuthn passkey only; there is no password
+  credential, password form or login limiter. GitHub OAuth:
+  `/auth/github/start` → Supabase → `/auth/callback`, which finalizes the flow
+  in one request boundary (code exchange, allowlist enforcement with sign-out
+  on unauthorized identities, profile sync, canonical `/` redirect) — no
+  `/auth/ready` hop and no legacy `/cms` path used internally.
+- Email onboarding: `ADD_EMAIL` inserts the allowlist row first, then asks
+  Supabase Auth to invite the address. `sendCmsInvitation` reports
+  `sent` / `existing-account` / `failed`; the row commit is the action's
+  success and `invited_at` is stamped only on `sent`. `sent` means GoTrue
+  accepted the send, not that mail arrived — custom SMTP is the deployment
+  prerequisite. Existing identities (confirmed or not) are never mailed a
+  duplicate invite and failures leave the row for an explicit `RESEND_INVITE`.
+  `/auth/confirm` is public and accepts either the default invite fragment
+  (`access_token`/`refresh_token`) or `?token_hash=…&type=invite`; the page
+  scrubs the URL before the Server Action re-validates, enforces the allowlist,
+  signs unauthorized users out (including any session established before a
+  failed check) and redirects to the protected `/auth/setup`, which only
+  offers passkey enrollment.
+- Server Actions are POST by design: the request body is the action's
+  argument list, so `[{ type: 'GET' }]` is the user-directory read operation,
+  not an HTTP method override. Never add ad-hoc POST blocking or a
+  method-override shim; security is the authenticated action plus its
+  server-side role gate (with the framework's Server Action origin/CSRF
+  checking). The demo cookie only admits GET/HEAD `/` for the shell and opens
+  no data or actions; the removed `x-redirected` header is not coming back.
+- Supabase Auth is project-global and shared with the public site: a dev
+  `dev_staging` invite creates a real `auth.users` identity and can send real
+  mail. `cms_allowed_users` is per-schema. The middleware resolves the role
+  through the single `public.cms_lookup_current_user(p_schema text default
+  'public')` RPC, passing `supabaseSchema`; the whitelist is exactly `public`
+  and `dev_staging` (missing table or any other value returns NULL, never a
+  public fallback), and there are no dev copies of the identity functions.
+  The legacy no-arg call still resolves through the default during rollout.
 
 ## 4. Mutations, storage ordering and revalidation
 
@@ -103,6 +148,16 @@ src/
   - Delete: commit the DB row delete FIRST, then remove the Storage object
     best-effort (`removePublicFileIfPresent` / `removeStorageObjectBestEffort`
     never throw).
+  - Bytes before storage: `prepareImageUpload` and `uploadPdfBuffer` are the
+    shared chokepoints every image/PDF path uses. They validate magic bytes,
+    declared-MIME agreement and container completeness (`fileSignatures.ts`)
+    before any Storage write, so a rejected or spoofed file writes nothing.
+    Raster formats are JPEG/PNG/WebP/GIF/AVIF only; SVG/HTML text is rejected
+    even under an image MIME. WebP must be a complete RIFF container (static
+    passthrough keeps the bytes; animated keeps every frame); PDFs need the
+    `%PDF-` header in the first 1 KiB plus `%%EOF`. These checks prove format,
+    not safety: the CMS is not a malware/content scanner and PDFs are served
+    as inert documents.
 - Image uploads keep animations: the browser canvas preprocessor
   (`src/utils/imageProcessor.ts`) returns an animated WebP untouched — a
   canvas round-trip keeps only the first frame — and the server pipeline
@@ -130,7 +185,8 @@ src/
 - Individual Publish and Publish All require confirmation; registered callbacks
   remain raw so Publish All confirms once. User removal confirms identity,
   commits profile deletion before owned-avatar cleanup, and never deletes
-  shared Auth identities from non-public schemas.
+  shared Auth identities from non-public schemas — non-dummy shared identities
+  are never deleted from the CMS at all (the allowlist row is the authority).
 
 ## 5. Commands and Workflows
 
@@ -149,7 +205,7 @@ build → typecheck (build before typecheck: fresh checkouts need `.next/types`)
 
 ## 6. Code Formatting
 
-> **Repo-wide:** Biome 2.4 is the formatter and linter. Config lives at
+> **Repo-wide:** Biome 2.6.3 is the formatter and linter. Config lives at
 > `biome.json`. The editorconfig at `.editorconfig` mirrors
 > indent/line-ending settings.
 
@@ -219,7 +275,7 @@ export function SectionHeader({
 - **Type aliases for discriminated unions:** `{Entity}Result` for operation results. `ContactsResult`, `I18nResult` (all extend `MutationResult`)
 - **Data types:** `{Entity}Data` suffix. `CMSHeroBootData`, `CreateContactData`
 - **Zustand stores:** `use{Name}Store`. `useCmsStore`, `useThemeStore`
-- **Server action files:** camelCase with domain prefix. `login.ts`, `getUser.ts`
+- **Server action files:** camelCase with domain prefix. `getUser.ts`, `onboardingActions.ts`
 - **Section action files:** `{section}Actions.ts`. `blogActions.ts`, `careerActions.ts`
 - **Component files:** PascalCase matching component name. `SectionHeader.tsx`, `TranslationField.tsx`
 - **Hook files:** `use{HookName}.ts`. `useFileUpload.ts`, `useSectionTranslations.ts`
@@ -232,20 +288,20 @@ export function SectionHeader({
 - **Type imports:** Use `import type { Foo } from '...'` for type-only imports. Runtime imports use regular `import { create } from 'zustand'`.
 - **Nullable:** Use `X | null` (not `X | undefined` for missing values).
 - **Optional properties:** Use `key?: Type` in interfaces.
-- **Union types:** `'admin' | 'editor'`, `RemoteType = 'full' | 'hybrid' | 'onSite'`
+- **Union types:** `'editor' | 'admin' | 'superadmin'` (the canonical `CmsRole`), `RemoteType = 'full' | 'hybrid' | 'onSite'`
 - **Export inline types:** Types are defined in the same file where they are primary consumers, not in a separate `.d.ts` unless shared across modules.
 - **Return types:** Explicit return types on public API functions. `export async function getUser(): Promise<CMSUser | null>`. Internal helper functions may omit return types.
 - **Type assertion with `as`:** Used sparingly for Supabase query results.
 
 ```typescript
-export type CmsRole = (typeof CMS_ALLOWED_ROLES)[number];
+export const CMS_ROLES = ['editor', 'admin', 'superadmin'] as const;
 
-export async function checkLoginRateLimitDurable(
-  supabase: Pick<SupabaseClient, 'rpc'>,
-  ipHash: string,
-  emailHash: string
-): Promise<LoginRateResult> {
-  // ...
+export type CmsRole = (typeof CMS_ROLES)[number];
+
+export function canManageCmsRole(actor: CmsRole, target: CmsRole): boolean {
+  if (target === 'superadmin') return false;
+  if (actor === 'superadmin') return true;
+  return actor === 'admin' && target === 'editor';
 }
 ```
 
@@ -302,7 +358,8 @@ import { useCmsStore } from '@/store/cmsStore';
 ## 11. Comments and Docstrings
 
 - **Docstrings:** Not used systematically. Module-level docstrings exist on
-  the limiter, revalidation and invalidation libs to explain contracts.
+  the validator, invitation, revalidation and invalidation libs to explain
+  contracts.
 - **Inline comments:** `//` style, used sparingly to explain intent or
   document edge cases, not what the code does. Storage-ordering comments
   document the upload/delete invariants.
@@ -321,12 +378,13 @@ import { useCmsStore } from '@/store/cmsStore';
 Vitest is configured (`vitest.config.ts`, node environment). Tests live next
 to sources as `*.test.ts`. Run with `bun run test` (`vitest run`). Existing
 suites: cache-tag vocabulary, invalidation descriptors, local invalidation,
-mutation result contract, revalidation signature, auth helpers, route
-matching, CMS validators (sizes/URLs/storage paths), limiter identifier
-derivation, and a PGlite (WASM Postgres) suite that executes the limiter
-migration's DDL against a real database (drift-guarded by the
-`-- BEGIN GRANTS` / `-- END GRANTS` markers). CI runs lint, test, build, then
-typecheck (build first: fresh checkouts need `.next/types`).
+mutation result contract, revalidation signature, auth helpers
+(schema-aware allowlist RPC + role vocabulary), route matching,
+CMS validators (sizes/URLs/storage paths), file-signature/WebP-container
+checks, invitation sending and invite-confirmation flows, and PGlite (WASM
+Postgres) suites that execute migration DDL — role CHECK, last-superadmin
+guard trigger, grants — against a real database. CI runs lint, test, build,
+then typecheck (build first: fresh checkouts need `.next/types`).
 
 ## 13. Git
 
@@ -381,18 +439,21 @@ urgent it feels.
 - **Package manager:** bun (`packageManager` in `package.json`). Always use `bun` not `npm`/`yarn`/`pnpm`.
 - **Lockfile:** `bun.lock` — committed to the repo.
 - **Add dependency:** `bun add <package>` (prod) or `bun add -d <package>` (dev).
-- **Linter/Formatter:** Biome 2.4. Config: `biome.json`.
+- **Linter/Formatter:** Biome 2.6.3. Config: `biome.json`.
 - **Type checker:** `tsc` with `strict: true`. Config: `tsconfig.json`.
 - **CSS:** Tailwind CSS 4 with `@tailwindcss/postcss`. Config: `postcss.config.mjs`, `tailwind.config.ts`.
-- **Runtime:** Next.js 16 with Turbopack dev server. Config: `next.config.ts`.
+- **Runtime:** Next.js 16.4.3 with Turbopack dev server (`>=16.4.1` is the
+  security floor: the patched line carrying the October 2026 RCE/DoS fixes),
+  React 19.3.1, `sharp >=0.35.5`. Config: `next.config.ts`.
   `serverActions.bodySizeLimit` is `'10mb'` — the upload contract (10 MB max
   for images and PDFs) is enforced client-side (`useFileUpload maxSizeMB`),
   server-side (`MAX_UPLOAD_SIZE_BYTES` in `src/utils/cms/validation.ts`) and
-  at the framework layer.
+  at the framework layer. `happy-dom 21.0.4` backs the DOM test environment.
 - **Environment variables:** Required: `NEXT_PUBLIC_SUPABASE_URL`,
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (`sb_publishable_…`),
   `SUPABASE_SECRET_KEY` (`sb_secret_…`, server-only, never in public code).
-  Optional: `CMS_PUBLIC_URL`, `CMS_AUTH_DEBUG`, `APP_ENV`,
+  `CMS_PUBLIC_URL` is required in production and for invitations; the rest are
+  optional: `CMS_AUTH_DEBUG`, `APP_ENV`,
   `WEBSITE_REVALIDATION_URL`, `WEBSITE_REVALIDATION_SECRET`,
   `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_LOCALES`, `NEXT_PUBLIC_DEFAULT_LOCALE`.
   Full list in `.env.local.example`.
@@ -410,21 +471,29 @@ urgent it feels.
 - **Database verification:** read-only `bun run db:dev:check [--scope dev_staging]`
   (`src/utils/cms/devMigrations.ts`;
   `src/libs/cms/devMigrations/devCheck.ts`; registry
-  `src/libs/cms/devMigrations/registry.json`, 13 `{version,name,sourceFile}`
+  `src/libs/cms/devMigrations/registry.json`, 20 `{version,name,sourceFile}`
   entries) plus content tables and the dev-only `dev_staging.cms_migration_audit`
-  ledger (eight `verified_existing`, five `applied`: GitHub subjects, Skills
-  reseed, the `20261008135608` content-controls cutover,
-  `20261008145842` header-image restoration and `20261008213304` allowlist
-  ID-sequence usage). Source hashes certify immutable bytes; live effect
-  checks include service-role sequence usage and reflect the latest cutover.
+  ledger, which must hold one source-hash record per registry entry
+  (`verified_existing` = schema effects + hash audited, `applied` = executed
+  under review). Source hashes certify immutable bytes; live effect checks
+  include service-role sequence usage and the dev RBAC mirror (role CHECK,
+  guard trigger, no allowlist client grants). The public role CHECK, public
+  function bodies and auth-side effects are not certified.
   Native Supabase history is mixed-scope, not proof of content state.
   Historical public/unqualified sources must never be replayed against
   shared `public`. Link once (`supabase login`, `supabase link --project-ref
   <ref>`); green ends `dev check: N pass / 0 fail / M info`. `--scope` must
   equal `dev_staging`; the CLI exposes only a read-only `check` command.
   Future changes remain explicitly reviewed/manual: never `supabase db push`,
-  `migration repair`, or search-path fallback apply. `public`, shared Auth
-  and pre-existing global history are not certified.
+  `migration repair`, or search-path fallback apply.
+- **Role-hierarchy migration:** `20261026125511_cms_superadmin_role.sql`
+  touches `public` too (role CHECK, schema-aware
+  `cms_lookup_current_user(p_schema)`, `is_admin_user`, last-superadmin
+  trigger) and mirrors only the CHECK + trigger in `dev_staging`. Apply it
+  manually FIRST, then deploy the matching code, then bootstrap exactly one
+  named identity by SQL `id` subselect — never `where role='admin'`, which
+  would promote every admin. The trigger's advisory transaction lock keeps
+  two concurrent demotions from both passing. No migration promotes anyone.
 - **Deployment:** Vercel with Next.js framework preset. Build output: `.next/`.
 
 ## 15. Red Lines
@@ -444,25 +513,30 @@ urgent it feels.
 - **Never commit or push directly to `main`.** Work on a branch and open a PR — the only exception is a direct push you explicitly asked for in the session (§13.1).
 - **Never open a PR, or merge one, without the owner's go-ahead.** A pushed branch is not a PR request; wait for confirmation (§13.1).
 - **Never add a `'use server'` directive inside a file that also has `'use client'`.** These directives are mutually exclusive at the file level.
-- **Never import server-only modules (like `next/headers`, `next/cache`) into client components.** Keep server and client code separated. Client-safe contracts live in `src/libs/cms/mutationResult.ts` and route/validation utils.
-- **Never use `console.log` in production paths.** Use `console.error` for server-side error logging (limiter/revalidation failures are logged with event/identifier context).
+- **Never import server-only modules (like `next/headers`, `next/cache`) into client components.** Keep server and client code separated. Client-safe contracts live in `src/libs/cms/mutationResult.ts`, `src/utils/cms/roles.ts`, `src/utils/cms/fileSignatures.ts` and route/validation utils.
+- **Never use `console.log` in production paths.** Use `console.error` for server-side error logging (invitation/revalidation failures are logged with event/identifier context).
 - **Never define React component state inline in the JSX render path.** Use Zustand stores for shared state, `useState`/`useReducer` for local state.
 - **Never add a dependency with npm/yarn/pnpm** — always use `bun add`.
 - **Never export a component as default** unless it is a Next.js page or layout file. Use named exports.
 - **Never delete a Storage object before its DB write has committed** (see §4). Storage cleanup after a commit is best-effort and never throws.
-- **Successful password login owns its navigation in the Server Action** via
-  `redirect()` from `next/navigation` — the client never navigates on the
-  success path, and no refresh/revalidatePath/router.refresh may be added to
-  the login action (a client hard-navigation racing the action's RSC/cookie
-  lifecycle caused a transient load error in Firefox). The client treats the
-  `NEXT_REDIRECT` promise rejection as control flow — see
-  `src/app/actions/cms/login.test.ts`. The same single-owner pattern applies
-  to account deletion (`deleteMyAccount` → canonical `/{locale}/login`;
-  guards in `src/app/actions/cms/deleteAccount.test.ts`).
-- **Never call the limiter RPCs with the publishable-key client** — execution
-  is service_role only (use `getCmsAdminClient`). The legacy single-identifier
-  `cms_check_login_rate(text)` and its temporary anon grant were removed by
-  `20260818110000_remove_legacy_login_rate_rpc.sql`; do not reintroduce them.
+- **Never write an upload to Storage before byte-signature/container validation.**
+  `prepareImageUpload` and `uploadPdfBuffer` are the shared chokepoints; do not
+  add an image/PDF path that bypasses them. The checks prove format and
+  completeness only — never describe them as malware or content scanning.
+- **Never add a password credential, password login or password limiter.**
+  Invitation confirmation ends at passkey enrollment; existing users sign in
+  with GitHub OAuth or a passkey.
+- **Never grant, change, or remove `superadmin` from application code or a
+  migration.** It is provisioned only by the owner's one-off SQL bootstrap of
+  a single named row; there is no auto-promotion, and the last-superadmin
+  trigger is the atomic backstop.
+- **Never derive production auth or invitation origins from a forwarded host
+  header.** Production OAuth callbacks and all invite redirects use
+  `CMS_PUBLIC_URL` (the invitation helper validates it as a bare http(s)
+  origin); development OAuth is the only request-origin fallback.
+- **Account deletion owns its navigation in the Server Action** — `deleteMyAccount`
+  redirects to the canonical `/login` after the commit, and the client treats
+  the `NEXT_REDIRECT` rejection as control flow (`deleteAccount.test.ts`).
 
 <!-- BEGIN:nextjs-agent-rules -->
 

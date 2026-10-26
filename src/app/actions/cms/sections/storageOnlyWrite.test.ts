@@ -4,6 +4,7 @@ import {
   type FakeSupabase,
   type Row,
 } from '@/testing/unit/supabaseFake';
+import { staticWebpFile } from '@/testing/unit/fileFixtures';
 
 /**
  * Blog WRITE path: Storage-only Markdown (no dual write). Uses the established
@@ -49,16 +50,6 @@ function pathFor(
   return `blog/${postId}/${locale}/${sha256Hex(Buffer.from(markdown, 'utf8'))}.md`;
 }
 
-function webpFile(name = 'image.webp'): File {
-  return new File(
-    [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
-    name,
-    {
-      type: 'image/webp',
-    }
-  );
-}
-
 function fake(
   tables: Record<string, Row[]> = {},
   extra: Partial<Parameters<typeof createFakeSupabase>[0]> = {}
@@ -88,7 +79,7 @@ function blogCreate(
       author_id: 'user-1',
       ...extra,
     },
-    file: webpFile(),
+    file: staticWebpFile(),
     tempId: 'c1',
   };
 }
@@ -382,6 +373,28 @@ describe('blog edit', () => {
     expect(row?.hidden).toBe(true);
   });
 
+  it('rejects a spoofed cover before any storage write or DB commit', async () => {
+    h.fake = fake(seeded());
+    const calls = instrument(h.fake);
+    const before = { ...h.fake.state.tables.blog_posts[0] };
+    const spoofed = new File(
+      [new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')],
+      'cover.webp',
+      { type: 'image/webp' }
+    );
+
+    const result = await blogActions({
+      type: 'UPLOAD_IMAGE',
+      blogId: 7,
+      file: spoofed,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SVG and HTML/i);
+    expect(calls).toEqual({ uploads: [], downloads: [] });
+    expect(h.fake.state.tables.blog_posts[0]).toEqual(before);
+  });
+
   it('uploads nothing when the body bytes already match the committed pointer', async () => {
     h.fake = fake(seeded());
     const calls = instrument(h.fake);
@@ -497,7 +510,9 @@ describe('blog edit', () => {
     const result = await blogActions({
       type: 'BATCH_PUBLISH',
       creates: [],
-      updates: [{ id: 7, data: { body_en: '# new en' }, file: webpFile() }],
+      updates: [
+        { id: 7, data: { body_en: '# new en' }, file: staticWebpFile() },
+      ],
       deletes: [],
     });
 

@@ -3,6 +3,7 @@
 import { errorMessage } from '@/libs/cms/mutationResult';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
 import type { HeroSettings } from '@/types/fetchedData.types';
+import { isCmsAdminRole, type CmsRole } from '@/utils/cms/roles';
 import { createClient } from '@/utils/supabase/server';
 import {
   findAllowedCmsUser,
@@ -20,7 +21,7 @@ export type CMSUser = {
   email: string;
   displayName: string;
   avatarUrl: string | null;
-  role: 'admin' | 'editor' | '';
+  role: CmsRole | '';
   authProvider: 'email' | 'github' | 'dummy';
   githubUsername: string | null;
   githubUserId?: string | null;
@@ -129,7 +130,9 @@ export async function getCmsBootData(): Promise<CMSBootData> {
 
     if (!user.role) return { status: 'unauthorized' };
 
-    if (user.role !== 'admin') {
+    // Admin-tier identity (admin + superadmin) owns global dashboard data;
+    // editors stop at their own content sections.
+    if (!isCmsAdminRole(user.role)) {
       return { status: 'ok', user, heroSection: null };
     }
 

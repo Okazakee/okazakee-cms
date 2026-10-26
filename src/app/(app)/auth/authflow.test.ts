@@ -1,92 +1,127 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { parseInviteLink } from './confirm/parseInviteLink';
 
 /**
- * GitHub OAuth flow contract guards.
+ * Invitation-link classification (behavior).
  *
- * The OAuth flow must be self-contained in two request boundaries
- * (/auth/github/start -> /auth/callback) with the callback performing ALL
- * finalization (code exchange, allowlist enforcement with sign-out on
- * unauthorized identities, profile sync, canonical /{locale} redirect). It
- * must never use legacy /cms routes internally and must not reference the
- * removed /auth/ready hop.
- *
- * Source-level on purpose: the flow depends on a live Supabase provider
- * round-trip that cannot be unit-tested.
+ * The public /auth/confirm page accepts exactly two shapes: the standard
+ * Supabase invite fragment (implicit flow, tokens) and the optional
+ * `?token_hash=...&type=invite` custom template. Recovery/magic-link/
+ * password-reset links are not product scope and must be rejected before any
+ * Server Action call.
  */
 
-const callbackSource = readFileSync(
-  fileURLToPath(new URL('./callback/route.ts', import.meta.url)),
-  'utf8'
-);
-const startSource = readFileSync(
-  fileURLToPath(new URL('./github/start/route.ts', import.meta.url)),
-  'utf8'
-);
-const loginPageSource = readFileSync(
-  fileURLToPath(new URL('../login/page.tsx', import.meta.url)),
-  'utf8'
-);
-const accountSectionSource = readFileSync(
-  fileURLToPath(
-    new URL(
-      '../../../components/common/cms/AccountSection.tsx',
-      import.meta.url
-    )
-  ),
-  'utf8'
-);
+const accessToken = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.c2lnbmF0dXJl';
+const refreshToken = 'v1.refresh-token-value';
+const tokenHash =
+  'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
 
-describe('no legacy /cms routes used internally', () => {
-  it('auth routes, login page and account section never redirect to /cms/login', () => {
-    // Guards the actual redirect pattern (a template literal), not the
-    // '@app/actions/cms/login' import path.
-    for (const [name, source] of [
-      ['callback', callbackSource],
-      ['github/start', startSource],
-      ['login page', loginPageSource],
-      ['AccountSection', accountSectionSource],
-    ]) {
-      expect(source, name).not.toMatch(/\/\$\{locale\}\/cms\/login/);
-      expect(source, name).not.toMatch(/'\/\$\{locale\}\/cms\/login'/);
+describe('standard Supabase invite fragment', () => {
+  it('accepts access_token/refresh_token with type=invite', () => {
+    const hash = `#access_token=${accessToken}&expires_at=1790000000&expires_in=3600&refresh_token=${refreshToken}&token_type=bearer&type=invite`;
+
+    expect(parseInviteLink(hash, '')).toEqual({
+      kind: 'session',
+      accessToken,
+      refreshToken,
+    });
+  });
+
+  it('accepts a fragment without a type parameter', () => {
+    const hash = `#access_token=${accessToken}&refresh_token=${refreshToken}`;
+
+    expect(parseInviteLink(hash, '')).toEqual({
+      kind: 'session',
+      accessToken,
+      refreshToken,
+    });
+  });
+
+  it('accepts the fragment without its leading hash', () => {
+    const hash = `access_token=${accessToken}&refresh_token=${refreshToken}`;
+
+    expect(parseInviteLink(hash, '').kind).toBe('session');
+  });
+
+  it('rejects non-invite flow types', () => {
+    for (const type of ['recovery', 'magiclink', 'signup', 'email_change']) {
+      const hash = `#access_token=${accessToken}&refresh_token=${refreshToken}&type=${type}`;
+      expect(parseInviteLink(hash, ''), type).toEqual({ kind: 'invalid' });
     }
   });
-});
 
-describe('no /auth/ready hop remains', () => {
-  it('the ready route is removed', () => {
+  it('rejects a partial or malformed token pair', () => {
+    expect(parseInviteLink(`#access_token=${accessToken}`, '')).toEqual({
+      kind: 'invalid',
+    });
+    expect(parseInviteLink(`#refresh_token=${refreshToken}`, '')).toEqual({
+      kind: 'invalid',
+    });
     expect(
-      existsSync(fileURLToPath(new URL('./ready/route.ts', import.meta.url)))
-    ).toBe(false);
+      parseInviteLink(`#access_token=${accessToken}&refresh_token=`, '')
+    ).toEqual({ kind: 'invalid' });
+    expect(
+      parseInviteLink(
+        `#access_token=${accessToken}&refresh_token=has space`,
+        ''
+      )
+    ).toEqual({ kind: 'invalid' });
+    expect(
+      parseInviteLink(
+        `#access_token=${'a'.repeat(5000)}&refresh_token=${refreshToken}`,
+        ''
+      )
+    ).toEqual({ kind: 'invalid' });
   });
 
-  it('callback, start and login page never reference /auth/ready', () => {
-    for (const [name, source] of [
-      ['callback', callbackSource],
-      ['github/start', startSource],
-      ['login page', loginPageSource],
-    ]) {
-      expect(source, name).not.toContain('auth/ready');
+  it('treats an expired-link provider fragment as invalid without exposing it', () => {
+    const hash =
+      '#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired';
+
+    expect(parseInviteLink(hash, '')).toEqual({ kind: 'invalid' });
+  });
+});
+
+describe('token_hash custom template', () => {
+  it('accepts token_hash only with type=invite', () => {
+    expect(parseInviteLink('', `?token_hash=${tokenHash}&type=invite`)).toEqual(
+      { kind: 'tokenHash', tokenHash }
+    );
+  });
+
+  it('rejects token_hash without the invite type', () => {
+    expect(parseInviteLink('', `?token_hash=${tokenHash}`)).toEqual({
+      kind: 'invalid',
+    });
+    for (const type of ['recovery', 'magiclink', 'email', 'signup']) {
+      expect(
+        parseInviteLink('', `?token_hash=${tokenHash}&type=${type}`),
+        type
+      ).toEqual({ kind: 'invalid' });
     }
   });
-});
 
-describe('callback finalizes the OAuth flow in one boundary', () => {
-  it('exchanges the code, enforces allowlist, syncs profile and redirects canonically', () => {
-    expect(callbackSource).toContain('exchangeCodeForSession');
-    expect(callbackSource).toContain('findAllowedCmsUser');
-    expect(callbackSource).toContain('signOut');
-    expect(callbackSource).toContain('syncCmsUserProfile');
-    expect(callbackSource).toContain('resolvePostAuthPath');
-    expect(callbackSource).toContain('buildAuthErrorRedirect');
+  it('rejects malformed token hashes', () => {
+    expect(parseInviteLink('', '?token_hash=short&type=invite')).toEqual({
+      kind: 'invalid',
+    });
+    expect(
+      parseInviteLink('', `?token_hash=${'a'.repeat(600)}&type=invite`)
+    ).toEqual({ kind: 'invalid' });
   });
 });
 
-describe('github/start builds the canonical callback URL', () => {
-  it('starts the provider flow against the canonical callback', () => {
-    expect(startSource).toContain('signInWithOAuth');
-    expect(startSource).toContain('buildOAuthCallbackUrl');
-    expect(startSource).toContain('buildAuthErrorRedirect');
+describe('unusable confirmation links', () => {
+  it('rejects an empty URL instead of implying a session', () => {
+    expect(parseInviteLink('', '')).toEqual({ kind: 'invalid' });
+  });
+
+  it('ignores credentials passed as query parameters', () => {
+    expect(
+      parseInviteLink(
+        '',
+        `?access_token=${accessToken}&refresh_token=${refreshToken}&type=invite`
+      )
+    ).toEqual({ kind: 'invalid' });
   });
 });

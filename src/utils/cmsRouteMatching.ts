@@ -13,6 +13,12 @@ const CMS_PUBLIC_PATHS = [
   '/login',
   '/auth/callback',
   '/auth/github/start',
+  // Invitation link landing: the fragment/token_hash IS the credential, so
+  // there is no session yet. The page scrubs the tokens and the confirm
+  // Server Action enforces the allowlist (signing unauthorized users out).
+  // `/auth/setup` is deliberately NOT public: it requires the confirmed,
+  // allowlisted session.
+  '/auth/confirm',
 ] as const;
 
 /** Normalizes a single trailing slash (the routes are served without one). */

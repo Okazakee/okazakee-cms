@@ -96,10 +96,17 @@ values
    'fixture,app', 'https://example.com/store', null,
    'https://example.com', null, 7, false, null);
 
+-- Fixture-only allowlist. The superadmin row is a genuine LOCAL bootstrap
+-- identity (matching testAccounts.superadmin in src/testing/lib/config.mjs):
+-- it is the only row with that role, it gets no special bypass, and it exists
+-- solely so the real role-hierarchy code can be exercised against real RLS /
+-- RPCs. The role is accepted because the new-role migration runs before this
+-- seed.
 insert into public.cms_allowed_users (email, github_username, role)
 values
   ('admin@isolated.test', 'fixture-admin', 'admin'),
-  ('editor@isolated.test', 'fixture-editor', 'editor');
+  ('editor@isolated.test', 'fixture-editor', 'editor'),
+  ('superadmin@isolated.test', 'fixture-superadmin', 'superadmin');
 
 -- Only editorial content remains in the database. Structural section copy
 -- comes from the website's local EN/IT i18n files.

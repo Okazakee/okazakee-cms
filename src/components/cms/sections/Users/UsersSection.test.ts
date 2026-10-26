@@ -95,4 +95,56 @@ describe('user removal confirmation', () => {
     expect(removeCalls()).toHaveLength(1);
     expect(container.textContent).toContain('Deletion denied');
   });
+
+  it('renders peer-admin and superadmin rows read-only', async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.append(container);
+    h.actions.mockImplementation(async (operation) =>
+      operation.type === 'GET'
+        ? {
+            success: true,
+            data: [
+              {
+                id: 2,
+                email: 'editor@example.com',
+                github_username: null,
+                role: 'editor',
+                invited_at: null,
+                created_at: '2026-01-01',
+                profile: null,
+              },
+              {
+                id: 3,
+                email: 'peer@example.com',
+                github_username: null,
+                role: 'admin',
+                invited_at: null,
+                created_at: '2026-01-01',
+                profile: null,
+              },
+              {
+                id: 4,
+                email: 'owner@example.com',
+                github_username: null,
+                role: 'superadmin',
+                invited_at: null,
+                created_at: '2026-01-01',
+                profile: null,
+              },
+            ],
+          }
+        : { success: true }
+    );
+    root = createRoot(container);
+    await act(async () => root.render(createElement(UsersSection)));
+
+    // Only the editor row exposes management controls; the peer admin and the
+    // superadmin render as static chips and cannot be removed.
+    expect(
+      container.querySelectorAll('[aria-label="users.removeUser"]').length
+    ).toBe(1);
+    expect(container.textContent).toContain('superadmin');
+  });
 });

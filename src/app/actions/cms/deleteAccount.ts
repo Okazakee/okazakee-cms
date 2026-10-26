@@ -59,7 +59,9 @@ export async function deleteMyAccount() {
       if (idMatch) allowedUser = idMatch;
     }
 
-    // Verified email second (returns immediately under current behavior)
+    // Verified email second: a PRESENT, unmatched verified email fails
+    // closed (no legacy fallthrough), matching findAllowedCmsUser and the
+    // cms_lookup_current_user RPC.
     if (!allowedUser && verifiedEmail) {
       const { data: emailMatch } = await allowlistClient
         .from('cms_allowed_users')
@@ -69,8 +71,9 @@ export async function deleteMyAccount() {
       if (emailMatch) allowedUser = emailMatch;
     }
 
-    // Legacy display handle last (dual-allowed transition only)
-    if (!allowedUser && githubUsernameLegacy) {
+    // Legacy display handle last: only when the session carries no verified
+    // email at all (dual-allowed transition).
+    if (!allowedUser && !verifiedEmail && githubUsernameLegacy) {
       const { data: githubMatch } = await allowlistClient
         .from('cms_allowed_users')
         .select('id, role')
@@ -83,14 +86,38 @@ export async function deleteMyAccount() {
       return { success: false, error: 'User not found in allowed users' };
     }
 
-    // Prevent deleting the last admin
-    if (allowedUser.role === 'admin') {
-      const { data: admins } = await allowlistClient
-        .from('cms_allowed_users')
-        .select('id')
-        .eq('role', 'admin');
+    // No CMS action can remove a superadmin: that identity is provisioned out
+    // of band by the bootstrap and can never be granted/removed in-app.
+    // Refuse before any DB or storage write.
+    if (allowedUser.role === 'superadmin') {
+      return {
+        success: false,
+        error: 'Superadmin accounts cannot be deleted',
+      };
+    }
 
-      if (admins && admins.length === 1 && admins[0].id === allowedUser.id) {
+    // Prevent deleting the last usable privileged account. Superadmins are
+    // refused above and cannot be removed in-app, so a live superadmin keeps
+    // access available even when the last admin leaves; pre-bootstrap, with no
+    // superadmin provisioned, the sole admin is still the last usable admin.
+    // Dummy author rows are placeholders and never count as usable coverage.
+    if (allowedUser.role === 'admin') {
+      const { data: privileged } = await allowlistClient
+        .from('cms_allowed_users')
+        .select('id, email, role')
+        .in('role', ['admin', 'superadmin']);
+
+      const usablePrivileged = privileged?.filter(
+        (member) =>
+          !(
+            member.email?.startsWith('dummy-') &&
+            member.email.endsWith('@dummy.local')
+          )
+      );
+      if (
+        usablePrivileged?.length === 1 &&
+        usablePrivileged[0].id === allowedUser.id
+      ) {
         return {
           success: false,
           error: 'Cannot delete the last admin account',

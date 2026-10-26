@@ -32,20 +32,26 @@ import {
   editorSecondaryButtonClass,
 } from '@/components/cms/shared/EditorBody';
 import { ErrorBanner } from '@/components/cms/shared/ErrorBanner';
-import { RoleSelect } from '@/components/cms/shared/RoleChip';
+import { RoleChip, RoleSelect } from '@/components/cms/shared/RoleChip';
 import { SectionHeader } from '@/components/cms/shared/SectionHeader';
 import { GithubIcon } from '@/components/common/BrandIcons';
 import { useLatestRequest } from '@/hooks/cms/useLatestRequest';
 import { revalidationWarning } from '@/libs/cms/mutationResult';
 import { demoUsers } from '@/libs/demo/fixtures';
 import { useCmsStore } from '@/store/cmsStore';
+import {
+  canManageCmsRole,
+  type CmsRole,
+  isCmsAdminRole,
+  isCmsRole,
+} from '@/utils/cms/roles';
 import { processImageToWebP } from '@/utils/imageProcessor';
 
 type AllowedUser = {
   id: number;
   email: string | null;
   github_username: string | null;
-  role: 'admin' | 'editor';
+  role: CmsRole;
   invited_at: string | null;
   created_at: string;
   profile?: {
@@ -77,8 +83,14 @@ export default function UsersSection() {
   const [removeTarget, setRemoveTarget] = useState<AllowedUser | null>(null);
   const [removing, setRemoving] = useState(false);
   const removalLock = useRef(false);
+  const [invitingFor, setInvitingFor] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const isAdmin = user?.role === 'admin';
+  // One actor role for every control: superadmin gets admin-level sections,
+  // and per-target permissions come from the shared hierarchy helpers.
+  const storeRole = user?.role;
+  const actorRole: CmsRole | null = isCmsRole(storeRole) ? storeRole : null;
+  const isAdmin = isCmsAdminRole(actorRole);
 
   const beginLoad = useLatestRequest();
   const fetchUsers = useCallback(async () => {
@@ -119,6 +131,7 @@ export default function UsersSection() {
     }
     setIsSubmitting(true);
     setError(null);
+    setNotice(null);
     // Offline showcase: append a fake row locally.
     if (useCmsStore.getState().demoMode) {
       try {
@@ -164,6 +177,7 @@ export default function UsersSection() {
         });
         setNewUserInput('');
         setIsAdding(false);
+        if (addType === 'email') setNotice(t('users.inviteSent'));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed');
       } finally {
@@ -194,6 +208,22 @@ export default function UsersSection() {
       if (!result.success) throw new Error(result.error || 'Failed');
       setNewUserInput('');
       setIsAdding(false);
+      // The allowlist row is committed: report the invitation outcome
+      // truthfully instead of implying the email was sent.
+      setNotice(
+        result.invitation === 'sent'
+          ? t('users.inviteSent')
+          : result.invitation === 'existing-account'
+            ? t('users.inviteExistingAccount')
+            : null
+      );
+      if (result.invitation === 'failed') {
+        setError(
+          `${t('users.inviteFailed')}${
+            result.invitationError ? ` — ${result.invitationError}` : ''
+          }`
+        );
+      }
       await fetchUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
@@ -204,6 +234,7 @@ export default function UsersSection() {
 
   const handleUpdateRole = async (id: number, newRole: 'admin' | 'editor') => {
     setError(null);
+    setNotice(null);
     setUpdatingRoleFor(id);
     // Offline showcase: flip the row locally.
     if (useCmsStore.getState().demoMode) {
@@ -213,7 +244,9 @@ export default function UsersSection() {
           prev.map((u) => (u.id === id ? { ...u, role: newRole } : u))
         );
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('users.errorUpdateRole'));
+        setError(
+          err instanceof Error ? err.message : t('users.errorUpdateRole')
+        );
       } finally {
         setUpdatingRoleFor(null);
       }
@@ -230,6 +263,49 @@ export default function UsersSection() {
     }
   };
 
+  const handleResendInvite = async (id: number) => {
+    if (!isAdmin) return;
+    setError(null);
+    setNotice(null);
+    setInvitingFor(id);
+    // Offline showcase: mark the row invited locally.
+    if (useCmsStore.getState().demoMode) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === id ? { ...u, invited_at: new Date().toISOString() } : u
+        )
+      );
+      setNotice(t('users.inviteSent'));
+      setInvitingFor(null);
+      return;
+    }
+    try {
+      const r = await usersActions({ type: 'RESEND_INVITE', id });
+      if (!r.success) throw new Error(r.error || 'Failed');
+      setNotice(
+        r.invitation === 'sent'
+          ? t('users.inviteSent')
+          : r.invitation === 'existing-account'
+            ? t('users.inviteExistingAccount')
+            : null
+      );
+      if (r.invitation === 'failed') {
+        setError(
+          `${t('users.inviteFailed')}${
+            r.invitationError ? ` — ${r.invitationError}` : ''
+          }`
+        );
+      }
+      await fetchUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('users.inviteFailed'));
+      await fetchUsers();
+    } finally {
+      setInvitingFor(null);
+    }
+  };
+
   const handleRemoveUser = async () => {
     if (!removeTarget || removalLock.current || !isAdmin) return;
     removalLock.current = true;
@@ -243,7 +319,9 @@ export default function UsersSection() {
         setUsers((prev) => prev.filter((u) => u.id !== targetId));
         setRemoveTarget(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('users.errorRemoveUser'));
+        setError(
+          err instanceof Error ? err.message : t('users.errorRemoveUser')
+        );
         setRemoveTarget(null);
       } finally {
         removalLock.current = false;
@@ -341,7 +419,9 @@ export default function UsersSection() {
         setEditingNameFor(null);
         setEditedName('');
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('users.errorUpdateName'));
+        setError(
+          err instanceof Error ? err.message : t('users.errorUpdateName')
+        );
       } finally {
         setSavingNameFor(null);
       }
@@ -368,7 +448,11 @@ export default function UsersSection() {
     admin: t('users.roleAdmin'),
     editor: t('users.roleEditor'),
   };
-  const adminCount = users.filter((u) => u.role === 'admin').length;
+  // Usable privileged access is admin OR superadmin: the last-admin control
+  // must not lock a sole admin while an owner superadmin still holds access.
+  const adminCount = users.filter(
+    (u) => isCmsAdminRole(u.role) && !u.email?.startsWith('dummy-')
+  ).length;
 
   if (isLoading)
     return (
@@ -384,6 +468,16 @@ export default function UsersSection() {
         description={t('users.subtitle')}
       />
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
+
+      {notice && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-lg border border-green-500/30 bg-green-500/5 px-4 py-3"
+        >
+          <Check className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
+          <p className="text-sm text-green-600 dark:text-green-400">{notice}</p>
+        </div>
+      )}
 
       {!isAdmin && (
         <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3">
@@ -427,7 +521,14 @@ export default function UsersSection() {
               <button
                 key={type}
                 type="button"
-                onClick={() => setAddType(type)}
+                onClick={() => {
+                  setAddType(type);
+                  // Dummy identities are unusable by design, so they are
+                  // editor-only; never leave a privileged role selected.
+                  if (type === 'dummy') setNewUserRole('editor');
+                  setError(null);
+                  setNotice(null);
+                }}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
                   addType === type
                     ? 'bg-surface-raised text-text-main'
@@ -493,6 +594,8 @@ export default function UsersSection() {
                 cmsRole={newUserRole}
                 labels={roleLabels}
                 label={t('users.roleLabel')}
+                actorRole={actorRole ?? undefined}
+                disabled={addType === 'dummy'}
                 onChange={(r) => {
                   setNewUserRole(r);
                   setError(null);
@@ -542,6 +645,11 @@ export default function UsersSection() {
               (user.id && au.profile?.id === user.id));
           const isLastAdmin = au.role === 'admin' && adminCount === 1;
           const isDummy = !!au.email?.startsWith('dummy-');
+          const canManage = actorRole
+            ? canManageCmsRole(actorRole, au.role)
+            : false;
+          // An email row that never signed in can be re-invited explicitly.
+          const canInvite = canManage && !isDummy && !hasProfile && !!au.email;
           const isEditing = editingNameFor === au.profile?.id;
           const isUploading = uploadingAvatarFor === au.profile?.id;
           const displayName =
@@ -576,7 +684,7 @@ export default function UsersSection() {
               className={`${editorRowClass} flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4`}
             >
               <div className="flex min-w-0 flex-1 items-center gap-3">
-                {hasProfile && isAdmin && !isCurrentUser ? (
+                {hasProfile && canManage && !isCurrentUser ? (
                   <>
                     <button
                       type="button"
@@ -684,7 +792,7 @@ export default function UsersSection() {
                         <span className="truncate font-medium text-text-main">
                           {displayName}
                         </span>
-                        {hasProfile && isAdmin && !isCurrentUser && (
+                        {hasProfile && canManage && !isCurrentUser && (
                           <button
                             type="button"
                             aria-label={`${t('common.edit')} — ${displayName}`}
@@ -725,9 +833,14 @@ export default function UsersSection() {
                           {au.github_username}
                         </span>
                       )}
-                      {!hasProfile && !isDummy && (
+                      {!hasProfile && !isDummy && !au.invited_at && (
                         <span className="text-amber-500">
                           {t('users.notLoggedInYet')}
+                        </span>
+                      )}
+                      {!hasProfile && !isDummy && !!au.invited_at && (
+                        <span className="text-green-500">
+                          {t('users.invited')}
                         </span>
                       )}
                       {isLastAdmin && !isCurrentUser && (
@@ -740,37 +853,71 @@ export default function UsersSection() {
                 </div>
               </div>
 
-              {isAdmin && !isCurrentUser && (
+              {!isCurrentUser && (
                 <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                  <RoleSelect
-                    cmsRole={au.role}
-                    labels={roleLabels}
-                    label={t('users.roleLabel')}
-                    editorDisabled={isLastAdmin}
-                    disabled={updatingRoleFor === au.id || removing}
-                    onChange={(nr) => {
-                      if (isLastAdmin && nr === 'editor') {
-                        setError(t('users.cannotDemoteLastAdmin'));
-                        return;
-                      }
-                      handleUpdateRole(au.id, nr);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setRemoveTarget(au)}
-                    disabled={
-                      removing ||
-                      updatingRoleFor !== null ||
-                      uploadingAvatarFor !== null ||
-                      savingNameFor !== null ||
-                      isSubmitting
-                    }
-                    aria-label={t('users.removeUser')}
-                    className="flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-text-dim transition-colors hover:bg-surface-raised hover:text-red-400"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {canManage ? (
+                    <>
+                      {/* Dummy identities are editor-only (server-enforced),
+                          so their role control never offers an admin
+                          promotion: disable it instead of trusting the UI. */}
+                      <RoleSelect
+                        cmsRole={au.role}
+                        labels={roleLabels}
+                        label={t('users.roleLabel')}
+                        actorRole={actorRole ?? undefined}
+                        editorDisabled={isLastAdmin}
+                        disabled={
+                          isDummy ||
+                          updatingRoleFor === au.id ||
+                          removing ||
+                          invitingFor === au.id
+                        }
+                        onChange={(nr) => {
+                          if (isLastAdmin && nr === 'editor') {
+                            setError(t('users.cannotDemoteLastAdmin'));
+                            return;
+                          }
+                          handleUpdateRole(au.id, nr);
+                        }}
+                      />
+                      {canInvite && (
+                        <button
+                          type="button"
+                          onClick={() => void handleResendInvite(au.id)}
+                          disabled={
+                            invitingFor !== null ||
+                            removing ||
+                            updatingRoleFor !== null
+                          }
+                          className={`${editorSecondaryButtonClass} inline-flex items-center gap-1.5`}
+                        >
+                          <Mail className="h-3.5 w-3.5" />
+                          {t('users.resendInvite')}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setRemoveTarget(au)}
+                        disabled={
+                          removing ||
+                          updatingRoleFor !== null ||
+                          uploadingAvatarFor !== null ||
+                          savingNameFor !== null ||
+                          invitingFor !== null ||
+                          isSubmitting
+                        }
+                        aria-label={t('users.removeUser')}
+                        className="flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-text-dim transition-colors hover:bg-surface-raised hover:text-red-400"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </>
+                  ) : (
+                    // Peer admin / superadmin rows are read-only here: only a
+                    // higher role (or a SQL bootstrap for superadmin) may
+                    // change them.
+                    <RoleChip cmsRole={au.role} />
+                  )}
                 </div>
               )}
             </article>

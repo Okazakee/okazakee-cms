@@ -482,14 +482,10 @@ export default function AccountSection() {
               {t('account.roleLabel')}
             </p>
             <div className="rounded-lg border border-border-subtle bg-surface-base px-3 py-2">
-              {user.role === 'admin' ? (
-                <RoleChip cmsRole="admin" />
-              ) : user.role === 'editor' ? (
-                <RoleChip cmsRole="editor" />
+              {user.role ? (
+                <RoleChip cmsRole={user.role} />
               ) : (
-                <span className="px-2 py-0.5 text-xs text-text-dim">
-                  {user.role || 'user'}
-                </span>
+                <span className="px-2 py-0.5 text-xs text-text-dim">user</span>
               )}
             </div>
             <p className="mt-1 text-xs text-text-dim">
@@ -506,169 +502,174 @@ export default function AccountSection() {
             <Fingerprint className="h-5 w-5 text-text-dim" />
             {t('account.passkeysTitle')}
           </h2>
-        <p className="mb-4 text-sm text-text-muted">
-          {t('account.passkeysDesc')}
-        </p>
-
-        <ErrorBanner message={passkeysError} />
-
-        {passkeysLoading ? (
-          <div className="flex justify-center py-4">
-            <span className="h-6 w-6 animate-spin rounded-full border-2 border-accent-violet border-t-transparent" />
-          </div>
-        ) : passkeys.length === 0 ? (
           <p className="mb-4 text-sm text-text-muted">
-            {t('account.passkeysEmpty')}
+            {t('account.passkeysDesc')}
           </p>
-        ) : (
-          <ul className="mb-4 space-y-2">
-            {passkeys.map((passkey) => (
-              <li
-                key={passkey.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-base px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-text-main">
-                    {passkey.friendly_name || t('account.passkeyUnnamed')}
-                  </p>
-                  <p className="text-xs text-text-dim">
-                    {passkey.last_used_at
-                      ? t('account.passkeyLastUsed', {
-                          lastUsed: new Date(
-                            passkey.last_used_at
-                          ).toLocaleDateString(),
-                        })
-                      : t('account.passkeyNeverUsed')}
-                  </p>
-                </div>
+
+          <ErrorBanner message={passkeysError} />
+
+          {passkeysLoading ? (
+            <div className="flex justify-center py-4">
+              <span className="h-6 w-6 animate-spin rounded-full border-2 border-accent-violet border-t-transparent" />
+            </div>
+          ) : passkeys.length === 0 ? (
+            <p className="mb-4 text-sm text-text-muted">
+              {t('account.passkeysEmpty')}
+            </p>
+          ) : (
+            <ul className="mb-4 space-y-2">
+              {passkeys.map((passkey) => (
+                <li
+                  key={passkey.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border-subtle bg-surface-base px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-text-main">
+                      {passkey.friendly_name || t('account.passkeyUnnamed')}
+                    </p>
+                    <p className="text-xs text-text-dim">
+                      {passkey.last_used_at
+                        ? t('account.passkeyLastUsed', {
+                            lastUsed: new Date(
+                              passkey.last_used_at
+                            ).toLocaleDateString(),
+                          })
+                        : t('account.passkeyNeverUsed')}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPasskeyToDelete(passkey)}
+                    disabled={isDeletingPasskey}
+                    className="shrink-0 rounded-lg p-2 text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
+                    aria-label={t('account.passkeyDeleteButton')}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {passkeyToDelete ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3">
+              <p className="min-w-0 text-sm text-red-400">
+                {t('account.passkeyDeleteConfirm', {
+                  name:
+                    passkeyToDelete.friendly_name ||
+                    t('account.passkeyUnnamed'),
+                })}
+              </p>
+              <div className="flex shrink-0 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPasskeyToDelete(passkey)}
+                  onClick={() => setPasskeyToDelete(null)}
                   disabled={isDeletingPasskey}
-                  className="shrink-0 rounded-lg p-2 text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50"
-                  aria-label={t('account.passkeyDeleteButton')}
+                  className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {t('common.cancel')}
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {passkeyToDelete ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3">
-            <p className="min-w-0 text-sm text-red-400">
-              {t('account.passkeyDeleteConfirm', {
-                name:
-                  passkeyToDelete.friendly_name || t('account.passkeyUnnamed'),
-              })}
-            </p>
-            <div className="flex shrink-0 gap-2">
-              <button
-                type="button"
-                onClick={() => setPasskeyToDelete(null)}
-                disabled={isDeletingPasskey}
-                className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised"
-              >
-                {t('common.cancel')}
-              </button>
-              <button
-                type="button"
-                onClick={handleDeletePasskey}
-                disabled={isDeletingPasskey}
-                className="flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:opacity-50"
-              >
-                {isDeletingPasskey && (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                )}
-                {t('account.passkeyDeleteButton')}
-              </button>
+                <button
+                  type="button"
+                  onClick={handleDeletePasskey}
+                  disabled={isDeletingPasskey}
+                  className="flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:opacity-50"
+                >
+                  {isDeletingPasskey && (
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  )}
+                  {t('account.passkeyDeleteButton')}
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={handleRegisterPasskey}
-            disabled={isRegisteringPasskey}
-            className="flex items-center gap-1.5 rounded-lg bg-accent-violet-deep px-3 py-1.5 text-sm text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
-          >
-            {isRegisteringPasskey ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
-            {isRegisteringPasskey
-              ? t('account.addingPasskey')
-              : t('account.addPasskey')}
-          </button>
-        )}
-      </section>
+          ) : (
+            <button
+              type="button"
+              onClick={handleRegisterPasskey}
+              disabled={isRegisteringPasskey}
+              className="flex items-center gap-1.5 rounded-lg bg-accent-violet-deep px-3 py-1.5 text-sm text-white transition-colors hover:bg-accent-violet disabled:opacity-50"
+            >
+              {isRegisteringPasskey ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              {isRegisteringPasskey
+                ? t('account.addingPasskey')
+                : t('account.addPasskey')}
+            </button>
+          )}
+        </section>
       )}
 
-      {/* Account deletion is meaningless without a real identity. */}
-      {!demoMode && (
+      {/*
+        Account deletion is meaningless without a real identity, and a
+        superadmin account is provisioned out of band: no CMS action can
+        remove it (the server refuses too), so the control is not offered.
+      */}
+      {!demoMode && user.role !== 'superadmin' && (
         <section className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6">
-        <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-red-400">
-          <Trash2 className="h-5 w-5" />
-          {t('account.dangerZoneTitle')}
-        </h2>
-        <p className="mb-4 text-sm text-text-muted">
-          {t('account.dangerZoneDesc')}
-        </p>
+          <h2 className="mb-2 flex items-center gap-2 text-lg font-bold text-red-400">
+            <Trash2 className="h-5 w-5" />
+            {t('account.dangerZoneTitle')}
+          </h2>
+          <p className="mb-4 text-sm text-text-muted">
+            {t('account.dangerZoneDesc')}
+          </p>
 
-        {showDeleteConfirm ? (
-          <div className="space-y-4">
-            <div className="rounded-lg border border-red-500/40 bg-surface-card p-4">
-              <p className="mb-2 font-semibold text-red-400">
-                {t('account.confirmDeleteTitle')}
-              </p>
-              <p className="text-sm text-text-muted">
-                {t('account.confirmDeleteDesc')}
-              </p>
+          {showDeleteConfirm ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-red-500/40 bg-surface-card p-4">
+                <p className="mb-2 font-semibold text-red-400">
+                  {t('account.confirmDeleteTitle')}
+                </p>
+                <p className="text-sm text-text-muted">
+                  {t('account.confirmDeleteDesc')}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleDeleteAccount}
+                  disabled={isDeleting}
+                  className="flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isDeleting ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      {t('account.deleting')}
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4" />
+                      {t('account.confirmDeleteButton')}
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setError(null);
+                  }}
+                  disabled={isDeleting}
+                  className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised disabled:opacity-50"
+                >
+                  {t('common.cancel')}
+                </button>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleDeleteAccount}
-                disabled={isDeleting}
-                className="flex items-center gap-2 rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white transition-colors hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isDeleting ? (
-                  <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    {t('account.deleting')}
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-4 w-4" />
-                    {t('account.confirmDeleteButton')}
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDeleteConfirm(false);
-                  setError(null);
-                }}
-                disabled={isDeleting}
-                className="rounded-lg bg-surface-base px-3 py-1.5 text-sm text-text-main transition-colors hover:bg-surface-raised disabled:opacity-50"
-              >
-                {t('common.cancel')}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-500/20 hover:text-red-300"
-          >
-            <Trash2 className="h-4 w-4" />
-            {t('account.deleteAccount')}
-          </button>
-        )}
-      </section>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-sm text-red-400 transition-colors hover:bg-red-500/20 hover:text-red-300"
+            >
+              <Trash2 className="h-4 w-4" />
+              {t('account.deleteAccount')}
+            </button>
+          )}
+        </section>
       )}
     </div>
   );

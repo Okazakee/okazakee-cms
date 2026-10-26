@@ -3,7 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { encode as blurkitEncode } from 'blurkit/node';
 import { getCmsStorageOrigin } from '@/libs/cms/storage/bucket';
 import { getCmsAdminClient } from '@/libs/cms/supabase/admin';
-import { FALLBACK_BLUR_DATA_URL, isValidBlurPlaceholder } from '@/utils/blurhashUtils';
+import {
+  FALLBACK_BLUR_DATA_URL,
+  isValidBlurPlaceholder,
+} from '@/utils/blurhashUtils';
 // Pure validation helpers live in @/utils/cms/validation (unit-tested).
 // Re-exported here to keep every existing call site unchanged.
 import {
@@ -13,9 +16,14 @@ import {
   isValidHttpUrl,
   isValidUrl,
   sanitizeFilename,
+  validateImageBytes,
   validateImageFile,
+  validateImageFileContent,
+  validatePdfBytes,
   validatePdfFile,
+  validatePdfFileContent,
 } from '@/utils/cms/validation';
+import { type CmsRole, isCmsAdminRole } from '@/utils/cms/roles';
 import { isAnimatedWebpBytes } from '@/utils/cms/webpAnimation';
 import { createClient } from '@/utils/supabase/server';
 import {
@@ -32,8 +40,12 @@ export {
   isValidHttpUrl,
   isValidUrl,
   sanitizeFilename,
+  validateImageBytes,
   validateImageFile,
+  validateImageFileContent,
+  validatePdfBytes,
   validatePdfFile,
+  validatePdfFileContent,
 };
 
 type ServerSupabaseClient = Awaited<ReturnType<typeof createClient>>;
@@ -48,7 +60,7 @@ export type CmsActionContext = {
     githubUserId: string | null;
     githubUsername: string | null;
   };
-  role: string | null;
+  role: CmsRole | null;
 };
 
 export async function getCmsActionContext(
@@ -74,30 +86,28 @@ export async function getCmsActionContext(
   // cms_allowed_users since the hardening (anon/authenticated = no access).
   // Order: githubUserID -> verified-email (returns immediately) -> legacy
   // display handle. No user_metadata trust anywhere.
-  const role =
+  const role: CmsRole | null =
     requiredRole === 'authenticated'
       ? null
-      : (
+      : ((
           await findAllowedCmsUser(getCmsAdminClient(), {
             email: verifiedEmail,
             githubUserId,
             githubUsernameLegacy: githubUsername,
           })
-        )?.role || null;
+        )?.role ?? null);
 
   if (requiredRole === 'allowlisted' && !role) {
     throw new Error('Unauthorized: You are not allowlisted for the CMS');
   }
 
-  if (requiredRole === 'admin' && role !== 'admin') {
+  if (requiredRole === 'admin' && !isCmsAdminRole(role)) {
     throw new Error('Unauthorized: Admin access required');
   }
 
   if (
     requiredRole === 'post-writer' &&
-    !CMS_POST_WRITER_ROLES.includes(
-      role as (typeof CMS_POST_WRITER_ROLES)[number]
-    )
+    !(role !== null && CMS_POST_WRITER_ROLES.includes(role))
   ) {
     throw new Error(
       'Unauthorized: You do not have permission to create or edit posts'
@@ -136,8 +146,16 @@ export async function requireAdmin(): Promise<{ id: string; email: string }> {
   return { id: context.user.id, email: context.user.email };
 }
 
-/** Roles that are allowed to create/update blog and portfolio posts (must match RLS if using JWT role) */
-const CMS_POST_WRITER_ROLES = ['admin', 'editor'] as const;
+/**
+ * Roles that are allowed to create/update blog and portfolio posts (must match
+ * RLS if using JWT role). Superadmin is a superset of admin and must keep every
+ * editorial permission. Role policy is owned by `@/utils/cms/roles`.
+ */
+const CMS_POST_WRITER_ROLES: readonly CmsRole[] = [
+  'superadmin',
+  'admin',
+  'editor',
+];
 
 /**
  * Verifies the user is in cms_allowed_users with a role that can create posts.
@@ -351,8 +369,25 @@ export async function prepareImageUpload(
     return { success: false, error: validation.error || 'Invalid image file' };
   }
 
+  // Authoritative byte check: signature, declared-MIME agreement and trailer
+  // completeness run before any buffer is processed or stored.
+  const content = await validateImageFileContent(file);
+  if (!content.isValid) {
+    return { success: false, error: content.error || 'Invalid image file' };
+  }
+
   if (file.type === 'image/webp') {
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // The passthrough branch stores client bytes verbatim, so the full RIFF
+    // container (declared size + chunk walk) is verified first.
+    const byteValidation = validateImageBytes(buffer, file.type);
+    if (!byteValidation.isValid) {
+      return {
+        success: false,
+        error: byteValidation.error || 'Invalid image file',
+      };
+    }
 
     // Static WebP is already the canonical upload format (the browser canvas
     // pipeline wrote it), so it is stored as-is: re-encoding would only add
@@ -447,6 +482,13 @@ export async function uploadPdfBuffer(
   label: string | undefined,
   buffer: Buffer
 ): Promise<{ publicUrl: string; path: string }> {
+  // Header/trailer completeness before the write: a spoofed or truncated
+  // document must never become a public resume link.
+  const content = validatePdfBytes(buffer);
+  if (!content.isValid) {
+    throw new Error(content.error ?? 'Please select a valid PDF file');
+  }
+
   const path = `${buildUniqueAssetPath(prefix, label)}.pdf`;
   const { error } = await supabase.storage.from(bucket).upload(path, buffer, {
     cacheControl: '3600',

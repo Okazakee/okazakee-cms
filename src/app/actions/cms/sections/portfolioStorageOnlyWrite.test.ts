@@ -4,6 +4,7 @@ import {
   type FakeSupabase,
   type Row,
 } from '@/testing/unit/supabaseFake';
+import { staticWebpFile as webpFile } from '@/testing/unit/fileFixtures';
 
 /**
  * Portfolio WRITE path: Storage-only Markdown. Same invariants as the blog
@@ -44,16 +45,6 @@ function pathFor(
   postId = 11
 ): string {
   return `portfolio/${postId}/${locale}/${sha256Hex(Buffer.from(markdown, 'utf8'))}.md`;
-}
-
-function webpFile(name = 'image.webp'): File {
-  return new File(
-    [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
-    name,
-    {
-      type: 'image/webp',
-    }
-  );
 }
 
 function fake(

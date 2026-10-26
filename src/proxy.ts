@@ -1,11 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import {
+  isCmsPublicPath,
   isLegacyCmsPath,
   stripLegacyCmsSegment,
 } from '@/utils/cmsRouteMatching';
 import { updateSession } from '@/utils/supabase/middleware';
 
-const REDIRECT_HEADER = 'x-redirected';
 // Demo showcase cookie (mirrors src/libs/demo/session.ts — kept as a
 // literal so the edge bundle never imports client modules).
 const DEMO_COOKIE_NAME = 'cms_demo';
@@ -46,24 +46,16 @@ function handleMiddlewareError(
     error: error instanceof Error ? error.message : 'Unknown error',
   });
 
-  // Fail closed for non-public paths, but avoid redirect loops
-  if (!request.headers.get(REDIRECT_HEADER)) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    const response = NextResponse.redirect(url);
-    response.headers.set(REDIRECT_HEADER, '1');
-    return response;
+  if (isCmsPublicPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
   }
-  return NextResponse.next();
+  const url = request.nextUrl.clone();
+  url.pathname = '/login';
+  return NextResponse.redirect(url);
 }
 
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  // Check redirect loop prevention
-  if (request.headers.get(REDIRECT_HEADER)) {
-    return NextResponse.next();
-  }
 
   // Skip processing for static assets, API routes - matches old matcher behavior
   // Exclude: api, _next/*, favicon.ico, assets/*, fonts/*, images/*, and files with extensions
@@ -96,6 +88,7 @@ export default async function proxy(request: NextRequest) {
     // without a Supabase session. This opens NO data: every server action
     // still enforces auth, and demo sections never call them.
     if (
+      (request.method === 'GET' || request.method === 'HEAD') &&
       safePathname === '/' &&
       request.cookies.get(DEMO_COOKIE_NAME)?.value === '1'
     ) {
@@ -117,7 +110,6 @@ export default async function proxy(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       const response = NextResponse.redirect(url);
-      response.headers.set(REDIRECT_HEADER, '1');
       return response;
     }
   } catch (error) {

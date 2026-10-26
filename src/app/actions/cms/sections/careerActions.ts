@@ -2,20 +2,16 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  buildUniqueAssetPath,
-  generateBlurhashFromBuffer,
   getAdminClient,
   getCmsActionContext,
   isValidDate,
   isValidHttpUrl,
   prepareImageUpload,
-  processImage,
   removePublicFileIfDifferent,
   removePublicFileIfPresent,
   removeStorageObjectBestEffort,
   requireAdmin,
   uploadImmutablePreparedImage,
-  validateImageFile,
 } from '@/app/actions/cms/utils/fileHelpers';
 import {
   batchFailureSummary,
@@ -36,7 +32,6 @@ import { invalidatePublicContent } from '@/libs/public-site/revalidation';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
 import { CAREER_ASSET_ROOT } from '@/libs/cms/storage/paths';
 import type { CareerEntry } from '@/types/fetchedData.types';
-import { isValidBlurPlaceholder } from '@/utils/blurhashUtils';
 import { createClient } from '@/utils/supabase/server';
 
 type CareerOperation =
@@ -711,9 +706,17 @@ async function uploadCareerLogo(
   blurhashURL?: string
 ): Promise<CareerResult> {
   try {
-    const fileValidation = validateImageFile(file);
-    if (!fileValidation.isValid) {
-      return { success: false, error: fileValidation.error };
+    // Same central pipeline as every other image upload: metadata pre-filter,
+    // byte signature/completeness check, 256x256 bound, animated-decode budget
+    // and the static-WebP byte passthrough. A rejected file writes nothing, so
+    // this legacy operation cannot bypass the upload contract.
+    const prepared = await prepareImageUpload(file, blurhashURL, {
+      maxWidth: 256,
+      maxHeight: 256,
+      quality: 80,
+    });
+    if (!prepared.success) {
+      return { success: false, error: prepared.error };
     }
 
     const admin = getAdminClient();
@@ -728,58 +731,20 @@ async function uploadCareerLogo(
       return { success: false, error: 'Career entry not found' };
     }
 
-    const isWebP = file.type === 'image/webp';
-    let buffer: Buffer;
-    let blurhash: string | undefined;
-    let format: 'webp' | 'png' = 'webp';
-
-    if (isWebP) {
-      const arrayBuffer = await file.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
-      blurhash = isValidBlurPlaceholder(blurhashURL)
-        ? blurhashURL
-        : await generateBlurhashFromBuffer(buffer);
-    } else {
-      const processed = await processImage(file);
-      if (!processed.success || !processed.buffer) {
-        return {
-          success: false,
-          error: processed.error || 'Failed to process image',
-        };
-      }
-      buffer = processed.buffer;
-      blurhash = isValidBlurPlaceholder(blurhashURL)
-        ? blurhashURL
-        : processed.blurhash;
-      format = processed.format ?? 'webp';
-    }
-
     // Unique immutable path: never overwrites the previous logo, so a failed
     // DB update cannot leave the row pointing at a deleted object. The
     // previous DB-referenced logo is removed AFTER the commit.
-    const fileBase = buildUniqueAssetPath(
+    const upload = await uploadImmutablePreparedImage(
+      admin,
+      bucket,
       CAREER_ASSET_ROOT,
-      existingCareer.company || 'company'
+      existingCareer.company || 'company',
+      prepared.image
     );
-    const fileName = `${fileBase}.${format === 'png' ? 'png' : 'webp'}`;
-
-    const { error: uploadError } = await admin.storage
-      .from(bucket)
-      .upload(fileName, buffer, {
-        cacheControl: '3600',
-        contentType: format === 'png' ? 'image/png' : 'image/webp',
-        upsert: false,
-      });
-
-    if (uploadError) throw uploadError;
-
-    const { data: urlData } = admin.storage
-      .from(bucket)
-      .getPublicUrl(fileName);
 
     const updateData: { logo: string; blurhashurl?: string | null } = {
-      logo: urlData.publicUrl,
-      blurhashurl: blurhash ?? null,
+      logo: upload.publicUrl,
+      blurhashurl: prepared.image.blurhash,
     };
 
     const { error: updateError } = await admin
@@ -788,7 +753,7 @@ async function uploadCareerLogo(
       .eq('id', careerId);
 
     if (updateError) {
-      await removeStorageObjectBestEffort(admin, bucket, fileName);
+      await removeStorageObjectBestEffort(admin, bucket, upload.path);
       throw updateError;
     }
 
@@ -798,7 +763,7 @@ async function uploadCareerLogo(
       admin,
       existingCareer.logo,
       bucket,
-      fileName
+      upload.path
     );
 
     const revalidation = await invalidatePublicContent({
@@ -807,7 +772,7 @@ async function uploadCareerLogo(
     });
     return {
       success: true,
-      data: { logo: urlData.publicUrl, blurhashURL: blurhash || '' },
+      data: { logo: upload.publicUrl, blurhashURL: prepared.image.blurhash },
       revalidation,
     };
   } catch (error) {

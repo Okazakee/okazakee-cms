@@ -5,7 +5,11 @@ import {
   logCmsAuth,
   lookupAllowedCmsUserViaRpc,
 } from '@/app/actions/cms/utils/auth';
-import { supabasePublishableKey, supabaseUrl } from '@/config/shared';
+import {
+  supabasePublishableKey,
+  supabaseSchema,
+  supabaseUrl,
+} from '@/config/shared';
 import { isAuthPagePath, isCmsPublicPath } from '@/utils/cmsRouteMatching';
 
 /* PLEASE REFER TO https://supabase.com/docs/guides/auth/server-side/nextjs?queryGroups=router&router=app */
@@ -102,12 +106,19 @@ export async function updateSession(request: NextRequest) {
 
   if (user && !isPublic) {
     // Allowlist is internal data: the middleware (Edge Runtime) calls the
-    // SECURITY DEFINER RPC — identity derived from the JWT, no parameters.
-    const allowlistMatch = await lookupAllowedCmsUserViaRpc(supabase);
+    // SECURITY DEFINER RPC — identity derived from the JWT, and the schema
+    // argument only selects which OWN-identity allowlist is read. This client
+    // must NOT switch its PostgREST schema (`db.schema`): the RPC exists only
+    // in public, while the dev/prod choice is the RPC argument.
+    const allowlistMatch = await lookupAllowedCmsUserViaRpc(
+      supabase,
+      supabaseSchema
+    );
 
     if (!allowlistMatch) {
       logCmsAuth('middleware-unauthorized', {
         pathname,
+        schema: supabaseSchema,
         userId: user.id,
         hasEmail: Boolean(user.email),
         hasGithubId: Boolean(getUserGithubId(user)),
@@ -127,6 +138,7 @@ export async function updateSession(request: NextRequest) {
 
     logCmsAuth('middleware-authorized', {
       pathname,
+      schema: supabaseSchema,
       userId: user.id,
       role: allowlistMatch.role,
       matchSource: allowlistMatch.matchSource,

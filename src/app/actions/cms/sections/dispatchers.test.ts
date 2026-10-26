@@ -3,6 +3,10 @@ import {
   createFakeSupabase,
   type FakeSupabase,
 } from '@/testing/unit/supabaseFake';
+import {
+  minimalPdfFile as pdfFile,
+  staticWebpFile as webpFile,
+} from '@/testing/unit/fileFixtures';
 
 const h = vi.hoisted(() => ({
   fake: null as unknown as FakeSupabase,
@@ -52,22 +56,6 @@ function makeFake(
   extra: Partial<Parameters<typeof createFakeSupabase>[0]> = {}
 ): FakeSupabase {
   return createFakeSupabase({ tables, ...extra });
-}
-
-function webpFile(name = 'image.webp'): File {
-  return new File(
-    [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
-    name,
-    {
-      type: 'image/webp',
-    }
-  );
-}
-
-function pdfFile(name = 'resume.pdf'): File {
-  return new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], name, {
-    type: 'application/pdf',
-  });
 }
 
 const blogCreate = (title: string, tempId: string) => ({
@@ -353,6 +341,32 @@ describe('hero UPDATE_WITH_FILES staging is atomic', () => {
     });
 
     expect(result.success).toBe(false);
+    expect(h.fake.state.uploads).toEqual([]);
+    expect(h.fake.state.log.some((entry) => entry.mode === 'update')).toBe(
+      false
+    );
+  });
+
+  it('rejects a PDF-typed non-PDF before any upload (byte preflight)', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      hero_section: [{ id: 1, propic: null, resume_en: null }],
+    });
+
+    const result = await heroActions({
+      type: 'UPDATE_WITH_FILES',
+      files: {
+        propic: webpFile(),
+        resume_en: new File(
+          [new TextEncoder().encode('<html>not a pdf</html>')],
+          'resume.pdf',
+          { type: 'application/pdf' }
+        ),
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/valid PDF/i);
     expect(h.fake.state.uploads).toEqual([]);
     expect(h.fake.state.log.some((entry) => entry.mode === 'update')).toBe(
       false
@@ -853,6 +867,30 @@ describe('asset commit and cleanup authority', () => {
     expect(result.success).toBe(true);
     expect(h.fake.state.removed).toEqual([]);
   });
+
+  it('rejects a spoofed WebP on the legacy UPLOAD_LOGO route with zero writes', async () => {
+    h.fake = makeFake({
+      cms_allowed_users: ADMIN,
+      career_entries: [{ id: 1, company: 'Fixture', logo: null }],
+    });
+
+    const result = await careerActions({
+      type: 'UPLOAD_LOGO',
+      careerId: 1,
+      file: new File(
+        [new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0])],
+        'spoof.webp',
+        { type: 'image/webp' }
+      ),
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/incomplete|corrupted/i);
+    expect(h.fake.state.uploads).toEqual([]);
+    expect(h.fake.state.objects).toEqual({});
+    expect(h.fake.state.tables.career_entries[0]?.logo).toBeNull();
+  });
+
   it('never deletes a same-origin cross-bucket URL (prod object from a dev write)', async () => {
     // Old prod URL is readable but must be a cleanup no-op: the dev bucket
     // owns nothing at that path, so deleting would remove a prod object.
@@ -904,8 +942,15 @@ describe('asset commit and cleanup authority', () => {
   it('cleans the staged avatar when the profile update fails', async () => {
     h.fake = makeFake(
       {
-        cms_allowed_users: ADMIN,
-        user_profiles: [{ id: 'profile-1', avatar_url: null }],
+        cms_allowed_users: [
+          { id: 1, email: 'admin@example.com', role: 'admin' },
+          { id: 2, email: 'member@example.com', role: 'editor' },
+        ],
+        // The protected route only edits an allowlist-bound target, so the
+        // fixture carries the member identity it authorizes against.
+        user_profiles: [
+          { id: 'profile-1', email: 'member@example.com', avatar_url: null },
+        ],
       },
       {
         failNext: {
@@ -941,11 +986,16 @@ describe('asset commit and cleanup authority', () => {
 
   it('rejects over-long display names on both profile update paths', async () => {
     h.fake = makeFake({
-      cms_allowed_users: ADMIN,
-      user_profiles: [{ id: 'user-1', display_name: 'Old' }],
+      cms_allowed_users: [
+        { id: 1, email: 'admin@example.com', role: 'admin' },
+        { id: 2, email: 'member@example.com', role: 'editor' },
+      ],
+      user_profiles: [
+        { id: 'profile-1', email: 'member@example.com', display_name: 'Old' },
+      ],
     });
     expect(
-      (await updateUserDisplayName('user-1', 'x'.repeat(101))).success
+      (await updateUserDisplayName('profile-1', 'x'.repeat(101))).success
     ).toBe(false);
     const form = new FormData();
     form.set('displayName', 'x'.repeat(101));

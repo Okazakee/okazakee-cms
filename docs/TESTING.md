@@ -18,9 +18,9 @@ touching production data or credentials.
 - Deterministic seed content and translations
   (`src/testing/sql/0002_seed_content.sql`) whose asset URLs point at loopback
   Storage.
-- Real GoTrue identities (admin / editor / non-allowlisted outsider) created
-  with local, non-secret test passwords, and real `@supabase/ssr` session
-  cookies for browser seeding.
+- Real GoTrue identities (superadmin / admin / editor / non-allowlisted
+  outsider) created with local, non-secret test passwords, and real
+  `@supabase/ssr` session cookies for browser seeding.
 - The real Next.js application, snapshotted into a `/tmp` overlay, on
   `http://localhost:3100`.
 - A standalone test server on `http://localhost:3200` that mirrors the public
@@ -99,6 +99,7 @@ Accounts (local, non-secret test credentials):
 
 | Key | Email | Password | Allowlist role |
 |---|---|---|---|
+| `superadmin` | `superadmin@isolated.test` | `isolated-superadmin-pw` | `superadmin` |
 | `admin` | `admin@isolated.test` | `isolated-admin-pw` | `admin` |
 | `editor` | `editor@isolated.test` | `isolated-editor-pw` | `editor` |
 | `outsider` | `outsider@isolated.test` | `isolated-outsider-pw` | none (denied) |

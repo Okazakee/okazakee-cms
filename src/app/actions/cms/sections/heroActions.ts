@@ -11,6 +11,7 @@ import {
   uploadPdfBuffer,
   validateImageFile,
   validatePdfFile,
+  validatePdfFileContent,
 } from '@/app/actions/cms/utils/fileHelpers';
 import type { MutationResult } from '@/libs/cms/mutationResult';
 import { getCmsStorageBucket } from '@/libs/cms/storage/bucket';
@@ -298,11 +299,19 @@ async function updateWithFiles(
     if (!validation.isValid) {
       return { success: false, error: validation.error };
     }
+    const content = await validatePdfFileContent(files.resume_en);
+    if (!content.isValid) {
+      return { success: false, error: content.error };
+    }
   }
   if (files.resume_it) {
     const validation = validatePdfFile(files.resume_it);
     if (!validation.isValid) {
       return { success: false, error: validation.error };
+    }
+    const content = await validatePdfFileContent(files.resume_it);
+    if (!content.isValid) {
+      return { success: false, error: content.error };
     }
   }
 

@@ -39,6 +39,7 @@ import ThemeToggle from '@/components/layout/ThemeToggle';
 import { useDialogFocus } from '@/hooks/cms/useDialogFocus';
 import { exitDemoSession } from '@/libs/demo/session';
 import { useCmsStore } from '@/store/cmsStore';
+import { isCmsAdminRole } from '@/utils/cms/roles';
 import { createClient } from '@/utils/supabase/client';
 
 // Public website URL for cross-app links (CMS Home button).
@@ -184,7 +185,7 @@ const SidePanel = ({ isOpen = true, onClose }: SidePanelProps) => {
     setDemoMode,
   } = useCmsStore();
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = isCmsAdminRole(user?.role);
 
   const sectionLabelMap: Record<string, string> = {
     hero: t('sidebar.nav.hero'),

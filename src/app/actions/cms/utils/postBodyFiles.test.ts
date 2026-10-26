@@ -2,8 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { FALLBACK_BLUR_DATA_URL } from '@/utils/blurhashUtils';
 import type { BodyImageUpload } from '@/utils/cms/postBody';
+import { staticWebpFile } from '@/testing/unit/fileFixtures';
 import {
   applyBodyImageRewrites,
+  BodyUploadError,
+  bodyUploadStaged,
   cleanupOrphanedBodyImages,
   removeBodyUploads,
   uploadBodyImages,
@@ -14,12 +17,13 @@ const ORIGIN = 'https://x.test';
 const BUCKET = 'website-dev';
 const PREFIX = 'blog/7';
 
-function webpFile(name = 'shot.webp'): File {
-  return new File([new Uint8Array(64)], name, { type: 'image/webp' });
-}
-
 function stagedFile(localId: string, alt = 'my-photo'): BodyImageUpload {
-  return { localId, file: webpFile(), blurhash: FALLBACK_BLUR_DATA_URL, alt };
+  return {
+    localId,
+    file: staticWebpFile('shot.webp'),
+    blurhash: FALLBACK_BLUR_DATA_URL,
+    alt,
+  };
 }
 
 function makeFake() {
@@ -50,10 +54,10 @@ function makeFake() {
 describe('validateBodyImagePayload', () => {
   it('accepts resolvable pending refs and legacy lines', () => {
     expect(
-      validateBodyImagePayload([stagedFile('a')], [
-        'text ![cap-pending:a](blob:u)',
-        '![No dash](https://x.test/f.webp)',
-      ])
+      validateBodyImagePayload(
+        [stagedFile('a')],
+        ['text ![cap-pending:a](blob:u)', '![No dash](https://x.test/f.webp)']
+      )
     ).toBeNull();
   });
 
@@ -97,6 +101,36 @@ describe('uploadBodyImages + applyBodyRewrites', () => {
     );
     expect(bodies.body_en).toBe(`x ${committed}`);
     expect(bodies.body_it).toBe(`y ${committed}`);
+  });
+
+  it('rejects a spoofed later image and reports the staged paths for rollback', async () => {
+    const { client, uploaded } = makeFake();
+    const spoofed: BodyImageUpload = {
+      localId: 'b',
+      file: new File(
+        [new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')],
+        'evil.webp',
+        { type: 'image/webp' }
+      ),
+      blurhash: FALLBACK_BLUR_DATA_URL,
+      alt: 'bad',
+    };
+
+    let thrown: unknown;
+    try {
+      await uploadBodyImages(client, BUCKET, PREFIX, 'post', [
+        stagedFile('a'),
+        spoofed,
+      ]);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(BodyUploadError);
+    expect(bodyUploadStaged(thrown)).toHaveLength(1);
+    // Only the valid first image reached Storage; the spoofed one never did.
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0]?.startsWith(`${BUCKET}/${PREFIX}/`)).toBe(true);
   });
 
   it('removeBodyUploads deletes every staged path', async () => {

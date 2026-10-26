@@ -60,6 +60,51 @@ async function supabase(args, ctx) {
 }
 
 /**
+ * Migrations that exist only for the shared `dev_staging` clone (or its audit
+ * ledger). The isolated fixture has no `dev_staging` schema, so replaying one
+ * fails on the absent schema. The file name does not always carry the suffix,
+ * so the stragglers are listed explicitly.
+ */
+const DEV_ONLY_MIGRATIONS = new Set([
+  '20261005150208_add_site_settings_footer_identity.sql',
+  '20261005234758_create_cms_migration_audit_ledger.sql',
+  '20261008213304_cms_allowed_users_sequence_usage.sql',
+  '20261017160247_isolate_dev_author_profile_policy.sql',
+]);
+
+/**
+ * Migrations that mention `dev_staging` but also carry public-schema work, so
+ * they must run in the public fixture. `20261026125511_cms_superadmin_role.sql`
+ * guards its dev mirror with `to_regclass(...) is null`, which keeps it safe
+ * when the dev schema is absent.
+ */
+const MIXED_SCHEMA_MIGRATIONS = new Set([
+  '20261005120000_freeze_static_site_copy.sql',
+  '20261010000000_restore_public_content_objects.sql',
+  '20261017161925_optimize_indexes_public.sql',
+  '20261026125511_cms_superadmin_role.sql',
+]);
+
+const DEV_STAGING_REFERENCE = /\bdev_staging\b/;
+
+function isDevOnlyMigration(name) {
+  return name.endsWith('_dev_staging.sql') || DEV_ONLY_MIGRATIONS.has(name);
+}
+
+/**
+ * CLI output for a failed command. Supabase writes progress (image pulls,
+ * container logs) to stderr and the structured error — including the SQL
+ * failure from `db reset` — to stdout, so reporting stderr alone hides the
+ * real cause.
+ */
+function failureOutput(result) {
+  const detail = [result.stdout.trim(), result.stderr.trim()]
+    .filter(Boolean)
+    .join('\n');
+  return detail || '(no output)';
+}
+
+/**
  * Prepares the /tmp Supabase project: init, port/redirect patching, baseline
  * schema as the first migration, the repository migrations, and the seed.
  */
@@ -74,7 +119,7 @@ export async function prepareSupabaseProject(ctx) {
     // config.toml was written; only fail if the file is genuinely missing.
     if (init.code !== 0 && !existsSync(paths.configFile)) {
       throw new Error(
-        `supabase init failed (${init.code}): ${init.stderr || init.stdout}`
+        `supabase init failed (${init.code}): ${failureOutput(init)}`
       );
     }
   }
@@ -98,15 +143,21 @@ export async function prepareSupabaseProject(ctx) {
   await cp(seedSource, paths.seedFile);
 
   const repoMigrations = path.join(repoRoot, 'supabase', 'migrations');
-  // Dev-clone migrations must never be replayed into this isolated public
-  // baseline: their schema is deliberately absent here.
-  const entries = (await readdir(repoMigrations)).filter(
-    (name) =>
-      name.endsWith('.sql') &&
-      !name.endsWith('_dev_staging.sql') &&
-      name !== '20261005234758_create_cms_migration_audit_ledger.sql'
-  );
-  entries.sort();
+  const entries = [];
+  for (const name of (await readdir(repoMigrations)).sort()) {
+    if (!name.endsWith('.sql') || isDevOnlyMigration(name)) continue;
+    const sql = await readFile(path.join(repoMigrations, name), 'utf8');
+    if (DEV_STAGING_REFERENCE.test(sql) && !MIXED_SCHEMA_MIGRATIONS.has(name)) {
+      // A new dev-only migration without the `_dev_staging` suffix would
+      // otherwise be copied silently and only fail later inside `db reset`.
+      throw new Error(
+        `Migration ${name} references dev_staging but is not classified; add ` +
+          'it to DEV_ONLY_MIGRATIONS or MIXED_SCHEMA_MIGRATIONS in ' +
+          'src/testing/lib/supabase.mjs before preparing the public fixture.'
+      );
+    }
+    entries.push(name);
+  }
   for (const name of entries) {
     await cp(
       path.join(repoMigrations, name),
@@ -128,7 +179,7 @@ export async function startSupabase(ctx, { onLog } = {}) {
     );
     if (!status) {
       throw new Error(
-        `supabase start failed (${result.code}): ${result.stderr || result.stdout}`
+        `supabase start failed (${result.code}): ${failureOutput(result)}`
       );
     }
   }
@@ -149,9 +200,7 @@ export async function resetSupabase(ctx) {
       return status;
     }
     throw new Error(
-      `supabase db reset failed (${result.code}): ${
-        result.stderr || result.stdout
-      }`
+      `supabase db reset failed (${result.code}): ${failureOutput(result)}`
     );
   }
   return readSupabaseStatus(ctx);

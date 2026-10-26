@@ -1,8 +1,11 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { cmsConfig } from '@/config/cms';
+import { CMS_ROLES, type CmsRole, isCmsRole } from '@/utils/cms/roles';
 
-export const CMS_ALLOWED_ROLES = ['admin', 'editor'] as const;
-export type CmsRole = (typeof CMS_ALLOWED_ROLES)[number];
+// The role vocabulary/hierarchy lives in the client-safe shared module; this
+// server-only module re-exports it so existing imports keep working.
+export const CMS_ALLOWED_ROLES = CMS_ROLES;
+export type { CmsRole };
 
 export type CmsAllowlistMatch = {
   role: CmsRole;
@@ -104,11 +107,7 @@ export function getUserGithubUsername(user: User): string | null {
   const github = identities.find((entry) => entry?.provider === 'github');
   if (!github) return null;
   const data = github.identity_data ?? {};
-  const candidates = [
-    data.user_name,
-    data.preferred_username,
-    data.login,
-  ];
+  const candidates = [data.user_name, data.preferred_username, data.login];
   for (const candidate of candidates) {
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
@@ -162,12 +161,17 @@ export type FindAllowedCmsUserInput = {
 /**
  * Canonical CMS allowlist lookup (server-only, service_role client).
  *
- * Order is load-bearing and preserved from the pre-cutover behavior:
- * githubUserID match -> verified-email match (returns immediately) ->
- * legacy username ONLY as a dual-allowed transition fallback. The legacy
- * branch exists so old admins/editors still map while `github_user_id` is
+ * Order is load-bearing: immutable githubUserID match -> verified-email
+ * match. A *present* verified email decides: when it matches nothing the
+ * lookup returns null instead of falling through to the legacy handle
+ * (exact parity with public.is_admin_user() and the middleware RPC). The
+ * legacy handle branch therefore runs only for sessions with no verified
+ * email, as a dual-allowed transition fallback while `github_user_id` is
  * being backfilled; it must never authorize an editable `user_metadata`
  * value (callers pass the identity-derived display handle, not metadata).
+ *
+ * `email` must be the VERIFIED address (getVerifiedUserEmail), and only the
+ * exact CMS role tokens are accepted — anything else fails closed.
  */
 export async function findAllowedCmsUser(
   supabase: Pick<SupabaseClient, 'from'>,
@@ -197,11 +201,14 @@ export async function findAllowedCmsUser(
       .eq('github_user_id', githubUserId)
       .maybeSingle();
 
-    if (idMatch?.role && CMS_ALLOWED_ROLES.includes(idMatch.role as CmsRole)) {
-      return { role: idMatch.role as CmsRole, matchSource: 'github' };
+    if (isCmsRole(idMatch?.role)) {
+      return { role: idMatch.role, matchSource: 'github' };
     }
   }
 
+  // Verified email decides. An unmatched verified email fails closed: no
+  // legacy-handle fallthrough (previously allowed a different row to
+  // authorize a session whose verified email was never allowlisted).
   if (email) {
     const { data: emailMatch } = await supabase
       .from('cms_allowed_users')
@@ -209,12 +216,11 @@ export async function findAllowedCmsUser(
       .eq('email', email.toLowerCase())
       .maybeSingle();
 
-    if (
-      emailMatch?.role &&
-      CMS_ALLOWED_ROLES.includes(emailMatch.role as CmsRole)
-    ) {
-      return { role: emailMatch.role as CmsRole, matchSource: 'email' };
+    if (isCmsRole(emailMatch?.role)) {
+      return { role: emailMatch.role, matchSource: 'email' };
     }
+
+    return null;
   }
 
   if (githubUsernameLegacy) {
@@ -224,46 +230,64 @@ export async function findAllowedCmsUser(
       .eq('github_username', githubUsernameLegacy)
       .maybeSingle();
 
-    if (
-      githubMatch?.role &&
-      CMS_ALLOWED_ROLES.includes(githubMatch.role as CmsRole)
-    ) {
-      return { role: githubMatch.role as CmsRole, matchSource: 'github' };
+    if (isCmsRole(githubMatch?.role)) {
+      return { role: githubMatch.role, matchSource: 'github' };
     }
   }
 
   return null;
 }
 
+/** Schemas the identity RPC may read an allowlist from (exact whitelist). */
+const CMS_ALLOWLIST_SCHEMAS: Record<string, true> = {
+  public: true,
+  dev_staging: true,
+};
+
 /**
  * Edge-safe allowlist lookup for the Next.js middleware (Edge Runtime).
  *
  * The middleware cannot use the service_role client (anti-pattern: the
  * server secret would be embedded in the edge bundle). Instead it calls the
- * `cms_lookup_current_user` SECURITY DEFINER RPC, which derives the caller's
- * identity from the JWT (auth.uid()) — no caller-supplied identity
- * parameters, so an authenticated session cannot be used to enumerate the
- * allowlist by probing arbitrary emails/usernames. The RPC has a fixed
- * `search_path` and fully qualified table names, and is granted EXECUTE to
- * `authenticated` only; anon has no path to the allowlist.
+ * single `public.cms_lookup_current_user(p_schema)` SECURITY DEFINER RPC,
+ * which derives the caller's identity from the JWT (auth.uid()) — no
+ * caller-supplied identity, so an authenticated session cannot be used to
+ * enumerate an allowlist by probing arbitrary emails/usernames. The RPC has a
+ * fixed empty `search_path`, a whitelisted schema argument, values passed
+ * through `USING`, and is granted EXECUTE to `authenticated` only; anon has
+ * no path to any allowlist.
+ *
+ * `schema` selects which OWN-identity allowlist is read, never the identity:
+ * production passes `public`, while a deployment configured against
+ * `dev_staging` passes that schema so a dev-only invitee is authorized instead
+ * of being signed out by a production-only lookup. The RPC is always the
+ * public one (the Supabase client must NOT switch its PostgREST schema).
  */
 export async function lookupAllowedCmsUserViaRpc(
-  supabase: Pick<SupabaseClient, 'rpc'>
+  supabase: Pick<SupabaseClient, 'rpc'>,
+  schema: string = 'public'
 ): Promise<CmsAllowlistMatch | null> {
-  const { data } = await supabase.rpc('cms_lookup_current_user');
-
-  if (
-    data &&
-    typeof data === 'object' &&
-    'role' in data &&
-    'match_source' in data &&
-    CMS_ALLOWED_ROLES.includes((data as { role: string }).role as CmsRole)
-  ) {
-    return {
-      role: (data as { role: CmsRole }).role,
-      matchSource: (data as { match_source: 'email' | 'github' }).match_source,
-    };
+  // The database would return null for an unknown schema anyway; refusing
+  // locally keeps a misconfiguration from producing a pointless round trip.
+  if (CMS_ALLOWLIST_SCHEMAS[schema] !== true) {
+    logCmsAuth('allowlist-rpc-invalid-schema', { schema });
+    return null;
   }
 
-  return null;
+  const { data, error } = await supabase.rpc('cms_lookup_current_user', {
+    p_schema: schema,
+  });
+
+  if (error) {
+    logCmsAuth('allowlist-rpc-error', { schema, code: error.code ?? null });
+    return null;
+  }
+
+  if (!data || typeof data !== 'object') return null;
+  if (!('role' in data) || !isCmsRole(data.role)) return null;
+  if (!('match_source' in data)) return null;
+  const matchSource = data.match_source;
+  if (matchSource !== 'email' && matchSource !== 'github') return null;
+
+  return { role: data.role, matchSource };
 }

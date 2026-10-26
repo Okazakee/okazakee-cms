@@ -93,5 +93,10 @@
     "name": "add_content_storage_read_policy_dev_staging",
     "sourceFile": "supabase/migrations/20261017185848_add_content_storage_read_policy_dev_staging.sql",
     "version": "20261017185848"
+  },
+  {
+    "name": "cms_superadmin_role",
+    "sourceFile": "supabase/migrations/20261026125511_cms_superadmin_role.sql",
+    "version": "20261026125511"
   }
 ]

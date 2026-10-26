@@ -7,6 +7,10 @@ import {
   CONSTRAINTS_QUERY,
   type ContentStorageFacts,
   checkContentStorageIsolation,
+  DEV_RBAC_ALLOWLIST_ACL_QUERY,
+  DEV_RBAC_ROLE_CONSTRAINTS_QUERY,
+  DEV_RBAC_RPC_COPIES_QUERY,
+  DEV_RBAC_TRIGGERS_QUERY,
   EXPECTED_BODY_PATH_CHECKS,
   evaluateContentStorageIsolation,
   LEDGER_ROWS_QUERY,
@@ -732,6 +736,33 @@ describe('checkContentStorageIsolation — query wiring', () => {
   });
 });
 
+/** Live-shaped dev_staging RBAC mirror rows for the shared runDevCheck fixture. */
+const DEV_RBAC_CONSTRAINTS = [
+  {
+    constraint_name: 'cms_allowed_users_role_check',
+    contype: 'c',
+    definition:
+      "CHECK (role = ANY (ARRAY['editor'::text, 'admin'::text, 'superadmin'::text]))",
+  },
+];
+
+const DEV_RBAC_TRIGGERS = [
+  {
+    trigger_name: 'cms_allowed_users_guard_superadmin',
+    enabled: 'O',
+    trigger_type: 27,
+    function_schema: 'dev_staging',
+    function_name: 'cms_allowed_users_guard_superadmin',
+  },
+];
+
+const DEV_RBAC_ALLOWLIST_ACL = [
+  {
+    table_name: 'cms_allowed_users',
+    acl_raw: '{postgres=arwdDxt/postgres,service_role=arwdDxt/postgres}',
+  },
+];
+
 /**
  * The dev pointer-CHECK contract runs through `runDevCheck`; the ledger rows
  * are rebuilt from the real registry + source bytes so the history stage passes
@@ -760,6 +791,10 @@ async function devConstraintsFindings(
   const queryJson = async (sql: string): Promise<unknown[]> => {
     if (sql === LEDGER_ROWS_QUERY) return ledgerRows;
     if (sql === CONSTRAINTS_QUERY) return constraints;
+    if (sql === DEV_RBAC_ROLE_CONSTRAINTS_QUERY) return DEV_RBAC_CONSTRAINTS;
+    if (sql === DEV_RBAC_TRIGGERS_QUERY) return DEV_RBAC_TRIGGERS;
+    if (sql === DEV_RBAC_RPC_COPIES_QUERY) return [];
+    if (sql === DEV_RBAC_ALLOWLIST_ACL_QUERY) return DEV_RBAC_ALLOWLIST_ACL;
     return [];
   };
   const report = await runDevCheck({ repoRoot, queryJson });

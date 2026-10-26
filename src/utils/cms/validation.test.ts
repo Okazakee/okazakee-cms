@@ -5,9 +5,24 @@ import {
   isValidUrl,
   MAX_UPLOAD_SIZE_BYTES,
   sanitizeFilename,
+  validateImageBytes,
   validateImageFile,
+  validateImageFileContent,
+  validatePdfBytes,
   validatePdfFile,
+  validatePdfFileContent,
 } from '@/utils/cms/validation';
+import {
+  animatedWebpBytes,
+  avifBytes,
+  fileFromBytes,
+  gifBytes,
+  jpegBytes,
+  minimalPdfBytes,
+  minimalPdfFile,
+  pngBytes,
+  staticWebpBytes,
+} from '@/testing/unit/fileFixtures';
 
 function makeFile(name: string, type: string, size = 1024): File {
   return new File([new Uint8Array(size)], name, { type });
@@ -298,5 +313,187 @@ describe('isValidDate', () => {
     expect(isValidDate('')).toBe(false);
     expect(isValidDate('not-a-date')).toBe(false);
     expect(isValidDate('2026-99-99')).toBe(false);
+  });
+});
+
+describe('validateImageFileContent', () => {
+  it('accepts every supported raster format from real bytes', async () => {
+    const cases: Array<[Uint8Array<ArrayBuffer>, string, string]> = [
+      [staticWebpBytes(), 'static.webp', 'image/webp'],
+      [animatedWebpBytes(), 'animated.webp', 'image/webp'],
+      [pngBytes(), 'image.png', 'image/png'],
+      [jpegBytes(), 'photo.jpg', 'image/jpeg'],
+      [gifBytes(), 'image.gif', 'image/gif'],
+      [avifBytes(), 'image.avif', 'image/avif'],
+    ];
+    for (const [bytes, name, type] of cases) {
+      const result = await validateImageFileContent(
+        fileFromBytes(bytes, name, type)
+      );
+      expect(result.isValid).toBe(true);
+    }
+  });
+
+  it('accepts the legacy image/jpg alias for JPEG bytes', async () => {
+    const result = await validateImageFileContent(
+      fileFromBytes(jpegBytes(), 'photo.jpg', 'image/jpg')
+    );
+    expect(result.isValid).toBe(true);
+  });
+
+  it('rejects empty and near-empty files', async () => {
+    const empty = await validateImageFileContent(
+      fileFromBytes(new Uint8Array(0), 'empty.webp', 'image/webp')
+    );
+    expect(empty.isValid).toBe(false);
+    expect(empty.error).toMatch(/non-empty/i);
+
+    const tiny = await validateImageFileContent(
+      fileFromBytes(new Uint8Array(8), 'tiny.webp', 'image/webp')
+    );
+    expect(tiny.isValid).toBe(false);
+    expect(tiny.error).toMatch(/incomplete/i);
+  });
+
+  it('rejects SVG and HTML bytes even when declared as a raster image', async () => {
+    const svg = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'
+    );
+    const asPng = await validateImageFileContent(
+      fileFromBytes(svg, 'evil.png', 'image/png')
+    );
+    expect(asPng.isValid).toBe(false);
+    expect(asPng.error).toMatch(/SVG and HTML/i);
+
+    const html = new TextEncoder().encode(
+      '<!DOCTYPE html><html><script>alert(1)</script></html>'
+    );
+    const asWebp = await validateImageFileContent(
+      fileFromBytes(html, 'evil.webp', 'image/webp')
+    );
+    expect(asWebp.isValid).toBe(false);
+    expect(asWebp.error).toMatch(/SVG and HTML/i);
+  });
+
+  it('rejects content that disagrees with the declared MIME type', async () => {
+    const pngAsWebp = await validateImageFileContent(
+      fileFromBytes(pngBytes(), 'spoof.webp', 'image/webp')
+    );
+    expect(pngAsWebp.isValid).toBe(false);
+    expect(pngAsWebp.error).toMatch(/does not match/i);
+
+    const webpAsPng = await validateImageFileContent(
+      fileFromBytes(staticWebpBytes(), 'spoof.png', 'image/png')
+    );
+    expect(webpAsPng.isValid).toBe(false);
+    expect(webpAsPng.error).toMatch(/does not match/i);
+  });
+
+  it('rejects bytes with no supported raster signature', async () => {
+    const result = await validateImageFileContent(
+      fileFromBytes(new Uint8Array(64), 'fake.webp', 'image/webp')
+    );
+    expect(result.isValid).toBe(false);
+    expect(result.error).toMatch(/not a supported image/i);
+  });
+
+  it('rejects truncated containers', async () => {
+    const cases: Array<[Uint8Array, string, string]> = [
+      [staticWebpBytes().slice(0, -1), 'cut.webp', 'image/webp'],
+      [pngBytes().slice(0, -12), 'cut.png', 'image/png'],
+      [jpegBytes().slice(0, -2), 'cut.jpg', 'image/jpeg'],
+      [gifBytes().slice(0, -1), 'cut.gif', 'image/gif'],
+    ];
+    for (const [bytes, name, type] of cases) {
+      const result = await validateImageFileContent(
+        fileFromBytes(new Uint8Array(bytes), name, type)
+      );
+      expect(result.isValid).toBe(false);
+      expect(result.error).toMatch(/incomplete/i);
+    }
+  });
+});
+
+describe('validateImageBytes', () => {
+  it('accepts real buffers for every supported format', () => {
+    expect(validateImageBytes(staticWebpBytes(), 'image/webp').isValid).toBe(
+      true
+    );
+    expect(validateImageBytes(animatedWebpBytes(), 'image/webp').isValid).toBe(
+      true
+    );
+    expect(validateImageBytes(pngBytes(), 'image/png').isValid).toBe(true);
+    expect(validateImageBytes(jpegBytes(), 'image/jpeg').isValid).toBe(true);
+    expect(validateImageBytes(gifBytes(), 'image/gif').isValid).toBe(true);
+    expect(validateImageBytes(avifBytes(), 'image/avif').isValid).toBe(true);
+  });
+
+  it('rejects a WebP whose chunk walk is corrupt', () => {
+    const corrupt = new Uint8Array(staticWebpBytes());
+    // The single VP8 chunk declares 64 KiB, far beyond the RIFF payload.
+    corrupt.set([0xff, 0xff, 0x00, 0x00], 16);
+    const result = validateImageBytes(corrupt, 'image/webp');
+    expect(result.isValid).toBe(false);
+    expect(result.error).toMatch(/incomplete/i);
+  });
+
+  it('rejects truncated and empty buffers', () => {
+    expect(
+      validateImageBytes(staticWebpBytes().slice(0, -1), 'image/webp').isValid
+    ).toBe(false);
+    expect(validateImageBytes(new Uint8Array(0), 'image/webp').isValid).toBe(
+      false
+    );
+  });
+
+  it('rejects declared-type mismatch and markup', () => {
+    expect(validateImageBytes(pngBytes(), 'image/webp').isValid).toBe(false);
+    expect(
+      validateImageBytes(new TextEncoder().encode('<svg/>'), 'image/png')
+        .isValid
+    ).toBe(false);
+  });
+});
+
+describe('validatePdfFileContent / validatePdfBytes', () => {
+  it('accepts a real minimal PDF', async () => {
+    expect((await validatePdfFileContent(minimalPdfFile())).isValid).toBe(true);
+    expect(validatePdfBytes(minimalPdfBytes()).isValid).toBe(true);
+  });
+
+  it('rejects spoofed and truncated PDFs', async () => {
+    const html = new TextEncoder().encode('<html>not a pdf</html>');
+    const spoof = await validatePdfFileContent(
+      fileFromBytes(html, 'resume.pdf', 'application/pdf')
+    );
+    expect(spoof.isValid).toBe(false);
+    expect(spoof.error).toMatch(/valid PDF/i);
+
+    const pdf = minimalPdfBytes();
+    // Drop the trailing newline plus %%EOF: a complete header, no trailer.
+    const headerOnly = new Uint8Array(pdf.subarray(0, pdf.length - 6));
+    const truncated = await validatePdfFileContent(
+      fileFromBytes(headerOnly, 'cut.pdf', 'application/pdf')
+    );
+    expect(truncated.isValid).toBe(false);
+    expect(truncated.error).toMatch(/incomplete/i);
+    expect(validatePdfBytes(headerOnly).isValid).toBe(false);
+  });
+
+  it('rejects empty and tiny PDFs', async () => {
+    const empty = await validatePdfFileContent(
+      fileFromBytes(new Uint8Array(0), 'empty.pdf', 'application/pdf')
+    );
+    expect(empty.isValid).toBe(false);
+    expect(validatePdfBytes(new Uint8Array(4)).isValid).toBe(false);
+  });
+
+  it('accepts a header preceded by up to 1 KiB of leading bytes', () => {
+    const prefix = new TextEncoder().encode(' '.repeat(200));
+    const pdf = minimalPdfBytes();
+    const bytes = new Uint8Array(prefix.length + pdf.length);
+    bytes.set(prefix);
+    bytes.set(pdf, prefix.length);
+    expect(validatePdfBytes(bytes).isValid).toBe(true);
   });
 });

@@ -96,15 +96,17 @@ describe('user removal storage safety', () => {
       expect(h.deleteAuth).not.toHaveBeenCalled();
     }
   );
-  it('protects the last admin and reports a missing target without cleanup', async () => {
+  it('refuses a peer admin target without cleanup', async () => {
     setup();
+    // An admin can never manage another admin: only a superadmin can.
     expect((await usersActions({ type: 'REMOVE', id: 1 })).error).toContain(
-      'last admin'
+      'superadmin'
     );
     expect((await usersActions({ type: 'REMOVE', id: 999 })).success).toBe(
       false
     );
     expect(h.fake.state.removed).toEqual([]);
+    expect(h.deleteAuth).not.toHaveBeenCalled();
   });
   it('does not fall back to a recycled GitHub handle when an immutable ID exists', async () => {
     setup();

@@ -48,6 +48,17 @@ export const testAccounts = [
     displayName: 'Fixture Editor',
   },
   {
+    // Genuine local bootstrap-level identity: the only 'superadmin' allowlist
+    // row is seeded for this address. It has no authorization bypass — the
+    // real RPC/role checks run exactly as they do for the other accounts.
+    key: 'superadmin',
+    email: 'superadmin@isolated.test',
+    password: 'isolated-superadmin-pw',
+    role: 'superadmin',
+    githubUsername: 'fixture-superadmin',
+    displayName: 'Fixture Superadmin',
+  },
+  {
     // Authenticates successfully but is NOT on the CMS allowlist: used to
     // prove the middleware/RLS deny path without prod credentials.
     key: 'outsider',

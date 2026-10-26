@@ -10,7 +10,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   prepareImageUpload,
   uploadImmutablePreparedImage,
+  uploadPdfBuffer,
 } from './fileHelpers';
+import {
+  fileFromBytes,
+  minimalPdfBytes,
+  pngBytes,
+  staticWebpBytes,
+} from '@/testing/unit/fileFixtures';
 
 /**
  * Real 3-frame animated WebP fixture (24x18, ~300 B). Exported by libwebp:
@@ -230,5 +237,146 @@ describe('prepareImageUpload — static images (unchanged behaviour)', () => {
     expect(inspected.pages).toBeUndefined();
     expect(inspected.width).toBe(512);
     expect(inspected.height).toBe(512);
+  });
+});
+
+describe('prepareImageUpload — byte validation before storage', () => {
+  it('rejects SVG bytes declared as WebP', async () => {
+    const svg = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>'
+    );
+
+    const result = await prepareImageUpload(
+      fileFromBytes(svg, 'evil.webp', 'image/webp'),
+      undefined,
+      HERO_IMAGE_OPTIONS
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toMatch(/SVG and HTML/i);
+  });
+
+  it('rejects PNG bytes declared as WebP (MIME/content mismatch)', async () => {
+    const result = await prepareImageUpload(
+      fileFromBytes(pngBytes(), 'spoof.webp', 'image/webp'),
+      undefined,
+      HERO_IMAGE_OPTIONS
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toMatch(/does not match/i);
+  });
+
+  it('rejects the 8-byte RIFF-only file the old fixtures fabricated', async () => {
+    const riffOnly = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0]);
+
+    const result = await prepareImageUpload(
+      fileFromBytes(riffOnly, 'image.webp', 'image/webp'),
+      undefined,
+      HERO_IMAGE_OPTIONS
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toMatch(/incomplete|corrupted/i);
+  });
+
+  it('rejects a WebP whose declared payload is truncated', async () => {
+    const truncated = staticWebpBytes().slice(0, -1);
+
+    const result = await prepareImageUpload(
+      fileFromBytes(new Uint8Array(truncated), 'cut.webp', 'image/webp'),
+      undefined,
+      HERO_IMAGE_OPTIONS
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toMatch(/incomplete|corrupted/i);
+  });
+
+  it('rejects a WebP whose chunk walk overruns the RIFF payload', async () => {
+    const corrupt = new Uint8Array(staticWebpBytes());
+    corrupt.set([0xff, 0xff, 0x00, 0x00], 16);
+
+    const result = await prepareImageUpload(
+      fileFromBytes(corrupt, 'corrupt.webp', 'image/webp'),
+      undefined,
+      HERO_IMAGE_OPTIONS
+    );
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toMatch(/incomplete|corrupted/i);
+  });
+});
+
+function fakeStorage() {
+  const upload = vi.fn(
+    async (
+      _path: string,
+      _data: Buffer,
+      _options: Record<string, unknown>
+    ) => ({ error: null })
+  );
+  const getPublicUrl = vi.fn((path: string) => ({
+    data: { publicUrl: `https://cdn.test/${path}` },
+  }));
+  const supabase = {
+    storage: { from: vi.fn(() => ({ upload, getPublicUrl })) },
+  } as unknown as SupabaseClient;
+  return { supabase, upload };
+}
+
+describe('uploadPdfBuffer — content validation before storage', () => {
+  it('rejects bytes without a PDF header before any Storage write', async () => {
+    const { supabase, upload } = fakeStorage();
+
+    await expect(
+      uploadPdfBuffer(
+        supabase,
+        'website-dev',
+        'resumes',
+        'resume',
+        Buffer.from('<html>not a pdf</html>')
+      )
+    ).rejects.toThrow(/valid PDF/i);
+
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects a truncated PDF (header but no %%EOF)', async () => {
+    const { supabase, upload } = fakeStorage();
+    const pdf = minimalPdfBytes();
+    const truncated = Buffer.from(pdf.subarray(0, pdf.length - 6));
+
+    await expect(
+      uploadPdfBuffer(supabase, 'website-dev', 'resumes', 'resume', truncated)
+    ).rejects.toThrow(/incomplete|corrupted/i);
+
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('stores a complete PDF at a unique path with the pinned content type', async () => {
+    const { supabase, upload } = fakeStorage();
+    const pdf = Buffer.from(minimalPdfBytes());
+
+    const result = await uploadPdfBuffer(
+      supabase,
+      'website-dev',
+      'resumes',
+      'resume',
+      pdf
+    );
+
+    expect(result.path).toMatch(/^resumes\/\d+-[a-f0-9-]+-resume\.pdf$/);
+    expect(upload).toHaveBeenCalledWith(result.path, pdf, {
+      cacheControl: '3600',
+      contentType: 'application/pdf',
+      upsert: false,
+    });
+    expect(result.publicUrl).toBe(`https://cdn.test/${result.path}`);
   });
 });
