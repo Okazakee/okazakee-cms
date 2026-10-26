@@ -153,11 +153,14 @@ src/
     declared-MIME agreement and container completeness (`fileSignatures.ts`)
     before any Storage write, so a rejected or spoofed file writes nothing.
     Raster formats are JPEG/PNG/WebP/GIF/AVIF only; SVG/HTML text is rejected
-    even under an image MIME. WebP must be a complete RIFF container (static
-    passthrough keeps the bytes; animated keeps every frame); PDFs need the
-    `%PDF-` header in the first 1 KiB plus `%%EOF`. These checks prove format,
-    not safety: the CMS is not a malware/content scanner and PDFs are served
-    as inert documents.
+    even under an image MIME. WebP must be a complete RIFF container AND
+    genuinely decode: static passthrough keeps the bytes only after a real
+    decode, and an animation's fits-bounds passthrough decodes every frame.
+    PDFs need the `%PDF-` header in the first 1 KiB plus `%%EOF`. Uploaded
+    filenames never choose the stored key, extension, or content type, so
+    multi-dot names cannot change how an object is served. These checks prove
+    format/decode/completeness, not safety: the CMS is not a malware/content
+    scanner and PDFs are served as inert documents.
 - Image uploads keep animations: the browser canvas preprocessor
   (`src/utils/imageProcessor.ts`) returns an animated WebP untouched — a
   canvas round-trip keeps only the first frame — and the server pipeline

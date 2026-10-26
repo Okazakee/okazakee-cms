@@ -194,6 +194,14 @@ const DEFAULT_MAX_HEIGHT = 1080;
 const DEFAULT_WEBP_QUALITY = 80;
 
 /**
+ * Fixed, user-safe failure for bytes that pass the container checks but cannot
+ * be decoded by libwebp. Shared by the static passthrough and the animated
+ * fits-bounds passthrough so both report the same contract.
+ */
+const UNDECODABLE_WEBP_ERROR =
+  'The image data could not be decoded as WebP. Please re-export the image and try again.';
+
+/**
  * Animated WebP is decoded frame-by-frame into a single tall surface, so the
  * total decoded pixel count is capped before libvips touches any frame
  * (~128 MB as RGBA). A 512x512 animation still fits ~120 frames; a larger
@@ -237,8 +245,9 @@ type PreparedImageUpload = {
  *
  * Animated WebP keeps every frame: sharp is told to read all pages and the
  * resize is applied per frame (libvips honours the animation's page height).
- * An animation that already fits the requested bounds is returned unchanged,
- * since re-encoding it would only add generation loss.
+ * An animation that already fits the requested bounds is returned unchanged
+ * (after every frame is proven decodable), since re-encoding it would only add
+ * generation loss.
  */
 export async function processImage(
   file: File,
@@ -277,6 +286,15 @@ export async function processImage(
         (!maxWidth || pageWidth <= maxWidth) &&
         (!maxHeight || pageHeight <= maxHeight)
       ) {
+        // The animation is returned byte-for-byte, so every frame — not just
+        // the first — must decode. Container metadata (and even the first
+        // frame) can be fine while a later ANMF frame is corrupt. The 32 MPx
+        // guard above bounds this decode; an oversized animation never gets
+        // here and is re-encoded in full below instead.
+        if (!(await canDecodeWebp(inputBuffer, { animated: true }))) {
+          return { success: false, error: UNDECODABLE_WEBP_ERROR };
+        }
+
         return {
           success: true,
           buffer: inputBuffer,
@@ -356,6 +374,41 @@ export async function generateBlurhashFromBuffer(
   }
 }
 
+/**
+ * Proves libwebp can actually decode WebP bytes that are about to be stored
+ * verbatim. The full RIFF/chunk walk in `validateImageBytes` only validates
+ * container structure: a well-formed `VP8 `/`VP8L`/`ANMF` container may still
+ * hold a bitstream no decoder accepts, and both passthroughs never re-encode,
+ * so structural validity alone would store it. A 1x1 raw derivative forces a
+ * real decode while its output buffer stays tiny — no encoder pass and no
+ * full-size raw output. `animated: true` decodes every frame, which is what an
+ * unchanged animation requires. Sharp's defaults stay in effect, including
+ * `failOn: 'warning'` and `limitInputPixels`, so the decode is no more
+ * permissive than `processImage`'s own resize decode.
+ */
+async function canDecodeWebp(
+  buffer: Buffer,
+  options?: { animated?: boolean }
+): Promise<boolean> {
+  // Lazy import, like processImage: keeps the native addon out of the module
+  // graph of every CMS action.
+  const sharp = (await import('sharp')).default;
+  try {
+    await sharp(buffer, { animated: options?.animated === true })
+      .resize({
+        width: 1,
+        height: 1,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .raw()
+      .toBuffer();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function prepareImageUpload(
   file: File,
   blurhashURL?: string,
@@ -394,6 +447,13 @@ export async function prepareImageUpload(
     // generation loss. Animated WebP is NOT passed through here — it falls
     // through to processImage(), which keeps every frame while resizing.
     if (!isAnimatedWebpBytes(buffer)) {
+      // Byte-for-byte storage means the container walk above is not enough:
+      // the VP8/VP8L bitstream itself must decode. A supplied placeholder
+      // never counts as proof.
+      if (!(await canDecodeWebp(buffer))) {
+        return { success: false, error: UNDECODABLE_WEBP_ERROR };
+      }
+
       const blurhash = isValidBlurPlaceholder(blurhashURL)
         ? blurhashURL
         : await generateBlurhashFromBuffer(buffer);

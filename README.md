@@ -50,9 +50,13 @@ rendering and caching.
   upload is validated by magic bytes and container completeness before any
   Storage write: JPEG/PNG/WebP/GIF/AVIF only, declared MIME must agree with
   the bytes (`image/jpg` is the accepted JPEG alias), SVG/HTML spoofs are
-  rejected, WebP is walked as a complete RIFF container, and PDFs need the
-  `%PDF-` header plus `%%EOF` trailer. This proves file format/completeness,
-  not safety: the CMS is not a malware or content scanner. Production
+  rejected, WebP is walked as a complete RIFF container and actually decoded
+  (both static passthrough and every frame of an animation), and PDFs need the
+  `%PDF-` header plus `%%EOF` trailer. The uploaded filename never selects the
+  stored key, extension, or content type: storage names are generated and the
+  type is pinned, so multi-dot names cannot change how a file is served. This
+  proves file format/decode/completeness, not safety: the CMS is not a
+  malware or content scanner. Production
   uses `website`; staging uses the isolated `website-dev` bucket. Contacts
   render editor-supplied SVG URLs rather than uploading SVG through Sharp.
   Animated WebP skips the
